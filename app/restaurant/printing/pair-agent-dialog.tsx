@@ -1,8 +1,10 @@
 "use client";
 
 import * as React from "react";
+import { Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
+import { Icon } from "@/components/ui/icon";
 import { TextField } from "@/components/ui/inputs";
 import { createPrintAgentPairingAction } from "./actions";
 
@@ -107,7 +109,31 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
               {remainingLabel(issued.expiresAt, nowMs)}
             </p>
             <ol className="flex list-decimal flex-col gap-2 pl-5 text-body text-fg-secondary">
-              <li>On the restaurant PC, unzip the RASOIOS print agent download (Windows or Linux) and open a terminal as administrator in that folder.</li>
+              <li>
+                Download the agent onto the restaurant PC and unzip it there:
+                {/* Real files, built into this deployment and served by RH-PRINT-08 — not a link to a release that
+                    does not exist. A plain <a download> rather than a fetch: the browser streams it to disk, and a
+                    failure shows the server's own message instead of a silent no-op. */}
+                <span className="mt-2 flex flex-wrap gap-2">
+                  <a
+                    href="/api/v1/printing/agent-download/windows"
+                    download
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong px-3 text-nav text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised"
+                  >
+                    <Icon icon={Download} size={16} />
+                    Windows (.zip)
+                  </a>
+                  <a
+                    href="/api/v1/printing/agent-download/linux"
+                    download
+                    className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong px-3 text-nav text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised"
+                  >
+                    <Icon icon={Download} size={16} />
+                    Linux (.tar.gz)
+                  </a>
+                </span>
+              </li>
+              <li>Open a terminal in that folder as administrator (Windows) or root (Linux).</li>
               <li>
                 Run the installer with this code:
                 <code className="mt-1 block overflow-x-auto whitespace-pre rounded-xl border border-border-subtle bg-raised px-3 py-2 text-caption text-fg-primary">

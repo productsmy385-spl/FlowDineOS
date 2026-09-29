@@ -23,7 +23,7 @@ related_decisions: []
 | Project / environments | Project `rasoios`, environment `staging` | Environment `production` — S1-P27-T001 | Not provisioned — S1-P01-T008 is BLOCKED on owner approval (see below) |
 | Builder | Railpack, set in `railway.json` [fact: `railway.json`] | same | Committed in repo, not yet deployed |
 | Services | `web`, PostgreSQL, maintenance cron (if available) | same | — |
-| Build / start | `npm run prisma:gen && npm run build` / `npm run start` [fact: `railway.json`] | same | — |
+| Build / start | `npm run prisma:gen && npm run agent:build && npm run build` / `npm run start` [fact: `railway.json`] | same | — |
 | Port | `next start` reads `PORT` and binds `0.0.0.0` [fact: `node_modules/next/dist/bin/next`, `start` command] | same | — |
 | Health check path | `/` for now; `/api/ready` from S1-P26-T003 | `/api/ready` | Interim value, see below |
 | Pre-deploy command | none until the first migration (S1-P02-T003), then `npm run prisma:deploy` | Release pipeline (S1-P27-T003) | — |
@@ -37,6 +37,7 @@ v1.0 stated "PostgreSQL plugin with automated connection pooling" and "Health Ch
 
 - **Builder: Railpack.** Railpack is Railway's current default builder and detects the Node version from `.nvmrc` (24). A Dockerfile is not needed yet; revisit if the build requires system packages. [proposed]
 - **Prisma client generated in the build command.** npm 11 `allow-scripts` blocks install scripts, so `@prisma/client` postinstall cannot be relied on (same reason CI runs `npx prisma generate` explicitly).
+- **Print agent packaged in the build command (2026-09-29).** `npm run agent:build` writes `print-agent/dist/rasoios-print-agent-{windows.zip,linux.tar.gz}`, which `GET /api/v1/printing/agent-download/{platform}` serves to the pairing dialog. `print-agent/dist/` is gitignored, so without this step the deployment has no package and the download answers 404 with "not built into this deployment" — which is what the restaurant sees, rather than a broken file. Building it per deploy also guarantees the agent a restaurant installs matches the server that pairs it. [fact: `railway.json`, `print-agent/build.mjs`]
 - **Health check `/` until `/api/ready` exists.** The landing page renders without a session or database, so it proves the process is serving but not that the database is reachable. S1-P26-T003 switches `railway.json` to `/api/ready`.
 - **No pre-deploy migration yet.** There is no `prisma/migrations` folder. S1-P02-T003 adds `"preDeployCommand": ["npm run prisma:deploy"]` to `railway.json` in the same pull request as the first migration.
 - `tests/static/deploy-config.test.ts` checks that `railway.json` uses existing npm scripts, generates Prisma before building, and contains no secret values.
