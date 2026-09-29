@@ -31,7 +31,9 @@ const PACKAGES = {
 type Platform = keyof typeof PACKAGES;
 const isPlatform = (value: string): value is Platform => Object.hasOwn(PACKAGES, value);
 
-export const GET = route(async (_request, { params }: { params: Promise<{ platform: string }> }) => {
+// `Record<string, string>` rather than `{ platform: string }`: Next.js accepts it (the narrower shape is assignable
+// to it), and it matches the shared `invokeRoute` test harness, so the route needs no cast to be tested.
+export const GET = route(async (_request, { params }: { params: Promise<Record<string, string>> }) => {
   const ctx = await requireTenant("print_agent:manage");
   const { platform } = await params;
   if (!isPlatform(platform)) throw new NotFoundError("That print agent package does not exist.");

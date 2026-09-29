@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -18,10 +17,11 @@ const LINUX_TAR = path.join(DIST, "rasoios-print-agent-linux.tar.gz");
 
 beforeAll(async () => {
   await seedOnce();
-  // `print-agent/dist` is gitignored and built by `npm run agent:build`, which CI and Railway both run before this
-  // point. Build it on demand so a fresh clone does not fail here for a reason unrelated to the route.
+  // `print-agent/dist` is gitignored and built by `npm run agent:build`, which CI and Railway both run. Build it on
+  // demand so a fresh clone does not fail here for a reason unrelated to the route. Imported rather than spawned:
+  // `build.mjs` runs its work at module scope, and application code may not shell out (SC-VAL-06).
   if (!existsSync(WINDOWS_ZIP) || !existsSync(LINUX_TAR)) {
-    execFileSync("node", [path.join("print-agent", "build.mjs")], { cwd: process.cwd(), stdio: "pipe" });
+    await import(/* @vite-ignore */ path.join(process.cwd(), "print-agent", "build.mjs"));
   }
 }, 180_000);
 

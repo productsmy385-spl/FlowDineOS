@@ -61,11 +61,30 @@ async function direct(tenant: TenantKey, from: string | null, to: string | null)
 type ElementLike = { type: unknown; props: Record<string, unknown> };
 const isElement = (node: unknown): node is ElementLike => typeof node === "object" && node !== null && "props" in node && "type" in node;
 
-/** Concatenated text of a React element tree returned by a Server Component (no rendering needed). */
+/**
+ * Props that carry styling or wiring rather than anything a person reads. Without this the walker below would fold
+ * every `className` into the page text, and an assertion could pass on a Tailwind class that happens to contain the
+ * string it was looking for.
+ */
+const NON_TEXT_PROPS = new Set(["className", "style", "key", "ref", "id", "href", "src", "type", "name", "role", "target", "rel", "icon", "hue", "testId"]);
+const isTextProp = (key: string) => !NON_TEXT_PROPS.has(key) && !key.startsWith("aria-") && !key.startsWith("data-") && !key.startsWith("on");
+
+/**
+ * Concatenated text of a React element tree returned by a Server Component (no rendering needed).
+ *
+ * Walks every content-bearing prop, not just `children`. A Server Component tree hands text to a child through
+ * whichever prop that child names, and `MetricCard` takes its figure as `value` and its caption as `support`. While
+ * this only followed `children`, the page's own numbers were invisible here, so three assertions failed against a
+ * page that was rendering them correctly [f12a53a moved the dashboard and reports figures into those props].
+ */
 function textOf(node: unknown): string {
   if (typeof node === "string" || typeof node === "number") return String(node);
   if (Array.isArray(node)) return node.map(textOf).join("");
-  return isElement(node) ? textOf(node.props.children) : "";
+  if (!isElement(node)) return "";
+  return Object.entries(node.props)
+    .filter(([key]) => isTextProp(key))
+    .map(([, value]) => textOf(value))
+    .join("");
 }
 
 function findTestId(node: unknown, id: string): ElementLike | null {
