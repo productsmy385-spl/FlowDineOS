@@ -105,7 +105,17 @@ export async function listStaff(ctx: TenantContext, filters: ListStaffData): Pro
 
 // ─── SA-STF-01…03 invitations (`staff:invite`) ───
 
-/** SA-STF-01 — USER (if new) + USER_TENANT INVITED + Clerk invitation; 409 ALREADY_MEMBER; 403 ROLE_NOT_ASSIGNABLE. */
+/**
+ * SA-STF-01 — USER (if new) + USER_TENANT; 409 ALREADY_MEMBER; 403 ROLE_NOT_ASSIGNABLE.
+ *
+ * Two paths, decided by the role (RASOIOS-ADR-019 §1):
+ *
+ * - CASHIER, KITCHEN and WAITER get **no Clerk invitation and no email**. They do not use the identity provider at
+ *   all, so sending them a one-time code would be an email they must not act on and a second way into the console.
+ *   Their membership is ACTIVE immediately — there is nothing to accept — and their administrator gives them a
+ *   password each day from Staff → Daily passwords.
+ * - Everyone else is invited exactly as before: a Clerk invitation, INVITED until they accept it.
+ */
 export async function inviteStaff(ctx: TenantContext, input: InviteStaffData): Promise<StaffMemberDto> {
   hierarchy(() => assertCanAssignRole(ctx, input.role));
 
@@ -113,6 +123,12 @@ export async function inviteStaff(ctx: TenantContext, input: InviteStaffData): P
   if (candidate.membership && blocksInvitation(candidate.membership)) throw alreadyMemberError(candidate.membership);
   if (candidate.user && candidate.user.status !== "ACTIVE") {
     throw new ConflictError("This person's account is disabled. Contact the platform administrator.", "ACCOUNT_INACTIVE");
+  }
+
+  if (usesDailyPassword(input.role)) {
+    const member = await createInvitedMembership(ctx, { email: input.email, fullName: input.fullName, role: input.role, clerkInvitationId: null, now: now() });
+    logger.info("staff.added", { requestId: ctx.requestId, tenantId: ctx.tenantId, membershipId: member.membershipId, role: member.role, email: maskEmail(input.email) });
+    return member;
   }
 
   const redirectUrl = signUpUrl();
@@ -127,6 +143,11 @@ export async function inviteStaff(ctx: TenantContext, input: InviteStaffData): P
   }
   logger.info("staff.invited", { requestId: ctx.requestId, tenantId: ctx.tenantId, membershipId: member.membershipId, role: member.role, email: maskEmail(input.email) });
   return member;
+}
+
+/** Roles that sign in with a daily password instead of an emailed one-time code (ADR-019 §1). */
+function usesDailyPassword(role: TenantRole): boolean {
+  return role === "CASHIER" || role === "KITCHEN" || role === "WAITER";
 }
 
 /** Loads a membership and applies the checks shared by resend and revoke. */

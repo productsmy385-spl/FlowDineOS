@@ -61,8 +61,13 @@ describe("TC-TENANT-001 the tenant comes from the membership row only", () => {
     await expect(requireTenant("order:read")).rejects.toMatchObject({ code: "NO_ACTIVE_MEMBERSHIP", statusCode: 403 });
     await asSeedUser("A", "WAITER");
     await db.userTenant.update({ where: { id: seeded("A", "membership:WAITER") }, data: { status: "INACTIVE" } });
-    await expect(requireTenant("order:read")).rejects.toMatchObject({ code: "NO_ACTIVE_MEMBERSHIP" });
-    await db.userTenant.update({ where: { id: seeded("A", "membership:WAITER") }, data: { status: "ACTIVE" } });
+    try {
+      // A waiter signs in only with a daily password. Once their membership is gone the shift itself ends, so the
+      // next request is simply signed out rather than signed in to nothing (ADR-019 section 4).
+      await expect(requireTenant("order:read")).rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+    } finally {
+      await db.userTenant.update({ where: { id: seeded("A", "membership:WAITER") }, data: { status: "ACTIVE" } });
+    }
   });
 });
 
@@ -71,7 +76,9 @@ describe("TC-TENANT-005 fresh authorization data on every request", () => {
     await asSeedUser("A", "MANAGER");
     expect((await requireTenant("menu:manage")).role).toBe("MANAGER");
     await db.userTenant.update({ where: { id: seeded("A", "membership:MANAGER") }, data: { role: "WAITER" } });
-    await expect(requireTenant("menu:manage")).rejects.toMatchObject({ code: "FORBIDDEN" });
+    // Moved onto a staff role, the same Clerk session can no longer reach that membership at all: waiters sign in
+    // with a daily password (ADR-019 section 1). The change still lands on the very next request.
+    await expect(requireTenant("menu:manage")).rejects.toMatchObject({ code: "NO_ACTIVE_MEMBERSHIP" });
   });
 
   it("TC-AUTH-008 blocks a suspended tenant immediately: 403 TENANT_SUSPENDED and the suspended page", async () => {
@@ -86,7 +93,9 @@ describe("TC-TENANT-005 fresh authorization data on every request", () => {
 describe("TC-TENANT-004 active tenant selection", () => {
   async function giveManagerASecondRestaurant() {
     await db.userTenant.create({
-      data: { id: seeded("B", "membership:extra-for-A-manager"), tenantId: tenantIdOf("B"), userId: seeded("A", "user:MANAGER"), role: "WAITER", status: "ACTIVE" },
+      // MANAGER, not a staff role: a Clerk session cannot reach a staff membership, so a second waiter job would not
+      // give this person a second restaurant to choose between (ADR-019 section 1).
+      data: { id: seeded("B", "membership:extra-for-A-manager"), tenantId: tenantIdOf("B"), userId: seeded("A", "user:MANAGER"), role: "MANAGER", status: "ACTIVE" },
     });
   }
 
@@ -122,7 +131,7 @@ describe("TC-TENANT-004 active tenant selection", () => {
 
     const ctx = await requireTenant("order:read");
     expect(ctx.tenantId).toBe(tenantIdOf("B"));
-    expect(ctx.role).toBe("WAITER");
+    expect(ctx.role).toBe("MANAGER");
     expect(await db.auditLog.count({ where: { action: "session.tenant_switched", actorUserId: seeded("A", "user:MANAGER") } })).toBe(1);
   });
 });

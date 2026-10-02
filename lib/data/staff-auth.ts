@@ -199,9 +199,13 @@ export async function resolveStaffSession(tokenHash: string): Promise<ResolvedSt
     role: row.role as StaffRole,
     expiresAt: row.expiresAt,
     restaurant: row.tenant.restaurant ?? { id: "", timezone: "UTC", currencyCode: "INR" },
+    // Tenant suspension is deliberately *not* part of this. A suspended restaurant is explained, not disguised as a
+    // logout: the session keeps resolving, `resolveTenant` answers SUSPENDED for it exactly as it does for a Clerk
+    // user, and the guard sends the cashier to /account/suspended. Access is still refused either way. What does end
+    // the shift is anything saying this person no longer works here: membership gone, moved off a staff role, or
+    // their account disabled.
     stillEligible:
-      row.tenant.restaurant !== null &&
-      row.membership.status === "ACTIVE" && isStaffRole(row.membership.role) && row.tenant.status === "ACTIVE" && row.user.status === "ACTIVE",
+      row.tenant.restaurant !== null && row.membership.status === "ACTIVE" && isStaffRole(row.membership.role) && row.user.status === "ACTIVE",
   };
 }
 

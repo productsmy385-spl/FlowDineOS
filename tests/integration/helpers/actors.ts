@@ -9,9 +9,11 @@
  * Only the Clerk identity boundary is stubbed (tests/integration/setup/clerk-boundary.ts); session resolution,
  * tenant context, guards, services and PostgreSQL are real.
  */
+import { randomUUID } from "node:crypto";
 import type { TenantRole } from "@prisma/client";
 import { NextRequest } from "next/server";
 import { ACTIVE_MEMBERSHIP_COOKIE } from "@/lib/auth/active-membership-cookie";
+import { STAFF_SESSION_COOKIE, hashStaffSessionToken } from "@/lib/auth/staff-session-cookie";
 import { seedDatabase } from "@/prisma/seed-data/build";
 import { seedId } from "@/prisma/seed-data/ids";
 import { TENANTS, staffEmail } from "@/prisma/seed-data/tenants";
@@ -50,10 +52,80 @@ async function actAsUserId(userId: string): Promise<{ userId: string; clerkUserI
   return { userId: user.id, clerkUserId };
 }
 
-/** Acts as the seeded staff member of `tenant` with `role` (one ACTIVE user per role per tenant). */
+const DAILY_PASSWORD_ROLES = new Set<TenantRole>(["CASHIER", "KITCHEN", "WAITER"]);
+
+/**
+ * Acts as the seeded staff member of `tenant` with `role` (one ACTIVE user per role per tenant).
+ *
+ * The credential matches the one production would use (RASOIOS-ADR-019 §1): CASHIER, KITCHEN and WAITER get a staff
+ * session cookie, because a Clerk session cannot reach a staff-role membership; everyone else gets a Clerk identity.
+ * Tests therefore exercise the path each role really signs in through, rather than asserting RBAC over a credential
+ * that role can no longer hold.
+ */
 export async function asSeedUser(tenant: TenantKey, role: TenantRole): Promise<{ userId: string; clerkUserId: string; membershipId: string }> {
-  const actor = await actAsUserId(seeded(tenant, `user:${role}`));
-  return { ...actor, membershipId: seeded(tenant, `membership:${role}`) };
+  const membershipId = seeded(tenant, `membership:${role}`);
+  if (!DAILY_PASSWORD_ROLES.has(role)) {
+    const actor = await actAsUserId(seeded(tenant, `user:${role}`));
+    return { ...actor, membershipId };
+  }
+  const userId = seeded(tenant, `user:${role}`);
+  await openSeededStaffSession({ tenantId: tenantIdOf(tenant), membershipId, userId, role });
+  return { userId, clerkUserId: "", membershipId };
+}
+
+/**
+ * Gives a seeded staff member a live credential and shift, and presents its cookie — the state they would be in
+ * just after signing in with the day's password. Written directly rather than through `staffLogin` so a test does
+ * not pay scrypt (and the login rate limit) for every actor switch.
+ */
+async function openSeededStaffSession(input: { tenantId: string; membershipId: string; userId: string; role: TenantRole }): Promise<void> {
+  const db = testDb();
+  // Fixed instants, not Date.now(): several suites freeze the clock ("one minute before midnight in Kolkata"), and a
+  // credential stamped from a faked now would expire before the database's real created_at, which the
+  // staff_credentials_expires_after_creation_check rightly refuses. Valid from 2000 to 2099 is valid under any clock
+  // a test can set.
+  const since = new Date("2000-01-01T00:00:00.000Z");
+  const expiresAt = new Date("2099-12-31T00:00:00.000Z");
+  const businessDate = new Date("2026-09-15T00:00:00.000Z");
+
+  await db.staffSession.updateMany({
+    where: { tenantId: input.tenantId, membershipId: input.membershipId, status: "ACTIVE" },
+    data: { status: "ENDED", endReason: "SIGNED_OUT", endedAt: new Date() },
+  });
+  await db.staffCredential.updateMany({
+    where: { tenantId: input.tenantId, membershipId: input.membershipId, status: "ACTIVE" },
+    data: { status: "REVOKED", revokedAt: new Date() },
+  });
+  const credential = await db.staffCredential.create({
+    data: {
+      tenantId: input.tenantId,
+      membershipId: input.membershipId,
+      userId: input.userId,
+      passwordHash: "scrypt$65536$8$1$c2FsdHNhbHRzYWx0c2E=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=",
+      businessDate,
+      expiresAt,
+      generatedByUserId: input.userId,
+      createdAt: since,
+    },
+    select: { id: true },
+  });
+  const token = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "").slice(0, 11);
+  await db.staffSession.create({
+    data: {
+      tenantId: input.tenantId,
+      membershipId: input.membershipId,
+      userId: input.userId,
+      credentialId: credential.id,
+      role: input.role,
+      tokenHash: hashStaffSessionToken(token),
+      businessDate,
+      expiresAt,
+      loginAt: since,
+      lastSeenAt: since,
+    },
+  });
+  resetActorState();
+  actorState.cookies.set(STAFF_SESSION_COOKIE, token);
 }
 
 /** Acts as any existing USER row. */

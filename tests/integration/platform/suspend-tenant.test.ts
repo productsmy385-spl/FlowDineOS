@@ -4,7 +4,7 @@ import { requireTenant, requireTenantPage } from "@/lib/auth/guards";
 import { getPublicRestaurant } from "@/lib/data/public-restaurant";
 import { createMembership } from "../../factories";
 import { testDb } from "../setup/db";
-import { asPlatformAdmin, asSeedUser, invokeAction, invokeLoader, seedOnce, seeded, tenantIdOf } from "../helpers/actors";
+import { asPlatformAdmin, asSeedUser, asUserId, invokeAction, invokeLoader, seedOnce, seeded, tenantIdOf } from "../helpers/actors";
 import { RANDOM_UUID, dataOf, errorOf } from "../orders/helpers";
 import { clerkCalls, clerkStub, json, resetClerkStub, startClerkStub, stopClerkStub, xminOf } from "./helpers";
 
@@ -104,9 +104,12 @@ describe("TC-ADMIN-005 suspend and reactivate", () => {
   it("signs out, via Clerk, only members left without any usable restaurant", async () => {
     // Link Clerk identities for three Tenant B members; B's manager also works at Tenant A.
     const admin = await asSeedUser("B", "TENANT_ADMIN");
-    const cashier = await asSeedUser("B", "CASHIER");
+    // A cashier added before 2026-10-02 was sent an emailed code and may hold a Clerk account; suspension must sign
+    // that out too. Today's cashiers have no Clerk identity at all (ADR-019 section 1).
+    const cashier = await asUserId(seeded("B", "user:CASHIER"));
     const manager = await asSeedUser("B", "MANAGER");
-    const extra = await createMembership(db, tenantIdOf("A"), seeded("B", "user:MANAGER"), "WAITER");
+    // MANAGER at A, not a staff role: only a non-staff job is something a Clerk session can still reach elsewhere.
+    const extra = await createMembership(db, tenantIdOf("A"), seeded("B", "user:MANAGER"), "MANAGER");
     clerkStub.sessions.set(admin.clerkUserId, ["sess_admin_1", "sess_admin_2"]);
     clerkStub.sessions.set(cashier.clerkUserId, ["sess_cashier_1"]);
     clerkStub.sessions.set(manager.clerkUserId, ["sess_manager_1"]);

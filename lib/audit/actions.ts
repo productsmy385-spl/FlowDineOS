@@ -21,6 +21,8 @@ export const AUDIT_ACTIONS = [
   "session.tenant_switched",
   // Staff
   "staff.invited",
+  // Staff roles join without an invitation: no email is sent, so saying "invited" would be untrue (ADR-019 §1).
+  "staff.added",
   "staff.invite_resent",
   "staff.invite_revoked",
   "staff.activated",

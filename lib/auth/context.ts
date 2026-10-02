@@ -109,9 +109,30 @@ async function preferredMembershipFromCookie(): Promise<string | null> {
 export const getTenantResolution = cache(async (): Promise<TenantResolution> => {
   const session = await getSessionUser();
   const requestId = await currentRequestId();
-  const memberships = session.state === "ACTIVE" ? await activeMembershipsOfUser(session.user.id) : [];
-  return resolveTenant(session, memberships, await preferredMembershipFromCookie(), requestId);
+  const all = session.state === "ACTIVE" ? await activeMembershipsOfUser(session.user.id) : [];
+  return resolveTenant(session, session.state === "ACTIVE" ? reachableBy(session, all) : all, await preferredMembershipFromCookie(), requestId);
 });
+
+/**
+ * Which of a person's memberships the credential they used can actually reach (RASOIOS-ADR-019 §1).
+ *
+ * Counter staff do not use the identity provider at all: their administrator issues them a password each day, and
+ * that password is the only way into a staff-role membership. So a Clerk session — an email one-time code — reaches
+ * every membership *except* the staff ones, and a daily password reaches only the single membership it was issued
+ * for.
+ *
+ * Filtering here rather than at sign-in keeps the rule true for people who hold both kinds of job. Someone who
+ * manages one restaurant and waits tables at another signs in with Clerk and gets their manager console; the same
+ * person signing in with that evening's password gets the waiter console, and neither credential quietly carries
+ * the other's access.
+ */
+function reachableBy(session: Extract<SessionState, { state: "ACTIVE" }>, memberships: MembershipRow[]): MembershipRow[] {
+  if (session.via === "STAFF_PASSWORD") return memberships.filter((m) => m.membershipId === session.membershipId);
+  return memberships.filter((m) => !STAFF_ONLY_ROLES.has(m.role));
+}
+
+/** Roles that exist only behind a daily password. Mirrors `staff_sessions_role_is_staff_check` in the database. */
+const STAFF_ONLY_ROLES = new Set<MembershipRow["role"]>(["CASHIER", "KITCHEN", "WAITER"]);
 
 /** Platform (SUPER_ADMIN) context for this request. */
 export const getPlatformResolution = cache(async (): Promise<PlatformResolution> => {

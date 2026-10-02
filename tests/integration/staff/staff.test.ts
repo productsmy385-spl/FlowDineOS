@@ -11,6 +11,7 @@ import {
   revokeStaffInviteAction,
 } from "@/app/restaurant/staff/actions";
 import { testDb } from "../setup/db";
+import { actorState } from "../helpers/actor-state";
 import { asSeedUser, asUserId, invokeAction, seedOnce, seeded, SEED_TENANTS, staffEmail, tenantIdOf } from "../helpers/actors";
 import { dataOf, errorOf, expectSameNotFound, RANDOM_UUID } from "../orders/helpers";
 import { APP_URL, clerkCalls, clerkStub, json, resetClerkStub, startClerkStub, stopClerkStub } from "../platform/helpers";
@@ -79,21 +80,47 @@ describe("LD-STF-01 staff list", () => {
 });
 
 describe("SA-STF-01 invite staff", () => {
-  it("TC-STAFF-002 creates an INVITED membership with a Clerk invitation, audited", async () => {
+  it("TC-STAFF-002 a manager is invited through Clerk: INVITED, with an emailed one-time code, audited", async () => {
     const email = newEmail();
     try {
       const { userId } = await asSeedUser("A", "TENANT_ADMIN");
-      const member = dataOf(await invokeAction(inviteStaffAction, { email, fullName: "New Hire", role: "CASHIER" }));
-      expect(member).toMatchObject({ email: email.toLowerCase(), role: "CASHIER", status: "INVITED", fullName: "New Hire" });
+      const member = dataOf(await invokeAction(inviteStaffAction, { email, fullName: "New Manager", role: "MANAGER" }));
+      expect(member).toMatchObject({ email: email.toLowerCase(), role: "MANAGER", status: "INVITED", fullName: "New Manager" });
 
       const row = await db.userTenant.findUniqueOrThrow({ where: { id: member.membershipId } });
-      expect(row).toMatchObject({ tenantId: A(), role: "CASHIER", status: "INVITED" });
+      expect(row).toMatchObject({ tenantId: A(), role: "MANAGER", status: "INVITED" });
       expect(row.clerkInvitationId).toBeTruthy();
       expect(clerkCalls()).toContain("POST /v1/invitations");
 
       const audit = await db.auditLog.findFirstOrThrow({ where: { action: "staff.invited", resourceId: member.membershipId } });
       expect(audit).toMatchObject({ tenantId: A(), actorUserId: userId, actorRole: "TENANT_ADMIN" });
       expect(JSON.stringify(audit.afterState)).not.toContain(email); // PII is masked (SC-PII-03)
+    } finally {
+      await cleanup([email.toLowerCase()]);
+    }
+  });
+
+  // The owner's requirement (2026-10-02): counter and kitchen staff get no email at all. They sign in only with the
+  // password their administrator generates each day (ADR-019 section 1).
+  it.each(["CASHIER", "KITCHEN", "WAITER"] as const)("TC-STAFF-007 a %s is added with no Clerk invitation and no email", async (role) => {
+    const email = newEmail();
+    try {
+      const { userId } = await asSeedUser("A", "TENANT_ADMIN");
+      const before = clerkCalls().length;
+      const member = dataOf(await invokeAction(inviteStaffAction, { email, fullName: "New Hire", role }));
+
+      // Nothing was sent: not a single call reached Clerk for this person.
+      expect(clerkCalls().slice(before)).toEqual([]);
+      // Live straight away, because there is no invitation for them to accept.
+      expect(member).toMatchObject({ role, status: "ACTIVE" });
+      const row = await db.userTenant.findUniqueOrThrow({ where: { id: member.membershipId } });
+      expect(row.clerkInvitationId).toBeNull();
+      expect(row.acceptedAt).not.toBeNull();
+
+      // Recorded as added, not invited: no invitation was ever sent, and the trail should not claim one was.
+      expect(await db.auditLog.count({ where: { action: "staff.invited", resourceId: member.membershipId } })).toBe(0);
+      const audit = await db.auditLog.findFirstOrThrow({ where: { action: "staff.added", resourceId: member.membershipId } });
+      expect(audit).toMatchObject({ tenantId: A(), actorUserId: userId, actorRole: "TENANT_ADMIN" });
     } finally {
       await cleanup([email.toLowerCase()]);
     }
@@ -114,8 +141,19 @@ describe("SA-STF-01 invite staff", () => {
     try {
       await asSeedUser("A", "TENANT_ADMIN");
       clerkStub.override = (req, res) => (req.method === "POST" && req.pathname === "/v1/invitations" ? json(res, 500, { errors: [{ code: "internal" }] }) : false);
-      expect(errorOf(await invokeAction(inviteStaffAction, { email, role: "CASHIER" })).code).toBe("INVITATION_FAILED");
+      expect(errorOf(await invokeAction(inviteStaffAction, { email, role: "MANAGER" })).code).toBe("INVITATION_FAILED");
       expect(await db.user.findUnique({ where: { email: email.toLowerCase() } })).toBeNull();
+    } finally {
+      await cleanup([email.toLowerCase()]);
+    }
+  });
+
+  it("TC-STAFF-008 a Clerk outage does not stop a restaurant adding counter staff, because they never touch Clerk", async () => {
+    const email = newEmail();
+    try {
+      await asSeedUser("A", "TENANT_ADMIN");
+      clerkStub.override = (req, res) => (req.method === "POST" && req.pathname === "/v1/invitations" ? json(res, 500, { errors: [{ code: "internal" }] }) : false);
+      expect(dataOf(await invokeAction(inviteStaffAction, { email, role: "WAITER" }))).toMatchObject({ role: "WAITER", status: "ACTIVE" });
     } finally {
       await cleanup([email.toLowerCase()]);
     }
@@ -127,7 +165,8 @@ describe("SA-STF-02 / SA-STF-03 resend and revoke an invitation", () => {
     const email = newEmail();
     try {
       await asSeedUser("A", "TENANT_ADMIN");
-      const member = dataOf(await invokeAction(inviteStaffAction, { email, role: "WAITER" }));
+      // A manager: staff roles are never pending, because they are never invited (ADR-019 section 1).
+      const member = dataOf(await invokeAction(inviteStaffAction, { email, role: "MANAGER" }));
       const first = (await db.userTenant.findUniqueOrThrow({ where: { id: member.membershipId } })).clerkInvitationId;
 
       const resent = dataOf(await invokeAction(resendStaffInviteAction, { membershipId: member.membershipId }));
@@ -190,24 +229,34 @@ describe("SA-STF-04 change role (security.md §3.1)", () => {
 });
 
 describe("SA-STF-05 / SA-STF-06 deactivate and reactivate", () => {
-  it("TC-STAFF-004 / TC-AUTH-014 (second half) a deactivated member is denied on the very next request, and Clerk sessions are revoked", async () => {
+  it("TC-STAFF-004 / TC-AUTH-014 (second half) a deactivated member is denied on the very next request, and any Clerk sessions are revoked", async () => {
     const waiter = membershipOf("A", "WAITER");
     const row = await db.userTenant.findUniqueOrThrow({ where: { id: waiter } });
-    const user = await db.user.findUniqueOrThrow({ where: { id: row.userId } });
-    clerkStub.sessions.set(user.clerkUserId ?? "", ["sess_1", "sess_2"]);
+    // A waiter added before 2026-10-02 was sent an emailed code and may still hold a Clerk account. Deactivating
+    // them must revoke those sessions too, so give this one an account to prove it (ADR-019 section 1).
+    const clerkUserId = `user_legacy_${row.userId.slice(0, 8)}`;
+    await db.user.update({ where: { id: row.userId }, data: { clerkUserId } });
+    clerkStub.sessions.set(clerkUserId, ["sess_1", "sess_2"]);
+    // The waiter is on shift, signed in the only way a waiter can be: with today's password.
+    await asSeedUser("A", "WAITER");
+    expect(dataOf(await invokeAction(getOrdersAction, {}))).toHaveProperty("orders");
+    const waiterCookies = new Map(actorState.cookies);
     try {
       await asSeedUser("A", "TENANT_ADMIN");
       const result = dataOf(await invokeAction(deactivateStaffAction, { membershipId: waiter }));
       expect(result).toMatchObject({ member: { status: "INACTIVE" } });
       expect(clerkCalls().filter((c) => c.endsWith("/revoke") && c.includes("/sessions/")).length).toBe(2);
 
-      // The next request from that person is refused — authorisation is read from the database every request.
-      await asUserId(row.userId);
-      expect(errorOf(await invokeAction(getOrdersAction, {})).code).toBe("NO_ACTIVE_MEMBERSHIP");
+      // The waiter's own shift is refused on its very next request: the session row is re-read every time, and a
+      // deactivated membership is no longer eligible for one (ADR-019 section 4).
+      actorState.cookies = new Map(waiterCookies);
+      actorState.clerkUserId = null;
+      expect(errorOf(await invokeAction(getOrdersAction, {})).code).toBe("UNAUTHENTICATED");
 
       await asSeedUser("A", "TENANT_ADMIN");
       expect(dataOf(await invokeAction(reactivateStaffAction, { membershipId: waiter })).status).toBe("ACTIVE");
-      await asUserId(row.userId);
+      // Reactivated, they sign in again with a password and are back in.
+      await asSeedUser("A", "WAITER");
       expect(dataOf(await invokeAction(getOrdersAction, {}))).toHaveProperty("orders");
     } finally {
       await db.userTenant.update({ where: { id: waiter }, data: { status: "ACTIVE", deactivatedAt: null } });

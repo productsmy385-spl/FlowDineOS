@@ -162,7 +162,7 @@ const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClie
  */
 export async function createInvitedMembership(
   ctx: TenantContext,
-  input: { email: string; fullName: string | null; role: TenantRole; clerkInvitationId: string; now: Date },
+  input: { email: string; fullName: string | null; role: TenantRole; clerkInvitationId: string | null; now: Date },
 ): Promise<StaffMemberDto> {
   return withTx(ctx, async (tx) => {
     const existingUser = await tx.user.findUnique({ where: { email: input.email }, select: { id: true, fullName: true } });
@@ -175,12 +175,16 @@ export async function createInvitedMembership(
     const existing = await tx.userTenant.findFirst({ where: tenantScope(ctx, { userId: user.id }), select: MEMBER_SELECT });
     if (existing && blocksInvitation(existing)) throw alreadyMemberError(existing);
 
+    // Staff roles never receive a Clerk invitation, so there is nothing for them to accept: the membership is live
+    // from the moment it is created, and their administrator issues them a daily password (ADR-019 §1). Everyone
+    // else stays INVITED until they accept the emailed one-time code.
+    const immediate = input.clerkInvitationId === null;
     const data = {
       role: input.role,
-      status: "INVITED" as const,
+      status: immediate ? ("ACTIVE" as const) : ("INVITED" as const),
       invitedByUserId: ctx.userId,
       invitedAt: input.now,
-      acceptedAt: null,
+      acceptedAt: immediate ? input.now : null,
       clerkInvitationId: input.clerkInvitationId,
       deactivatedAt: null,
       deactivatedByUserId: null,
@@ -201,7 +205,7 @@ export async function createInvitedMembership(
     }
 
     await audit(tx, ctx, {
-      action: "staff.invited",
+      action: immediate ? "staff.added" : "staff.invited",
       resourceType: "user_tenant",
       resourceId: row.id,
       before: existing ? { status: existing.status, role: existing.role } : null,

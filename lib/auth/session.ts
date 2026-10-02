@@ -15,11 +15,18 @@ import { now } from "@/lib/time/clock";
  * - Errors propagate (mapped to 503 by lib/data), never "signed out" (SC-AUTH-09; BA-06 removed the blanket catch).
  */
 
+/**
+ * How the caller proved who they are. This is not a detail: it decides which of their memberships they can reach.
+ * A Clerk session never reaches a staff-role membership, and a daily password reaches only the one membership it
+ * was issued for (RASOIOS-ADR-019 §1).
+ */
+export type AuthMethod = { via: "CLERK" } | { via: "STAFF_PASSWORD"; membershipId: string };
+
 export type SessionState =
   | { state: "SIGNED_OUT" }
   | { state: "NO_ACCOUNT" }
   | { state: "INACTIVE"; userId: string }
-  | { state: "ACTIVE"; user: IdentityUser };
+  | ({ state: "ACTIVE"; user: IdentityUser } & AuthMethod);
 
 export type ClerkIdentity = {
   clerkUserId: string;
@@ -34,7 +41,7 @@ export async function resolveSession(identity: ClerkIdentity | null, requestId: 
   if (existing) {
     if (existing.status !== "ACTIVE") return { state: "INACTIVE", userId: existing.id };
     await touchLastSignIn(existing.id, now());
-    return { state: "ACTIVE", user: existing };
+    return { state: "ACTIVE", user: existing, via: "CLERK" };
   }
 
   const email = await identity.verifiedPrimaryEmail();
@@ -48,7 +55,7 @@ export async function resolveSession(identity: ClerkIdentity | null, requestId: 
   if (result.outcome === "NOT_INVITED") return { state: "NO_ACCOUNT" };
   if (result.user.status !== "ACTIVE") return { state: "INACTIVE", userId: result.user.id };
   logger.info("auth.user_linked", { requestId, userId: result.user.id, memberships: result.activatedMemberships.length });
-  return { state: "ACTIVE", user: result.user };
+  return { state: "ACTIVE", user: result.user, via: "CLERK" };
 }
 
 /** Lowercased primary email of a Clerk user, only if Clerk has verified it. */
@@ -118,5 +125,5 @@ async function resolveStaffSessionState(): Promise<SessionState> {
   const user = await findUserById(session.userId);
   if (!user) return { state: "SIGNED_OUT" };
   if (user.status !== "ACTIVE") return { state: "INACTIVE", userId: user.id };
-  return { state: "ACTIVE", user };
+  return { state: "ACTIVE", user, via: "STAFF_PASSWORD", membershipId: session.membershipId };
 }

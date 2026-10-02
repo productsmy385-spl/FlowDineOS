@@ -7,7 +7,7 @@ import { StaffBoard, type StaffBoardProps } from "@/components/staff/staff-board
 import { requireTenantPage } from "@/lib/auth/guards";
 import type { StaffListItem } from "@/lib/services/staff";
 import { testDb } from "../setup/db";
-import { asSeedUser, asUninvited, invokeAction, invokeLoader, seedOnce, tenantIdOf } from "../helpers/actors";
+import { asSeedUser, asUninvited, asUserId, invokeAction, invokeLoader, seedOnce, seeded, tenantIdOf } from "../helpers/actors";
 import { dataOf } from "../orders/helpers";
 import { APP_URL, resetClerkStub, startClerkStub, stopClerkStub } from "../platform/helpers";
 
@@ -99,13 +99,13 @@ describe("TC-STAFF-001 the staff screen", () => {
     }
   });
 
-  it("an invited cashier appears as invited, then as active once they sign in", async () => {
+  it("an invited manager appears as invited, then as active once they sign in", async () => {
     await asSeedUser("A", "TENANT_ADMIN");
-    dataOf(await invokeAction(inviteStaffAction, { email: invited, fullName: "New Hire", role: "CASHIER" }));
+    dataOf(await invokeAction(inviteStaffAction, { email: invited, fullName: "New Manager", role: "MANAGER" }));
 
     const afterInvite = await board();
     const pending = find(afterInvite.members, invited);
-    expect(pending).toMatchObject({ status: "INVITED", role: "CASHIER", fullName: "New Hire" });
+    expect(pending).toMatchObject({ status: "INVITED", role: "MANAGER", fullName: "New Manager" });
     expect(pending?.acceptedAt).toBeNull();
 
     // The invited person signs in for the first time: the session resolver links the identity and activates them.
@@ -114,7 +114,26 @@ describe("TC-STAFF-001 the staff screen", () => {
 
     await asSeedUser("A", "TENANT_ADMIN");
     const afterAccept = find((await board()).members, invited);
-    expect(afterAccept).toMatchObject({ status: "ACTIVE", role: "CASHIER" });
+    expect(afterAccept).toMatchObject({ status: "ACTIVE", role: "MANAGER" });
     expect(afterAccept?.acceptedAt).toBeTruthy();
+  });
+
+  it("an added cashier is active at once: there is no invitation for them to accept (ADR-019 section 1)", async () => {
+    // A different person from the manager above: `invited` is left in place on purpose, so it is already a member.
+    const added = `added.${randomUUID().slice(0, 8)}+clerk_test@example.com`;
+    await asSeedUser("A", "TENANT_ADMIN");
+    dataOf(await invokeAction(inviteStaffAction, { email: added, fullName: "New Hire", role: "CASHIER" }));
+
+    const member = find((await board()).members, added);
+    expect(member).toMatchObject({ status: "ACTIVE", role: "CASHIER", fullName: "New Hire" });
+    expect(member?.acceptedAt).toBeTruthy();
+  });
+
+  it("a cashier who somehow holds a Clerk account still cannot reach the console through it", async () => {
+    // Staff invited before 2026-10-02 received an emailed code and may have used it. Signing in with Clerk must no
+    // longer reach a staff-role membership: the daily password is the only way in (ADR-019 section 1).
+    const cashierUser = seeded("A", "user:CASHIER");
+    await asUserId(cashierUser);
+    expect(await invokeLoader(() => requireTenantPage("order:read"))).toEqual({ redirect: "/account/no-access?reason=NO_ACTIVE_MEMBERSHIP" });
   });
 });
