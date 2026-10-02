@@ -36,3 +36,26 @@ export type MembershipIdInput = z.input<typeof membershipIdSchema>;
 export const changeStaffRoleSchema = strictObject({ membershipId: uuidParam, role: roleField });
 export type ChangeStaffRoleInput = z.input<typeof changeStaffRoleSchema>;
 export type ChangeStaffRoleData = z.output<typeof changeStaffRoleSchema>;
+
+/**
+ * Staff daily-password sign-in (RASOIOS-ADR-019). Strict, like everything else here: no `tenantId` and no
+ * `membershipId` — the restaurant is derived from whichever credential the password matches, never named by the
+ * person signing in (C19, SC-STAFF-05).
+ */
+export const staffLoginSchema = strictObject({
+  email: emailField,
+  // Generous bounds rather than the exact generated shape: the server compares against a hash, and telling a caller
+  // their guess was the "wrong length" leaks the format for free.
+  password: z.string().min(4, "Enter today's password").max(64, "Enter today's password"),
+});
+export type StaffLoginInput = z.input<typeof staffLoginSchema>;
+
+/** SA-STAFFAUTH-01…03 all act on one membership of the caller's own restaurant. */
+export const staffCredentialSchema = strictObject({ membershipId: uuidParam });
+export type StaffCredentialInput = z.input<typeof staffCredentialSchema>;
+
+/** LD-STAFFAUTH-01 window, in whole business days ending today. Bounded so the read stays small. */
+export const staffAttendanceSchema = strictObject({
+  days: z.coerce.number().int().min(1, "At least one day").max(31, "At most 31 days").default(7),
+});
+export type StaffAttendanceInput = z.input<typeof staffAttendanceSchema>;

@@ -316,6 +316,34 @@ export async function createFullTenant(db: Db, label: string) {
   const printerDiscovery = await db.printerDiscovery.create({
     data: { tenantId: tenant.id, printAgentId: agent.id, requestedByUserId: user.id },
   });
+  // TC-DB-004 walks every composite foreign key and needs a row on each child side; staff_credentials and
+  // staff_sessions each carry (tenant_id, membership_id), and staff_sessions also (tenant_id, credential_id).
+  // A staff-role membership, because `staff_sessions_role_is_staff_check` refuses any other (ADR-019 §1).
+  const staffUser = await createUser(db, { fullName: `Cashier ${label}` });
+  const staffMembership = await createMembership(db, tenant.id, staffUser.id, TenantRole.CASHIER);
+  const staffCredential = await db.staffCredential.create({
+    data: {
+      tenantId: tenant.id,
+      membershipId: staffMembership.id,
+      userId: staffUser.id,
+      passwordHash: "scrypt$65536$8$1$c2FsdHNhbHRzYWx0c2E=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=",
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      expiresAt: new Date("2126-09-15T18:30:00.000Z"),
+      generatedByUserId: user.id,
+    },
+  });
+  const staffSession = await db.staffSession.create({
+    data: {
+      tenantId: tenant.id,
+      membershipId: staffMembership.id,
+      userId: staffUser.id,
+      credentialId: staffCredential.id,
+      role: TenantRole.CASHIER,
+      tokenHash: randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64),
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      expiresAt: new Date("2126-09-15T18:30:00.000Z"),
+    },
+  });
   const printer = await createPrinter(db, tenant.id, { printAgentId: agent.id, kitchenSectionId: section.id });
   const printJob = await db.printJob.create({
     data: {
@@ -372,5 +400,5 @@ export async function createFullTenant(db: Db, label: string) {
     },
   });
 
-  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, agent, printerDiscovery, printer, printJob, socialPost, dayClose, websiteSection, audit };
+  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, agent, printerDiscovery, staffUser, staffMembership, staffCredential, staffSession, printer, printJob, socialPost, dayClose, websiteSection, audit };
 }

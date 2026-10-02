@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { KeyRound } from "lucide-react";
+import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState } from "@/components/states/error-state";
 import { StaffBoard } from "@/components/staff/staff-board";
@@ -24,7 +27,24 @@ export default async function StaffPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col">
-      <PageHeader title="Staff" description="Who works here, what they can do, and who is still to accept an invitation." />
+      <PageHeader
+        title="Staff"
+        description="Who works here, what they can do, and who is still to accept an invitation."
+        actions={
+          // Administrator only, and linked from here rather than added to the navigation: MANAGER holds
+          // `staff:read`, so a capability-filtered nav entry would show managers a page the loader refuses
+          // (ADR-019 §6).
+          ctx.role === "TENANT_ADMIN" ? (
+            <Link
+              href="/restaurant/staff/access"
+              className="inline-flex h-11 items-center gap-2 rounded-xl border border-border-strong px-3 text-nav text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised"
+            >
+              <Icon icon={KeyRound} size={18} />
+              Daily passwords & attendance
+            </Link>
+          ) : undefined
+        }
+      />
 
       {staff.ok ? (
         <StaffBoard

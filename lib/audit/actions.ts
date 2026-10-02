@@ -27,6 +27,14 @@ export const AUDIT_ACTIONS = [
   "staff.role_changed",
   "staff.deactivated",
   "staff.reactivated",
+  // Staff daily-password login (ADR-019 §6). Never carries the password or its hash.
+  "staff.password_generated",
+  "staff.password_regenerated",
+  "staff.password_revoked",
+  "staff.login",
+  "staff.login_failed",
+  "staff.logout",
+  "staff.force_logout",
   // Restaurant
   "restaurant.profile_updated",
   "restaurant.branding_updated",

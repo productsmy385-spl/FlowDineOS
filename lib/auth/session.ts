@@ -1,6 +1,6 @@
 import "server-only";
 import { cache } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { findUserByClerkId, linkInvitedUser, touchLastSignIn, type IdentityUser } from "@/lib/data/users";
 import { logger } from "@/lib/logger";
@@ -69,17 +69,54 @@ async function requestIdFromHeaders(): Promise<string> {
   }
 }
 
-/** The current request's session, resolved once per request (React cache). */
+/**
+ * The current request's session, resolved once per request (React cache).
+ *
+ * Clerk first, then a staff daily-password session (RASOIOS-ADR-019). Deliberately in that order and mutually
+ * exclusive: an administrator or manager signed in with Clerk is never re-resolved as staff, and the staff path is
+ * only reached when Clerk has no session at all, so the two can never be combined to widen anyone's access.
+ *
+ * Resolving staff into the *same* `SessionState` is the whole design. Everything downstream — `resolveTenant`,
+ * every guard, every permission check, every `tenantScope` — then works on a staff session without knowing one
+ * exists, so there is no second authorization path to keep in step with the first.
+ */
 export const getSessionUser = cache(async (): Promise<SessionState> => {
   const { userId } = await auth();
-  const identity: ClerkIdentity | null = userId
-    ? {
-        clerkUserId: userId,
-        verifiedPrimaryEmail: async () => {
-          const user = await currentUser();
-          return user ? verifiedPrimaryEmailOf(user) : null;
-        },
-      }
-    : null;
-  return resolveSession(identity, await requestIdFromHeaders());
+  if (userId) {
+    const identity: ClerkIdentity = {
+      clerkUserId: userId,
+      verifiedPrimaryEmail: async () => {
+        const user = await currentUser();
+        return user ? verifiedPrimaryEmailOf(user) : null;
+      },
+    };
+    return resolveSession(identity, await requestIdFromHeaders());
+  }
+  return resolveStaffSessionState();
 });
+
+/**
+ * A staff cookie resolved to the same shape Clerk produces. `currentStaffSession` re-reads the session row, so a
+ * revoked, expired or no-longer-eligible session is already closed by the time this returns null.
+ */
+async function resolveStaffSessionState(): Promise<SessionState> {
+  const { currentStaffSession } = await import("@/lib/services/staff-auth");
+  const { STAFF_SESSION_COOKIE, parseStaffSessionCookie } = await import("./staff-session-cookie");
+  const { findUserById } = await import("@/lib/data/users");
+
+  let token: string | null = null;
+  try {
+    token = parseStaffSessionCookie((await cookies()).get(STAFF_SESSION_COOKIE)?.value);
+  } catch {
+    return { state: "SIGNED_OUT" }; // outside a request scope (scripts)
+  }
+  if (!token) return { state: "SIGNED_OUT" };
+
+  const session = await currentStaffSession(token);
+  if (!session) return { state: "SIGNED_OUT" };
+
+  const user = await findUserById(session.userId);
+  if (!user) return { state: "SIGNED_OUT" };
+  if (user.status !== "ACTIVE") return { state: "INACTIVE", userId: user.id };
+  return { state: "ACTIVE", user };
+}

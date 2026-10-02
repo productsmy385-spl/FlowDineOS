@@ -98,7 +98,36 @@ async function buildFixture() {
       uploadedByUserId: user.id,
     },
   });
-  return { tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, bucketKey };
+  // A staff membership with today's password and an open shift, for the staff_credentials / staff_sessions CHECKs
+  // (ADR-019). CASHIER because `staff_sessions_role_is_staff_check` refuses any non-staff role outright.
+  const staffUser = await createUser(db);
+  const staffMembership = await db.userTenant.create({
+    data: { tenantId: tenant.id, userId: staffUser.id, role: "CASHIER", status: "ACTIVE", acceptedAt: new Date() },
+  });
+  const staffCredential = await db.staffCredential.create({
+    data: {
+      tenantId: tenant.id,
+      membershipId: staffMembership.id,
+      userId: staffUser.id,
+      passwordHash: "scrypt$65536$8$1$c2FsdHNhbHRzYWx0c2E=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=",
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      expiresAt: new Date("2126-09-15T18:30:00.000Z"),
+      generatedByUserId: user.id,
+    },
+  });
+  const staffSession = await db.staffSession.create({
+    data: {
+      tenantId: tenant.id,
+      membershipId: staffMembership.id,
+      userId: staffUser.id,
+      credentialId: staffCredential.id,
+      role: "CASHIER",
+      tokenHash: "f".repeat(64),
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      expiresAt: new Date("2126-09-15T18:30:00.000Z"),
+    },
+  });
+  return { tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
 }
 
 beforeAll(async () => {
@@ -206,6 +235,18 @@ const CHECK_CASES: CheckCase[] = [
   { constraint: "media_assets_dimensions_check", table: "media_assets", set: "width = 4097", where: byId(() => f.mediaAsset.id) },
   { constraint: "media_assets_url_https_check", table: "media_assets", set: "url = 'http://ik.imagekit.io/test/logo.png'", where: byId(() => f.mediaAsset.id) },
   { constraint: "media_assets_deleted_at_check", table: "media_assets", set: "status = 'DELETED'", where: byId(() => f.mediaAsset.id) },
+  // STAFF DAILY LOGIN (ADR-019). The application checks all of these first; the database is the backstop.
+  { constraint: "staff_credentials_expires_after_creation_check", table: "staff_credentials", set: "expires_at = created_at", where: byId(() => f.staffCredential.id) },
+  { constraint: "staff_credentials_revoked_at_check", table: "staff_credentials", set: "status = 'REVOKED'", where: byId(() => f.staffCredential.id) },
+  { constraint: "staff_credentials_failed_attempts_check", table: "staff_credentials", set: "failed_attempts = -1", where: byId(() => f.staffCredential.id) },
+  // A plaintext password must never reach this column, whatever else goes wrong above it.
+  { constraint: "staff_credentials_password_hash_check", table: "staff_credentials", set: "password_hash = 'ABCD-2345'", where: byId(() => f.staffCredential.id) },
+  { constraint: "staff_sessions_ended_at_check", table: "staff_sessions", set: "status = 'ENDED', end_reason = 'SIGNED_OUT'", where: byId(() => f.staffSession.id) },
+  { constraint: "staff_sessions_end_reason_check", table: "staff_sessions", set: "end_reason = 'SIGNED_OUT'", where: byId(() => f.staffSession.id) },
+  { constraint: "staff_sessions_expires_after_login_check", table: "staff_sessions", set: "expires_at = login_at", where: byId(() => f.staffSession.id) },
+  { constraint: "staff_sessions_ended_after_login_check", table: "staff_sessions", set: "status = 'ENDED', end_reason = 'SIGNED_OUT', ended_at = login_at - interval '1 hour'", where: byId(() => f.staffSession.id) },
+  // The database itself refuses a daily-password session for an administrator or manager (ADR-019 §1, C7).
+  { constraint: "staff_sessions_role_is_staff_check", table: "staff_sessions", set: "role = 'TENANT_ADMIN'", where: byId(() => f.staffSession.id) },
   { constraint: "website_sections_cta_pair_check", table: "website_sections", set: "cta_label = NULL", where: byId(() => f.websiteSection.id) },
   // E26 / E27
   { constraint: "tenant_counters_last_value_check", table: "tenant_counters", set: "last_value = -1", where: () => `tenant_id = '${f.tenant.id}'` },

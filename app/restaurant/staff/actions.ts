@@ -2,6 +2,10 @@
 
 import { requireTenant } from "@/lib/auth/guards";
 import { action } from "@/lib/http/action";
+import { listStaffSessions, listStaffStanding } from "@/lib/data/staff-auth";
+import { assertStaffAdmin, forceLogoutStaff, generateDailyPassword, revokeDailyPassword } from "@/lib/services/staff-auth";
+import { addDays, businessDateFor, toIsoDate } from "@/lib/time/business-date";
+import { now as nowInstant } from "@/lib/time/clock";
 import {
   changeStaffRole,
   deactivateStaff,
@@ -17,10 +21,14 @@ import {
   inviteStaffSchema,
   listStaffSchema,
   membershipIdSchema,
+  staffAttendanceSchema,
+  staffCredentialSchema,
   type ChangeStaffRoleInput,
   type InviteStaffInput,
   type ListStaffInput,
   type MembershipIdInput,
+  type StaffAttendanceInput,
+  type StaffCredentialInput,
 } from "@/lib/validation/staff";
 
 /**
@@ -77,4 +85,77 @@ export const reactivateStaffAction = action(async (input: MembershipIdInput) => 
   const ctx = await requireTenant("staff:deactivate");
   const { membershipId } = parseInput(membershipIdSchema, input);
   return reactivateStaff(ctx, membershipId);
+});
+
+/**
+ * Staff daily-password administration (RASOIOS-ADR-019, SA-STAFFAUTH-01…03).
+ *
+ * TENANT_ADMIN only. `staff:read` is the coarse gate; `assertStaffAdmin` is what actually restricts these, because
+ * MANAGER already holds every `staff:*` permission including `staff:invite`, and the client was explicit that
+ * issuing passwords and forcing people out is not a manager capability (C17). Adding a new permission instead would
+ * be the cleaner RBAC shape, but the role table grants MANAGER the staff group wholesale, so an explicit assert is
+ * the honest way to say "administrator only" without quietly widening the group.
+ */
+export const generateStaffPasswordAction = action(async (input: StaffCredentialInput) => {
+  const ctx = await requireTenant("staff:read");
+  assertStaffAdmin(ctx);
+  const { membershipId } = parseInput(staffCredentialSchema, input);
+  // The plaintext is returned exactly once, here. It is never stored, never logged and never audited (C5).
+  return generateDailyPassword(ctx, membershipId);
+});
+
+export const revokeStaffPasswordAction = action(async (input: StaffCredentialInput) => {
+  const ctx = await requireTenant("staff:read");
+  assertStaffAdmin(ctx);
+  const { membershipId } = parseInput(staffCredentialSchema, input);
+  await revokeDailyPassword(ctx, membershipId);
+  return { revoked: true as const };
+});
+
+export const forceLogoutStaffAction = action(async (input: StaffCredentialInput) => {
+  const ctx = await requireTenant("staff:read");
+  assertStaffAdmin(ctx);
+  const { membershipId } = parseInput(staffCredentialSchema, input);
+  return forceLogoutStaff(ctx, membershipId);
+});
+
+/**
+ * LD-STAFFAUTH-01 — who may sign in with a daily password, who is on shift, and the recent attendance (C12/C13).
+ *
+ * One read of the restaurant's own staff and a bounded window of their sessions. TENANT_ADMIN only, like the rest
+ * of this group: knowing who is working and for how long is management information, not a staff-level view.
+ */
+export const listStaffAccessAction = action(async (input: StaffAttendanceInput = {}) => {
+  const ctx = await requireTenant("staff:read");
+  assertStaffAdmin(ctx);
+  const { days } = parseInput(staffAttendanceSchema, input);
+
+  const today = businessDateFor(nowInstant(), ctx.restaurant.timezone);
+  const from = addDays(today, -(days - 1));
+  const [standing, sessions] = await Promise.all([listStaffStanding(ctx), listStaffSessions(ctx, from, today)]);
+
+  return {
+    standing: standing.map((row) => ({
+      membershipId: row.membershipId,
+      name: row.fullName ?? row.email,
+      email: row.email,
+      role: row.role,
+      credentialExpiresAt: row.credential?.expiresAt.toISOString() ?? null,
+      credentialGeneratedAt: row.credential?.generatedAt.toISOString() ?? null,
+      activeSince: row.activeSession?.loginAt.toISOString() ?? null,
+    })),
+    sessions: sessions.map((row) => ({
+      sessionId: row.sessionId,
+      membershipId: row.membershipId,
+      name: row.fullName ?? "",
+      role: row.role,
+      businessDate: toIsoDate(row.businessDate),
+      loginAt: row.loginAt.toISOString(),
+      endedAt: row.endedAt?.toISOString() ?? null,
+      endReason: row.endReason,
+      open: row.status === "ACTIVE",
+    })),
+    from: toIsoDate(from),
+    to: toIsoDate(today),
+  };
 });

@@ -92,6 +92,14 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
 }
 
 /** Records a sign-in at most once per `minIntervalMs` (default 15 minutes) with a single conditional UPDATE. */
+/** The identity behind a staff session (ADR-019 §4), resolved after the session row has already proved who it is. */
+export async function findUserById(userId: string): Promise<IdentityUser | null> {
+  return mapErrors("User", () =>
+    // tenant-scope-exempt: identity-level read, keyed by the id the staff session itself carries.
+    db.user.findUnique({ where: { id: userId }, select: identitySelect }),
+  );
+}
+
 export async function touchLastSignIn(userId: string, now: Date, minIntervalMs = 15 * 60_000): Promise<void> {
   const threshold = new Date(now.getTime() - minIntervalMs);
   await mapErrors("User", () =>

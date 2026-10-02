@@ -336,6 +336,8 @@ model Tenant {
   auditLogs         AuditLog[]
   socialPosts       SocialPost[]
   mediaAssets       MediaAsset[]
+  staffCredentials  StaffCredential[]
+  staffSessions     StaffSession[]
   counters          TenantCounter[]
 
   @@index([status])
@@ -491,6 +493,10 @@ model User {
   createdDailyMenus      DailyMenu[]        @relation("DailyMenuCreatedBy")
   createdCustomers       Customer[]         @relation("CustomerCreatedBy")
   createdOrders          Order[]            @relation("OrderCreatedBy")
+  staffCredentials       StaffCredential[]  @relation("StaffCredentialUser")
+  generatedStaffCredentials StaffCredential[] @relation("StaffCredentialGeneratedBy")
+  staffSessions          StaffSession[]     @relation("StaffSessionUser")
+  endedStaffSessions     StaffSession[]     @relation("StaffSessionEndedBy")
   cancelledOrders        Order[]            @relation("OrderCancelledBy")
   recordedTransactions   Transaction[]      @relation("TransactionRecordedBy")
   voidedTransactions     Transaction[]      @relation("TransactionVoidedBy")
@@ -529,6 +535,8 @@ model UserTenant {
   user          User   @relation("MembershipUser", fields: [userId], references: [id], onDelete: Restrict)
   invitedBy     User?  @relation("MembershipInvitedBy", fields: [invitedByUserId], references: [id], onDelete: Restrict)
   deactivatedBy User?  @relation("MembershipDeactivatedBy", fields: [deactivatedByUserId], references: [id], onDelete: Restrict)
+  staffCredentials StaffCredential[] @relation("StaffCredentialMembership")
+  staffSessions    StaffSession[]    @relation("StaffSessionMembership")
 
   @@unique([tenantId, userId])
   @@unique([tenantId, id])
@@ -1234,4 +1242,106 @@ model MediaAsset {
   @@unique([tenantId, id])
   @@index([tenantId, purpose, status])
   @@map("media_assets")
+}
+
+// ───────────────────────── E26 STAFF DAILY LOGIN (RASOIOS-ADR-019) ─────────────────────────
+
+enum StaffCredentialStatus {
+  ACTIVE
+  REVOKED
+
+  @@map("staff_credential_status")
+}
+
+enum StaffSessionStatus {
+  ACTIVE
+  ENDED
+
+  @@map("staff_session_status")
+}
+
+/** Why a staff session stopped. Kept distinct from the status so attendance can tell a shift from a revocation. */
+enum StaffSessionEndReason {
+  SIGNED_OUT
+  ADMIN_FORCE_LOGOUT
+  CREDENTIAL_REVOKED
+  EXPIRED
+
+  @@map("staff_session_end_reason")
+}
+
+/**
+ * One workday's password for one staff membership (ADR-019). Only the scrypt hash is stored: the plaintext is shown
+ * to the administrator once, at generation, and is not recoverable afterwards.
+ *
+ * At most one ACTIVE credential per membership (partial unique index in the migration), so regenerating invalidates
+ * the previous password by construction rather than by remembering to.
+ */
+model StaffCredential {
+  id                String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String                @map("tenant_id") @db.Uuid
+  membershipId      String                @map("membership_id") @db.Uuid
+  userId            String                @map("user_id") @db.Uuid
+  passwordHash      String                @map("password_hash") @db.VarChar(255)
+  /** The restaurant's own business date this password is for, in its timezone — never a UTC calendar day. */
+  businessDate      DateTime              @map("business_date") @db.Date
+  expiresAt         DateTime              @map("expires_at") @db.Timestamptz(6)
+  status            StaffCredentialStatus @default(ACTIVE)
+  failedAttempts    Int                   @default(0) @map("failed_attempts")
+  generatedByUserId String                @map("generated_by_user_id") @db.Uuid
+  revokedAt         DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime              @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  membership  UserTenant      @relation("StaffCredentialMembership", fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Restrict)
+  user        User            @relation("StaffCredentialUser", fields: [userId], references: [id], onDelete: Restrict)
+  generatedBy User            @relation("StaffCredentialGeneratedBy", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  sessions    StaffSession[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, membershipId, status])
+  @@index([tenantId, businessDate])
+  @@map("staff_credentials")
+}
+
+/**
+ * One staff working session: the attendance record and the server-side session at once (ADR-019 §4).
+ *
+ * The cookie carries an opaque token; only its SHA-256 is stored, so the database never holds anything that could
+ * be replayed. Force logout ends the row, and because every request re-reads it, access stops on the next request
+ * rather than when a browser happens to drop a cookie.
+ */
+model StaffSession {
+  id           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId     String                 @map("tenant_id") @db.Uuid
+  membershipId String                 @map("membership_id") @db.Uuid
+  userId       String                 @map("user_id") @db.Uuid
+  credentialId String                 @map("credential_id") @db.Uuid
+  role         TenantRole
+  tokenHash    String                 @unique @map("token_hash") @db.Char(64)
+  status       StaffSessionStatus     @default(ACTIVE)
+  endReason    StaffSessionEndReason? @map("end_reason")
+  /** The restaurant's business date the shift belongs to, so attendance groups by workday not by UTC midnight. */
+  businessDate DateTime               @map("business_date") @db.Date
+  loginAt      DateTime               @default(now()) @map("login_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime               @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  endedAt      DateTime?              @map("ended_at") @db.Timestamptz(6)
+  expiresAt    DateTime               @map("expires_at") @db.Timestamptz(6)
+  ipAddress    String?                @map("ip_address") @db.VarChar(45)
+  userAgent    String?                @map("user_agent") @db.VarChar(255)
+  endedByUserId String?               @map("ended_by_user_id") @db.Uuid
+  createdAt    DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime               @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  membership UserTenant      @relation("StaffSessionMembership", fields: [tenantId, membershipId], references: [tenantId, id], onDelete: Restrict)
+  user       User            @relation("StaffSessionUser", fields: [userId], references: [id], onDelete: Restrict)
+  credential StaffCredential @relation(fields: [tenantId, credentialId], references: [tenantId, id], onDelete: Restrict)
+  endedBy    User?           @relation("StaffSessionEndedBy", fields: [endedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, status, membershipId])
+  @@index([tenantId, businessDate])
+  @@map("staff_sessions")
 }

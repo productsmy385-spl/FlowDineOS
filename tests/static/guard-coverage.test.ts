@@ -23,6 +23,10 @@ const ALLOW_LIST: Record<string, string> = {
   "app/account/forbidden/page.tsx#default": "Account state page: renders no tenant data",
   "app/account/suspended/page.tsx#default": "Account state page: resolves its own session state, renders no tenant data",
   "app/account/select-tenant/page.tsx#default": "Resolves the session itself and lists only the caller's own memberships",
+  "app/staff-login/actions.ts#staffLoginAction":
+    "Staff daily-password sign-in (RASOIOS-ADR-019 §2): the password IS the credential — there is no session yet — so the action starts with two fail-closed rate limits, and the tenant comes from whichever credential the password verifies against, never from the caller",
+  "app/staff-login/actions.ts#staffSignOutAction":
+    "Staff sign-out companion (ADR-019 §4): ends the session its own cookie names and deletes that cookie; reads and returns nothing, and must still work when the session has already been revoked",
   "app/sign-in/actions.ts#clearActiveTenantCookieAction":
     "Sign-out companion (SC-SESS-03): deletes the caller's own rasoi_active_membership preference cookie, reads and returns nothing; must also run after sign-out",
 };

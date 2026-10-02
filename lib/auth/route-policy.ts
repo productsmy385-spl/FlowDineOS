@@ -15,7 +15,9 @@ export type RouteKind =
 
 // `/sitemap.xml` and `/robots.txt` are generated from published public websites only (LD-PUB-03, S1-P09-T005).
 const PUBLIC_EXACT = new Set(["/", "/offline", "/api/health", "/api/ready", "/manifest.json", "/sw.js", "/favicon.ico", "/robots.txt", "/sitemap.xml"]);
-const PUBLIC_PREFIXES = ["/r/", "/sign-in", "/sign-up", "/icons/"];
+// `/staff-login` is public in the same sense as `/sign-in`: it is the door, not what is behind it. The daily
+// password is checked server-side and rate limited there (RASOIOS-ADR-019 §5).
+const PUBLIC_PREFIXES = ["/r/", "/sign-in", "/sign-up", "/staff-login", "/icons/"];
 
 /**
  * Paths that sit under a public prefix but are not public. `/sign-in/landing` reads the caller's platform role and
