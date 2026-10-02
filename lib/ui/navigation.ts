@@ -58,7 +58,9 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { key: "reports", href: "/restaurant/reports", label: "Reports", group: "Reports", capability: "report:read" },
   { key: "printing", href: "/restaurant/printing", label: "Printing", group: "Settings", capability: "print_job:read" },
   { key: "audit", href: "/restaurant/audit", label: "Audit log", group: "Reports", capability: "audit:read" },
-  { key: "settings", href: "/restaurant/settings", label: "Settings", group: "Settings", capability: "restaurant:read" },
+  // `dashboard:read`, not `restaurant:read`: every role reads the restaurant (the console needs its name and timezone),
+  // but Settings is a management screen. Counter and kitchen staff see only their own work (ADR-019, owner 2026-10-02).
+  { key: "settings", href: "/restaurant/settings", label: "Settings", group: "Settings", capability: "dashboard:read" },
 ];
 
 /** design.md §5.1 icon for each navigation item. */
@@ -169,8 +171,11 @@ export const BOTTOM_NAV_PRESETS: Readonly<Record<TenantRole, readonly NavKey[]>>
   TENANT_ADMIN: ["dashboard", "orders", "menu"],
   MANAGER: ["dashboard", "orders", "menu"],
   CASHIER: ["orders", "transactions", "customers", "printing"],
-  WAITER: ["orders", "customers", "menu", "settings"],
-  KITCHEN: ["orders", "menu", "printing", "settings"],
+  // Settings left the staff bars with the screen itself (owner 2026-10-02): staff see only their own work. The slot
+  // goes to today's menu, which both roles check during a service. (A cook's kitchen board is already the centre
+  // action, so it cannot also take a slot.)
+  WAITER: ["orders", "customers", "menu", "dailyMenu"],
+  KITCHEN: ["orders", "menu", "printing", "dailyMenu"],
 };
 
 export function bottomNavItemsFor(role: string, capabilities: Iterable<string>): NavItem[] {

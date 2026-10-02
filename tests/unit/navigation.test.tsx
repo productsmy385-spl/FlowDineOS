@@ -56,8 +56,10 @@ describe("capability-filtered navigation", () => {
 
   it("hides management and money areas from WAITER and KITCHEN", () => {
     // Menu and daily menu are read-only for these roles (`menu:read` / `daily_menu:read`), so the links stay.
-    expect(labels("WAITER")).toEqual(["orders", "kitchen", "customers", "menu", "dailyMenu", "settings"]);
-    expect(labels("KITCHEN")).toEqual(["orders", "kitchen", "menu", "dailyMenu", "printing", "settings"]);
+    // No Settings for staff: it is a management screen (ADR-019, owner 2026-10-02).
+    expect(labels("WAITER")).toEqual(["orders", "kitchen", "customers", "menu", "dailyMenu"]);
+    expect(labels("KITCHEN")).toEqual(["orders", "kitchen", "menu", "dailyMenu", "printing"]);
+    expect(labels("CASHIER")).not.toContain("settings");
     expect(labels("CASHIER")).not.toContain("reports");
     expect(labels("CASHIER")).not.toContain("dashboard");
     expect(labels("MANAGER")).toContain("reports");
@@ -145,8 +147,8 @@ describe("header navigation (ADR-013 §3)", () => {
 
 describe("bottom bar (< 768 px)", () => {
   it("shows at most four of the role's allowed areas, in preset order", () => {
-    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["orders", "customers", "menu", "settings"]);
-    expect(bottomNavItemsFor("KITCHEN", permissionsForTenantRole("KITCHEN")).map((i) => i.key)).toEqual(["orders", "menu", "printing", "settings"]);
+    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["orders", "customers", "menu", "dailyMenu"]);
+    expect(bottomNavItemsFor("KITCHEN", permissionsForTenantRole("KITCHEN")).map((i) => i.key)).toEqual(["orders", "menu", "printing", "dailyMenu"]);
     expect(bottomNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toEqual(["orders", "transactions", "customers", "printing"]);
     for (const role of ROLES) {
       const caps = permissionsForTenantRole(role);

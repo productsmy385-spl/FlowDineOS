@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { STAFF_SESSION_COOKIE_NAME } from "./route-policy";
 
 /**
  * `rasoi_staff_session` cookie (RASOIOS-ADR-019 §4).
@@ -11,7 +12,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
  * SHA-256 rather than a slow hash on purpose: the token is 256 bits of CSPRNG output, not a human-chosen secret, so
  * there is no dictionary to stretch against — only a constant-time lookup to do on every request.
  */
-export const STAFF_SESSION_COOKIE = "rasoi_staff_session";
+export const STAFF_SESSION_COOKIE = STAFF_SESSION_COOKIE_NAME;
 
 /** 32 bytes, base64url: no padding or separators to trip over in a Set-Cookie header. */
 export function issueStaffSessionToken(): { token: string; tokenHash: string } {

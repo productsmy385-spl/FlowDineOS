@@ -21,7 +21,9 @@ export const metadata: Metadata = { title: "Settings" };
  * built from Intl here, so the browser receives plain options and they cannot drift from what the schema accepts.
  */
 export default async function RestaurantSettingsPage() {
-  const ctx = await requireTenantPage("restaurant:read");
+  // Management only — the same gate as its navigation entry. Staff roles are sent to /account/forbidden rather than
+  // shown a read-only copy of settings they have no part in (ADR-019, owner 2026-10-02).
+  const ctx = await requireTenantPage("dashboard:read");
   const settings = await getRestaurantSettingsAction();
 
   return (

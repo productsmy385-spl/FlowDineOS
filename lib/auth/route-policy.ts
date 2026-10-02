@@ -56,6 +56,24 @@ export function mustNotBeStored(pathname: string): boolean {
   return classifyRoute(pathname) !== "public";
 }
 
+/**
+ * The staff daily-password cookie, as the middleware sees it (RASOIOS-ADR-019 section 4). Defined here, in the pure
+ * policy module, because the middleware runs on the edge and cannot import `node:crypto`; `staff-session-cookie.ts`
+ * takes the name from here so there is one source.
+ */
+export const STAFF_SESSION_COOKIE_NAME = "rasoi_staff_session";
+const STAFF_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
+
+/**
+ * Whether a request presents something shaped like a staff session. This is the coarse gate only (SC-AUTH-04): it
+ * proves nothing about the token, which every page, action and route handler then checks against the database via
+ * `getSessionUser`. Its job is narrower: before this, the gate knew only Clerk, so a cashier who had just signed in
+ * with today's password was bounced from /restaurant straight back to /sign-in, and asked for it again, forever.
+ */
+export function presentsStaffSession(cookieValue: string | null | undefined): boolean {
+  return typeof cookieValue === "string" && STAFF_TOKEN_SHAPE.test(cookieValue);
+}
+
 export type GateDecision =
   | { action: "next" }
   | { action: "redirect"; location: string }

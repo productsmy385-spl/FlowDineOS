@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
+import { useAuth, useClerk } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/inputs";
 import { staffLoginAction } from "./actions";
@@ -16,6 +17,8 @@ import { staffLoginAction } from "./actions";
  */
 export function StaffLoginForm() {
   const router = useRouter();
+  const { isSignedIn } = useAuth();
+  const { signOut } = useClerk();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [error, setError] = React.useState<string | null>(null);
@@ -40,6 +43,13 @@ export function StaffLoginForm() {
       setError("That email and password do not match. Check today's password with your administrator.");
       return;
     }
+    // A browser holds one person. If an administrator or manager is still signed in here through Clerk, that session
+    // would take precedence and the cashier would land in the administrator's console. Ending it is what makes the
+    // staff session the one this device actually uses (ADR-019 section 1).
+    if (isSignedIn) {
+      await signOut({ redirectUrl: "/restaurant" });
+      return;
+    }
     // The role decides the page; /restaurant resolves it from the session the cookie just established.
     router.replace("/restaurant");
     router.refresh();
@@ -47,6 +57,11 @@ export function StaffLoginForm() {
 
   return (
     <form onSubmit={submit} className="glass-2 flex flex-col gap-4 rounded-3xl p-6">
+      {isSignedIn && (
+        <p className="rounded-xl border border-status-warning/30 bg-status-warning/12 px-3 py-2 text-body text-fg-primary">
+          An administrator or manager is signed in on this device. Signing in as staff will sign them out.
+        </p>
+      )}
       {error && (
         <p role="alert" className="rounded-xl border border-status-danger/30 bg-status-danger/12 px-3 py-2 text-body text-status-danger">
           {error}

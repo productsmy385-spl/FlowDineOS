@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyRoute, ensureRequestId, gate, mustNotBeStored } from "@/lib/auth/route-policy";
+import { classifyRoute, ensureRequestId, gate, mustNotBeStored, presentsStaffSession } from "@/lib/auth/route-policy";
 
 // TC-AUTH-003 / TC-AUTH-004 — the middleware's decision table (S1-P03-T002). The e2e suite exercises the real
 // middleware (tests/e2e/auth-gate.spec.ts).
@@ -117,5 +117,36 @@ describe("TC-SEC-006 no shared cache holds one person's data (SC-PUB-02)", () =>
     for (const path of ["/", "/r/spice-route", "/r/spice-route/daily", "/sign-in", "/robots.txt", "/sitemap.xml", "/api/health", "/api/ready"]) {
       expect(mustNotBeStored(path), path).toBe(false);
     }
+  });
+});
+
+// RASOIOS-ADR-019: a staff member who has just signed in with today's password has no Clerk session. The gate used to
+// know only Clerk, so it sent them straight back to /sign-in to type the password again, forever.
+
+describe("staff daily-password sessions at the gate", () => {
+  const token = "A".repeat(43);
+
+  it("recognises a well-formed staff session cookie", () => {
+    expect(presentsStaffSession(token)).toBe(true);
+    expect(presentsStaffSession("abc_DEF-123".padEnd(43, "x"))).toBe(true);
+  });
+
+  it("rejects anything not shaped like one of our tokens, without a database round trip", () => {
+    for (const value of [undefined, null, "", "short", "A".repeat(42), "A".repeat(44), `${"A".repeat(42)}=`, `${"A".repeat(42)} `]) {
+      expect(presentsStaffSession(value), String(value)).toBe(false);
+    }
+  });
+
+  it("lets a staff session through to the console, where the page re-checks it against the database", () => {
+    expect(gate("/restaurant", "", presentsStaffSession(token), rid)).toEqual({ action: "next" });
+    expect(gate("/restaurant/orders", "", presentsStaffSession(token), rid)).toEqual({ action: "next" });
+    expect(gate("/api/v1/kitchen/tickets", "", presentsStaffSession(token), rid)).toEqual({ action: "next" });
+  });
+
+  it("still turns away a request with neither kind of session", () => {
+    expect(gate("/restaurant", "", presentsStaffSession(undefined), rid)).toEqual({
+      action: "redirect",
+      location: "/sign-in?redirect_url=%2Frestaurant",
+    });
   });
 });

@@ -148,11 +148,12 @@ describe("TC-REST-007 roles that cannot change settings see them read-only", () 
     expect(data.canEdit).toEqual({ profile: false, settings: false, website: false, sections: false });
   });
 
-  it("every other role also gets a read-only page", async () => {
+  it("counter and kitchen staff are not shown settings at all (ADR-019, owner 2026-10-02)", async () => {
+    // Staff see only their own work. A read-only copy of the restaurant's settings is not part of it, so the page
+    // refuses them outright rather than rendering something they have no use for.
     for (const role of ["CASHIER", "KITCHEN", "WAITER"] as const) {
       await asSeedUser("A", role);
-      const data = await view();
-      expect(Object.values(data.canEdit).some(Boolean), role).toBe(false);
+      expect(await invokeLoader(RestaurantSettingsPage), role).toEqual({ redirect: "/account/forbidden" });
     }
   });
 

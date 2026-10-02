@@ -1,6 +1,6 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { ensureRequestId, gate, mustNotBeStored } from "@/lib/auth/route-policy";
+import { STAFF_SESSION_COOKIE_NAME, ensureRequestId, gate, mustNotBeStored, presentsStaffSession } from "@/lib/auth/route-policy";
 import {
   TENANT_SLUG_HEADER,
   UNRESOLVABLE_PUBLIC_PATH,
@@ -68,7 +68,10 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.json(body, { status: 503, headers: { "x-request-id": requestId, "retry-after": "5" } });
   }
 
-  const decision = gate(pathname, search, signedIn, requestId);
+  // A daily-password staff session counts as signed in at this coarse gate; the page or handler behind it checks the
+  // token against the database on every request, so a revoked or expired one is still refused there (ADR-019).
+  const staffSession = presentsStaffSession(req.cookies.get(STAFF_SESSION_COOKIE_NAME)?.value);
+  const decision = gate(pathname, search, signedIn || staffSession, requestId);
   if (decision.action === "redirect") {
     const response = NextResponse.redirect(new URL(decision.location, req.url));
     response.headers.set("x-request-id", requestId);

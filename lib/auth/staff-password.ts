@@ -45,14 +45,22 @@ const scryptAsync = promisify(scrypt) as (
 ) => Promise<Buffer>;
 
 /**
- * N=2^16, r=8, p=1. A staff sign-in happens about once per shift, so the work is paid where nobody notices it, and
- * an offline attack on a stolen hash has to pay it for every guess.
+ * N=2^14, r=8, p=5 — one of OWASP's equivalent scrypt configurations, chosen to trade memory for CPU.
  *
- * `maxmem` has to be set explicitly: scrypt needs roughly 128·N·r bytes — 67 MB here — and Node's default ceiling
- * is 32 MB, so without this every hash throws "memory limit exceeded". The headroom is deliberate rather than
- * generous: a fixed ceiling means a tampered stored parameter cannot turn one login into an out-of-memory.
+ * scrypt needs roughly 128·N·r bytes per hash. The first parameters here (N=2^16, p=1) needed 67 MB for every sign-in,
+ * and a memory-constrained process could not always get it: on 2026-10-02 a development server answered a correct
+ * password in 51 ms with "Failed to allocate memory" behind it, and because verification then treated that as a
+ * mismatch, the staff member was told their password was wrong and typed it again. A Railway container signing in a
+ * whole shift at once is the same situation. This needs 16 MB, and p=5 restores the CPU cost an offline attacker
+ * pays for each guess.
+ *
+ * Existing hashes keep verifying: the parameters travel inside every stored hash, and `verifyStaffPassword` reads
+ * them from there rather than from this constant.
+ *
+ * `maxmem` is set explicitly because Node's default ceiling is 32 MB and older hashes need up to 67 MB. It is also
+ * the ceiling a tampered stored parameter cannot push past.
  */
-const PARAMS = { N: 1 << 16, r: 8, p: 1, maxmem: 96 * 1024 * 1024 };
+const PARAMS = { N: 1 << 14, r: 8, p: 5, maxmem: 96 * 1024 * 1024 };
 const KEY_LENGTH = 32;
 const SALT_LENGTH = 16;
 
@@ -78,12 +86,13 @@ export async function verifyStaffPassword(plaintext: string, stored: string): Pr
   // Also bounds the memory: anything needing more than `maxmem` would throw rather than verify.
   if (params.N > 1 << 17 || params.r > 16 || params.p > 16) return false;
 
-  let expected: Buffer;
-  try {
-    expected = Buffer.from(hashB64, "base64");
-    const derived = await scryptAsync(normalizeStaffPassword(plaintext), Buffer.from(saltB64, "base64"), expected.length, params);
-    return expected.length === derived.length && timingSafeEqual(expected, derived);
-  } catch {
-    return false;
-  }
+  const expected = Buffer.from(hashB64, "base64");
+  const salt = Buffer.from(saltB64, "base64");
+  if (expected.length < 16 || salt.length < 8) return false;
+
+  // Deliberately not wrapped in a catch. A failure *here* — the process could not allocate scrypt's memory, say — is
+  // a server fault, not a wrong password, and reporting it as one sent staff round in circles retyping a password
+  // that was correct. Let it surface as an error: the caller logs it and the person is told something went wrong.
+  const derived = await scryptAsync(normalizeStaffPassword(plaintext), salt, expected.length, params);
+  return expected.length === derived.length && timingSafeEqual(expected, derived);
 }
