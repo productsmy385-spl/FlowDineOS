@@ -56,7 +56,7 @@ export default function Home() {
             href="/sign-in"
             className="inline-flex h-11 items-center rounded-xl bg-action-primary px-4 text-label text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover motion-safe:hover:shadow-glow"
           >
-            Staff sign in
+            Sign in
           </Link>
         </div>
       </header>
@@ -119,7 +119,7 @@ export default function Home() {
             RASOIOS — licensed restaurant software
           </span>
           <Link href="/sign-in" className="hover:text-fg-primary">
-            Staff sign in
+            Sign in
           </Link>
         </div>
       </footer>

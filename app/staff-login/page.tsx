@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { Mail } from "lucide-react";
+import { SignInAudience, SignInDoor } from "@/components/layout/sign-in-door";
 import { AuthLayout } from "@/components/layout/auth-layout";
 import { StaffLoginForm } from "./staff-login-form";
 
@@ -15,19 +16,10 @@ export const dynamic = "force-dynamic";
  */
 export default function StaffLoginPage() {
   return (
-    <AuthLayout
-      title="Staff sign in"
-      description="Enter the password your restaurant administrator generated for today."
-      footer={
-        <>
-          Administrator or manager?{" "}
-          <Link href="/sign-in" className="text-fg-accent hover:underline">
-            Sign in with your email
-          </Link>
-        </>
-      }
-    >
+    <AuthLayout title="Staff sign in" description="Enter the password your restaurant administrator generated for today.">
+      <SignInAudience>Cashier, kitchen or waiter</SignInAudience>
       <StaffLoginForm />
+      <SignInDoor href="/sign-in" icon={Mail} title="Owner, administrator or manager?" detail="Sign in with a one-time code sent to your work email" />
     </AuthLayout>
   );
 }
