@@ -17,6 +17,8 @@ describe("TC-FOUND-004 CI gates", () => {
 
   it("fails the build on high or critical advisories", () => {
     expect(ci).toContain("npm audit --audit-level=high");
+    // The audit is judged by the exception-aware gate, never skipped (SC-DEP-01).
+    expect(ci).toContain("node scripts/check-audit.mjs npm-audit.json");
   });
 
   it("runs integration tests against a real PostgreSQL service", () => {

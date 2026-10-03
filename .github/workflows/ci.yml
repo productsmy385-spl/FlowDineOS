@@ -167,5 +167,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: "${{ env.NODE_VERSION }}" }
-      # SC-DEP-01: any high or critical advisory fails the build.
-      - run: npm audit --audit-level=high
+      # SC-DEP-01: any high or critical advisory fails the build, except one on the reviewed, dated exception list in
+      # scripts/check-audit.mjs. `npm audit` exits non-zero whenever it finds anything, so its JSON is kept and judged
+      # by the script, which fails closed on missing or errored output.
+      - run: npm audit --audit-level=high --json > npm-audit.json || true
+      - run: node scripts/check-audit.mjs npm-audit.json
