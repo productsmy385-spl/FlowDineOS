@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLate, LATE_AFTER_MINUTES, minutesSince, sectionLoads } from "@/lib/ui/kitchen-load";
+import { formatWaiting, isLate, LATE_AFTER_MINUTES, minutesSince, sectionLoads } from "@/lib/ui/kitchen-load";
 
 // TC-DASH-010 — the dashboard's station radar counts real tickets and nothing else (RASOIOS-ADR-020).
 const NOW = new Date("2026-10-03T12:00:00Z");
@@ -39,5 +39,17 @@ describe("TC-DASH-010 kitchen load per section", () => {
 
   it("never reports negative waiting time for a clock slightly ahead of the server", () => {
     expect(minutesSince(new Date(NOW.getTime() + 30_000).toISOString(), NOW)).toBe(0);
+  });
+});
+
+describe("TC-DASH-011 waiting time reads in sensible units", () => {
+  it.each([
+    [0, "0 min"],
+    [59, "59 min"],
+    [60, "1h 00m"],
+    [125, "2h 05m"],
+    [16354, "11d 8h"],
+  ])("%d minutes reads as %s", (minutes, expected) => {
+    expect(formatWaiting(minutes)).toBe(expected);
   });
 });

@@ -35,6 +35,13 @@ const WAITING_ON_KITCHEN = new Set(["QUEUED", "PREPARING"]);
 
 export const minutesSince = (iso: string, now: Date): number => Math.max(0, Math.floor((now.getTime() - new Date(iso).getTime()) / 60_000));
 
+/** "4 min", "2h 05m", "11d 8h" — a ticket left over from days ago should read as days, not as 16354 minutes. */
+export function formatWaiting(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+  return `${Math.floor(minutes / (24 * 60))}d ${Math.floor((minutes % (24 * 60)) / 60)}h`;
+}
+
 export function isLate(ticket: Pick<LoadTicket, "status" | "queuedAt">, now: Date): boolean {
   return WAITING_ON_KITCHEN.has(ticket.status) && minutesSince(ticket.queuedAt, now) >= LATE_AFTER_MINUTES;
 }

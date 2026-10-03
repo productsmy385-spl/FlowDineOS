@@ -27,7 +27,7 @@ This repository is governed by the **Knowledge Base** in `knowledge/`. The Knowl
     desaturated. Every colour is a semantic token; WCAG 2.1 AA contrast is enforced by tests.
   - Visual language: vibrant glassmorphism in three levels (navigation, cards/panels, overlays) — never nested,
     never behind long text, always with an opaque fallback.
-  - Display Font: Playfair Display · UI / Body Font: Plus Jakarta Sans
+  - Heading Font: Plus Jakarta Sans · UI / Body Font: Inter (RASOIOS-ADR-020, 2026-10-03; light theme uses Stitch's botanical neutrals)
 - **Navigation**: glass header navigation on desktop for both consoles — **no persistent desktop sidebar** — and a
   glass bottom bar below 768 px (ADR-013 §3).
 - **Tenant websites**: each tenant is served at `{slug}.<PUBLIC_ROOT_DOMAIN>` (`{slug}.localhost:3000` in dev), with

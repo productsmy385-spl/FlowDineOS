@@ -36,12 +36,14 @@ import { businessDaysEndingToday, salesSummary } from "@/lib/data/reports";
 import { listStaffStanding } from "@/lib/data/staff-auth";
 import { listActivePrinters, listAgents } from "@/lib/services/printing";
 import { formatBusinessDate, formatInZone, formatMoney } from "@/lib/ui/format";
-import { isLate, minutesSince, sectionLoads } from "@/lib/ui/kitchen-load";
+import { formatWaiting, isLate, minutesSince, sectionLoads } from "@/lib/ui/kitchen-load";
 import { now as clockNow } from "@/lib/time/clock";
 
 export const dynamic = "force-dynamic";
 
 const FEED_ROWS = 6;
+
+const ORDER_TYPE_LABEL: Record<string, string> = { DINE_IN: "Dine in", TAKEAWAY: "Takeaway", DELIVERY: "Delivery" };
 
 /**
  * Dashboard — the restaurant's operations command center (RASOIOS-ADR-020, after the Stitch "Operations Command
@@ -373,7 +375,7 @@ export default async function RestaurantDashboardPage() {
               support={
                 oldest === null
                   ? "Nothing waiting on the kitchen"
-                  : `Oldest waiting ${oldest} min`
+                  : `Oldest waiting ${formatWaiting(oldest)}`
               }
             />
           )}
@@ -429,7 +431,7 @@ export default async function RestaurantDashboardPage() {
                         href={`/restaurant/orders/${order.id}`}
                         className="-mx-2 grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 rounded-xl px-2 py-3 transition-colors duration-base ease-standard hover:bg-raised md:grid-cols-[10rem_1fr_auto_auto]"
                       >
-                        <span className="flex min-w-0 flex-col">
+                        <span className="col-start-1 row-start-1 flex min-w-0 flex-col">
                           <span className="truncate text-label text-numeric text-fg-primary">
                             #{order.orderNumber}
                           </span>
@@ -437,16 +439,14 @@ export default async function RestaurantDashboardPage() {
                             <Icon icon={Store} size={16} />
                             {order.tableLabel
                               ? `Table ${order.tableLabel}`
-                              : order.orderType
-                                  .replaceAll("_", " ")
-                                  .toLowerCase()}{" "}
+                              : ORDER_TYPE_LABEL[order.orderType]}{" "}
                             ·{" "}
                             <time dateTime={order.createdAt}>
                               {formatInZone(order.createdAt, timezone, "time")}
                             </time>
                           </span>
                         </span>
-                        <span className="col-span-2 row-start-2 truncate text-caption text-fg-secondary md:col-span-1 md:row-start-auto">
+                        <span className="col-start-1 row-start-2 truncate text-caption text-fg-secondary md:col-start-2 md:row-start-1">
                           {order.items.length === 0
                             ? "No items"
                             : order.items
@@ -459,7 +459,7 @@ export default async function RestaurantDashboardPage() {
                                 ? ` +${order.items.length - 2} more`
                                 : "")}
                         </span>
-                        <span className="row-start-1 flex flex-col items-end gap-1 md:row-start-auto">
+                        <span className="col-start-2 row-start-1 flex flex-col items-end gap-1 md:col-start-3">
                           <StatusBadge domain="order" status={order.status} />
                           {order.paymentStatus && (
                             <StatusBadge
@@ -468,7 +468,7 @@ export default async function RestaurantDashboardPage() {
                             />
                           )}
                         </span>
-                        <span className="hidden text-right text-label text-numeric text-fg-primary md:block">
+                        <span className="col-start-2 row-start-2 text-right text-label text-numeric text-fg-primary md:col-start-4 md:row-start-1">
                           {order.totalAmount
                             ? formatMoney(order.totalAmount, order.currencyCode)
                             : "—"}

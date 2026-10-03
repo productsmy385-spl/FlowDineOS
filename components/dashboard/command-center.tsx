@@ -6,7 +6,7 @@ import { IconTile } from "@/components/ui/icon-tile";
 import { EmptyState } from "@/components/states/empty-state";
 import { formatDuration } from "@/lib/ui/attendance";
 import { formatInZone } from "@/lib/ui/format";
-import type { SectionLoad } from "@/lib/ui/kitchen-load";
+import { formatWaiting, type SectionLoad } from "@/lib/ui/kitchen-load";
 import { roleLabel } from "@/lib/ui/navigation";
 import { cn } from "@/lib/ui/cn";
 
@@ -95,7 +95,7 @@ export function StationRadar({ loads }: { loads: readonly SectionLoad[] }) {
             </div>
             <div className="flex items-center gap-1.5 text-caption text-fg-secondary">
               <Icon icon={Clock} size={16} />
-              {load.oldestMinutes === null ? "Nothing waiting" : `Oldest waiting ${load.oldestMinutes} min`}
+              {load.oldestMinutes === null ? "Nothing waiting" : `Oldest waiting ${formatWaiting(load.oldestMinutes)}`}
               {load.priority > 0 && <span className="ml-auto font-semibold text-status-warning">{load.priority} priority</span>}
             </div>
           </li>
