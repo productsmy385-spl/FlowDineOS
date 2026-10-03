@@ -15,19 +15,22 @@ import { THEME_BOOT_SCRIPT } from "@/lib/ui/theme";
  * to be up is a build that fails for reasons that have nothing to do with the change being built.
  *
  * The two latin variable files are vendored in `app/fonts/` instead. One file per family covers every weight used
- * (Plus Jakarta Sans 400–700, Playfair Display 400–900), the bytes are identical to what the loader fetched, and the
+ * (Inter 400–700, Plus Jakarta Sans 400–700), the bytes are identical to what the loader fetched, and the
  * build is now reproducible offline. Re-download from Google Fonts only to pick up a new font version.
  */
+// Typography (RASOIOS-ADR-020, owner 2026-10-03, from the Stitch "Culinary Operations System"): Plus Jakarta Sans
+// carries headings and system anchors, Inter carries body text, tables, order lines and figures. Supersedes ADR-013's
+// Playfair Display + Plus Jakarta Sans pairing.
 const display = localFont({
-  src: "./fonts/PlayfairDisplay-Variable.woff2",
-  weight: "400 900",
+  src: "./fonts/PlusJakartaSans-Variable.woff2",
+  weight: "400 700",
   style: "normal",
   display: "swap",
   variable: "--font-display",
-  fallback: ["Georgia", "serif"],
+  fallback: ["system-ui", "sans-serif"],
 });
 const sans = localFont({
-  src: "./fonts/PlusJakartaSans-Variable.woff2",
+  src: "./fonts/Inter-Variable.woff2",
   weight: "400 700",
   style: "normal",
   display: "swap",

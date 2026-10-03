@@ -126,7 +126,7 @@ describe("TC-DS-009 contrast (design.md §2.3)", () => {
     ["info text on canvas", dark["text-info"], dark.surface, 9.43],
     ["danger text on canvas", dark["text-danger"], dark.surface, 9.07],
     ["success text on canvas", dark["text-success"], dark.surface, 10.09],
-    ["light body text on canvas", light.text, light.surface, 17.45],
+    ["light body text on canvas", light.text, light.surface, 16.38], // botanical canvas and ink (ADR-020)
   ])("%s is %s on %s = %d:1", (_name, foreground, background, expected) => {
     expect(contrastRatio(foreground, background)).toBe(expected);
   });

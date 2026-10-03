@@ -45,6 +45,20 @@ export const palette = {
     950: "#070B0A",
   },
   /**
+   * Botanical neutrals for the light theme (RASOIOS-ADR-020, from the Stitch "Culinary Operations System"): a
+   * low-chroma green-tinted canvas so white operational cards and frosted bars read as layers above it, with ink text
+   * and an olive secondary text tone. The dark theme keeps the near-black `surface` ramp.
+   */
+  botanical: {
+    50: "#F4FCEE",
+    100: "#EEF6E9",
+    200: "#E3EBDE",
+    300: "#BDCBB4",
+    500: "#6E7B67",
+    700: "#3E4A39",
+    900: "#161D16",
+  },
+  /**
    * Warning gold. design.md §2.2 names `--warning` explicitly outside the four ramps because none of them carries a
    * "caution" reading: `#F5B301` measures 10.28:1 on the canvas and `#8A5A00` 5.43:1 on the light surface.
    */
@@ -108,14 +122,15 @@ export const semanticTokens = {
     "focus-ring": palette.accent[300],
   },
   light: {
-    surface: palette.surface[50],
+    // Botanical canvas and ink (ADR-020): cards are white on a pale green-tinted ground, as in the Stitch screens.
+    surface: palette.botanical[50],
     "surface-2": "#FFFFFF",
-    "surface-3": palette.surface[100],
-    "surface-950": palette.surface[900],
-    border: palette.surface[200],
-    "border-strong": palette.surface[300],
-    text: palette.surface[900],
-    "text-muted": palette.surface[500],
+    "surface-3": palette.botanical[100],
+    "surface-950": palette.botanical[900],
+    border: palette.botanical[200],
+    "border-strong": palette.botanical[300],
+    text: palette.botanical[900],
+    "text-muted": palette.botanical[700],
     "text-accent": palette.primary[700],
     primary: palette.primary[600],
     "on-primary": "#FFFFFF",

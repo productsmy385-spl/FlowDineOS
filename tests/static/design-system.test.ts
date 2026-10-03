@@ -83,7 +83,7 @@ describe("TC-DS-001 Tailwind theme = design tokens", () => {
   it("builds the brand fonts from vendored files, not a download from Google", () => {
     const offenders = uiFiles.filter((f) => /from\s+["']next\/font\/google["']/.test(readFileSync(f, "utf8")));
     expect(offenders.map((f) => path.relative(root, f))).toEqual([]);
-    for (const file of ["app/fonts/PlayfairDisplay-Variable.woff2", "app/fonts/PlusJakartaSans-Variable.woff2"]) {
+    for (const file of ["app/fonts/PlusJakartaSans-Variable.woff2", "app/fonts/Inter-Variable.woff2"]) {
       // Present, and a real woff2 ("wOF2"), so a truncated or LFS-pointer file fails here rather than in the build.
       expect(readFileSync(path.join(root, file)).subarray(0, 4).toString("latin1"), file).toBe("wOF2");
     }

@@ -24,12 +24,18 @@ const HUE_STYLE: Record<DomainHue, { wash: string; bar: string; glow: string }> 
   "accent-soft": { wash: "from-accent-300/16", bar: "from-accent-300 to-accent-300/30", glow: "bg-accent-300/25" },
 };
 
+/**
+ * Hover (RASOIOS-ADR-020, Stitch §11): the card lifts 4 px, its shadow widens, its border firms up and the icon tile
+ * nudges — about 200 ms, transform and shadow only, so it stays cheap. `aside` replaces the icon tile when the card
+ * has something more telling to show there, such as a progress ring or an urgency badge.
+ */
 export function MetricCard({
   label,
   value,
   support,
   icon,
   hue,
+  aside,
   className,
 }: {
   label: string;
@@ -37,14 +43,16 @@ export function MetricCard({
   support?: React.ReactNode;
   icon: LucideIcon;
   hue: DomainHue;
+  aside?: React.ReactNode;
   className?: string;
 }) {
   const style = HUE_STYLE[hue];
   return (
     <div
       className={cn(
-        "glass-2 relative isolate flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle p-5 shadow-e1",
-        "transition-transform duration-fast ease-standard motion-safe:hover:-translate-y-0.5",
+        "group glass-2 rise-in relative isolate flex min-w-0 flex-col overflow-hidden rounded-2xl border border-border-subtle p-5 shadow-e1",
+        "transition-[transform,box-shadow,border-color] duration-base ease-standard",
+        "hover:border-border-strong hover:shadow-e2 motion-safe:hover:-translate-y-1",
         className,
       )}
     >
@@ -54,7 +62,11 @@ export function MetricCard({
 
       <div className="mb-3 flex items-start justify-between gap-3">
         <p className="min-w-0 text-label text-fg-secondary">{label}</p>
-        <IconTile icon={icon} size="md" tone={hue} />
+        {aside ?? (
+          <span className="transition-transform duration-base ease-standard motion-safe:group-hover:-translate-y-0.5 motion-safe:group-hover:scale-105">
+            <IconTile icon={icon} size="md" tone={hue} />
+          </span>
+        )}
       </div>
       <p className="text-display-m text-numeric text-fg-primary">{value}</p>
       {support && <p className="mt-1 text-caption text-fg-secondary">{support}</p>}
