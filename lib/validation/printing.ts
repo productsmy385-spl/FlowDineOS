@@ -93,6 +93,13 @@ export type TestPrintInput = z.input<typeof testPrintSchema>;
 export const retryPrintJobSchema = strictObject({ jobId: uuidParam });
 export type RetryPrintJobInput = z.input<typeof retryPrintJobSchema>;
 
+/** RASOIOS-ADR-022 — remove finished jobs from the history: chosen ones, or all older than N days. */
+export const archivePrintJobsSchema = z.union([
+  strictObject({ jobIds: z.array(uuidParam).min(1, "Choose at least one job").max(100, "Up to 100 jobs at a time") }),
+  strictObject({ olderThanDays: z.number().int().min(1).max(365) }),
+]);
+export type ArchivePrintJobsInput = z.input<typeof archivePrintJobsSchema>;
+
 export const printReceiptSchema = strictObject({ orderId: uuidParam });
 export type PrintReceiptInput = z.input<typeof printReceiptSchema>;
 

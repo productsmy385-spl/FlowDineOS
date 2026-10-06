@@ -212,6 +212,23 @@ export const updateWebsiteThemeSchema = strictObject({
   accentHex: hexColour("Accent colour").optional(),
   gradientFromHex: clearable(hexColour("Gradient start")),
   gradientToHex: clearable(hexColour("Gradient end")),
+  // RASOIOS-ADR-021 §7: any number of named colours (up to 16), in the restaurant's order. #RGB is written out in full.
+  brandColors: z
+    .array(
+      strictObject({
+        name: textField(30, "Colour name").pipe(z.string().min(1, "Give the colour a name")),
+        hex: z
+          .string()
+          .trim()
+          .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, "Use a colour like #9D174D")
+          .transform((hex) => (hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex).toUpperCase()),
+      }),
+    )
+    .max(16, "Up to 16 brand colours")
+    .refine((list) => new Set(list.map((c) => c.name.toLowerCase())).size === list.length, "Each colour needs a different name")
+    .optional(),
+  menuStyle: z.enum(["RING", "GRID"]).optional(),
+  dailyStyle: z.enum(["STRIP", "GRID"]).optional(),
 }).superRefine((value, ctx) => {
   if (value.preset === "CUSTOM") {
     for (const [field, label] of [
@@ -238,6 +255,9 @@ export type UpdateWebsiteThemeInput = {
   accentHex?: string;
   gradientFromHex?: string | null;
   gradientToHex?: string | null;
+  brandColors?: { name: string; hex: string }[];
+  menuStyle?: "RING" | "GRID";
+  dailyStyle?: "STRIP" | "GRID";
 };
 export type UpdateWebsiteThemeData = z.output<typeof updateWebsiteThemeSchema>;
 

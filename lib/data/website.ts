@@ -1,5 +1,5 @@
 import "server-only";
-import type { Prisma, WebsiteSectionKey, WebsiteSurfaceMode, WebsiteThemePreset } from "@prisma/client";
+import type { DailyStyle, MenuStyle, Prisma, WebsiteSectionKey, WebsiteSurfaceMode, WebsiteThemePreset } from "@prisma/client";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { audit } from "@/lib/audit/write";
 import { db } from "@/lib/db/prisma";
@@ -34,6 +34,9 @@ const THEME_SELECT = {
   brandAccentHex: true,
   gradientFromHex: true,
   gradientToHex: true,
+  brandColors: true,
+  menuStyle: true,
+  dailyStyle: true,
   tagline: true,
   heroImageUrl: true,
   faviconUrl: true,
@@ -58,7 +61,22 @@ export type WebsiteThemeRow = {
   accentHex: string | null;
   gradientFromHex: string | null;
   gradientToHex: string | null;
+  /** The restaurant's own named colours, in its order (RASOIOS-ADR-021 §7). */
+  brandColors: BrandColour[];
+  menuStyle: MenuStyle;
+  dailyStyle: DailyStyle;
 };
+
+export type BrandColour = { name: string; hex: string };
+
+/** Only well-formed entries survive a read, whatever an old or hand-edited row holds. */
+function brandColoursOf(value: Prisma.JsonValue): BrandColour[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const e = entry as { name?: unknown; hex?: unknown } | null;
+    return e && typeof e.name === "string" && typeof e.hex === "string" && /^#[0-9A-Fa-f]{6}$/.test(e.hex) ? [{ name: e.name, hex: e.hex.toUpperCase() }] : [];
+  });
+}
 
 export type WebsiteIdentityRow = {
   tagline: string | null;
@@ -111,6 +129,9 @@ function toTheme(row: ThemeRow): WebsiteThemeRow {
     accentHex: row.brandAccentHex,
     gradientFromHex: row.gradientFromHex,
     gradientToHex: row.gradientToHex,
+    brandColors: brandColoursOf(row.brandColors),
+    menuStyle: row.menuStyle,
+    dailyStyle: row.dailyStyle,
   };
 }
 
@@ -203,7 +224,8 @@ export async function getPublicWebsite(slug: string): Promise<PublicWebsiteData>
 
 // ─── Writes ───
 
-type Patch = Partial<Record<ThemeColumn, string | boolean | null>>;
+type Patch = Partial<Record<ThemeColumn, string | boolean | null | BrandColour[]>>;
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const pick = (row: ThemeRow, columns: ThemeColumn[]) => Object.fromEntries(columns.map((c) => [c, row[c]]));
 
@@ -211,7 +233,7 @@ const pick = (row: ThemeRow, columns: ThemeColumn[]) => Object.fromEntries(colum
 async function patchWebsite(ctx: TenantContext, patch: Patch, action: "restaurant.theme_updated" | "restaurant.website_updated"): Promise<WebsiteConfigDto> {
   return withTx(ctx, async (tx) => {
     const before = await loadThemeRow(tx, ctx);
-    const changed = (Object.keys(patch) as ThemeColumn[]).filter((c) => patch[c] !== undefined && patch[c] !== before[c]);
+    const changed = (Object.keys(patch) as ThemeColumn[]).filter((c) => patch[c] !== undefined && !same(patch[c], before[c]));
     if (changed.length === 0) {
       const sections = await loadSections(tx, ctx, before.id);
       return { restaurantId: before.id, theme: toTheme(before), identity: toIdentity(before), sections, updatedAt: instantDto(before.updatedAt) };
@@ -225,7 +247,10 @@ async function patchWebsite(ctx: TenantContext, patch: Patch, action: "restauran
 }
 
 /** SA-WEB-01 — preset, surface mode and colours (`restaurant.theme_updated`). Colours are already contrast-checked. */
-export function updateWebsiteTheme(ctx: TenantContext, theme: WebsiteThemeRow): Promise<WebsiteConfigDto> {
+export function updateWebsiteTheme(
+  ctx: TenantContext,
+  theme: Omit<WebsiteThemeRow, "brandColors" | "menuStyle" | "dailyStyle"> & Partial<Pick<WebsiteThemeRow, "brandColors" | "menuStyle" | "dailyStyle">>,
+): Promise<WebsiteConfigDto> {
   return patchWebsite(
     ctx,
     {
@@ -236,6 +261,9 @@ export function updateWebsiteTheme(ctx: TenantContext, theme: WebsiteThemeRow): 
       brandAccentHex: theme.accentHex,
       gradientFromHex: theme.gradientFromHex,
       gradientToHex: theme.gradientToHex,
+      brandColors: theme.brandColors,
+      menuStyle: theme.menuStyle,
+      dailyStyle: theme.dailyStyle,
     },
     "restaurant.theme_updated",
   );

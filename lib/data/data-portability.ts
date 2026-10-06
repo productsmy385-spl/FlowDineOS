@@ -1,5 +1,5 @@
 import "server-only";
-import { type BackupReminder, OrderStatus, PrinterDiscoveryStatus, PrintJobStatus, Prisma, StaffSessionStatus } from "@prisma/client";
+import { type BackupReminder, OrderStatus, PrinterDiscoveryStatus, PrintJobStatus, Prisma, StaffSessionStatus, TransactionStatus } from "@prisma/client";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { tenantKey, tenantScope } from "./scope";
 import type { Tx } from "./tx";
@@ -197,6 +197,56 @@ export async function readStaff(tx: Tx, ctx: TenantContext): Promise<Row[]> {
     select: { id: true, role: true, status: true, invitedAt: true, acceptedAt: true, deactivatedAt: true, createdAt: true, user: { select: { fullName: true, email: true } } },
   });
   return memberships.map(({ user, ...m }) => ({ membershipId: m.id, name: user.fullName, email: user.email, role: m.role, status: m.status, invitedAt: m.invitedAt, acceptedAt: m.acceptedAt, deactivatedAt: m.deactivatedAt, createdAt: m.createdAt }));
+}
+
+/**
+ * "Reports" in an export: one row per business date with order count, sales, tax, payments by method and refunds,
+ * summed by PostgreSQL in NUMERIC and written as exact decimal text. Cancelled orders and voided payments are left out.
+ */
+export async function readDailySummary(tx: Tx, ctx: TenantContext, range: DataRange | null): Promise<Row[]> {
+  const dated = businessDateWhere(range);
+  const [orders, money] = await Promise.all([
+    tx.order.groupBy({
+      by: ["businessDate"],
+      where: tenantScope(ctx, { ...dated, status: { not: OrderStatus.CANCELLED } }),
+      _count: { _all: true },
+      _sum: { subtotalAmount: true, taxAmount: true, discountAmount: true, totalAmount: true },
+      orderBy: { businessDate: "asc" },
+    }),
+    tx.transaction.groupBy({
+      by: ["businessDate", "type", "paymentMethod"],
+      where: tenantScope(ctx, { ...dated, status: TransactionStatus.SUCCESS }),
+      _sum: { amount: true },
+    }),
+  ]);
+  const day = (d: Date) => d.toISOString().slice(0, 10);
+  const zero = new Prisma.Decimal(0);
+  const byDay = new Map<string, Row>();
+  const rowFor = (date: string) => {
+    let row = byDay.get(date);
+    if (!row) {
+      row = { businessDate: date, orders: 0, subtotal: zero, tax: zero, discounts: zero, sales: zero, cash: zero, card: zero, upi: zero, refunds: zero };
+      byDay.set(date, row);
+    }
+    return row;
+  };
+  for (const o of orders) {
+    const row = rowFor(day(o.businessDate));
+    row.orders = o._count._all;
+    row.subtotal = o._sum.subtotalAmount ?? zero;
+    row.tax = o._sum.taxAmount ?? zero;
+    row.discounts = o._sum.discountAmount ?? zero;
+    row.sales = o._sum.totalAmount ?? zero;
+  }
+  for (const t of money) {
+    const row = rowFor(day(t.businessDate));
+    const amount = t._sum?.amount ?? zero;
+    const key = t.type === "REFUND" ? "refunds" : t.paymentMethod === "CASH" ? "cash" : t.paymentMethod === "CARD" ? "card" : "upi";
+    row[key] = (row[key] as Prisma.Decimal).add(amount);
+  }
+  return [...byDay.values()]
+    .sort((a, b) => String(a.businessDate).localeCompare(String(b.businessDate)))
+    .map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k, Prisma.Decimal.isDecimal(v) ? (v as Prisma.Decimal).toFixed(2) : v])));
 }
 
 /** The last time this restaurant downloaded a full backup, from the permanent `data.exported` audit record. */

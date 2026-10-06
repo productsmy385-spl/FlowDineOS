@@ -109,6 +109,7 @@ export const AUDIT_ACTIONS = [
   "print_job.reprint_requested",
   "print_job.retried",
   "print_job.failed",
+  "print_job.archived",
   // Social
   "social_post.created",
   "social_post.updated",

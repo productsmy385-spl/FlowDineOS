@@ -1,5 +1,6 @@
 import { LogIn } from "lucide-react";
 import Link from "next/link";
+import { ShareButton } from "./share";
 import { JsonLd, restaurantJsonLd } from "@/lib/seo/json-ld";
 import { OpenNowBadge } from "./hours";
 import { SiteImage } from "./primitives";
@@ -70,6 +71,12 @@ function SiteHeader({ view }: { view: SiteView }) {
   const links = siteNavLinks(site.sections);
   const inline = primaryNavLinks(links);
   const signIn = staffSignInHref();
+  const share = {
+    title: site.restaurant.name,
+    text: site.identity.tagline ? `${site.restaurant.name} - ${site.identity.tagline}` : site.restaurant.name,
+    url: view.canonicalUrl,
+    imageUrl: site.identity.heroImageUrl ?? site.restaurant.coverImageUrl ?? site.identity.logoUrl,
+  };
   return (
     <header className="glass-1 sticky top-0 z-header border-b print:static">
       <div className="mx-auto flex h-header w-full max-w-public items-center gap-3 px-4 md:px-6">
@@ -97,6 +104,7 @@ function SiteHeader({ view }: { view: SiteView }) {
 
         <div className="hidden shrink-0 items-center gap-3 md:flex">
           <OpenNowBadge openNow={site.openNow} />
+          <ShareButton content={share} />
           {/* The restaurant's own staff sign in here, on the apex host (one Clerk domain); after sign-in the console
               shows only the restaurants that person is a member of. */}
           <Link
@@ -109,6 +117,7 @@ function SiteHeader({ view }: { view: SiteView }) {
           </Link>
         </div>
 
+        <ShareButton content={share} compact className="md:hidden" />
         <SiteMenu
           className="shrink-0"
           restaurantName={site.restaurant.name}

@@ -39,5 +39,6 @@ Architecture changes during implementation require a new ADR (brief §56).
 | [RASOIOS-ADR-014](decisions/RASOIOS-ADR-014.md) | Render as the deployment target (`render.yaml` Blueprint) | 2026-09-23 | PROPOSED | Would supersede the Railway clause of ADR-001 |
 | [RASOIOS-ADR-017](decisions/RASOIOS-ADR-017.md) | ImageKit for image upload, storage and delivery (proxied uploads, `media_assets`) | 2026-09-25 | APPROVED | Supersedes Q-009 A and ADR-013 §6 "no uploads" |
 | [RASOIOS-ADR-021](decisions/RASOIOS-ADR-021.md) | Data backups, restore and date-range deletion; table QR menus; 3D menu ring; Brand Kit | 2026-10-06 | APPROVED | Supersedes in part data-model.md §1.4 and the unconditional audit append-only rule |
+| [RASOIOS-ADR-022](decisions/RASOIOS-ADR-022.md) | One main menu (ring), today strip, brand colours, spreadsheet imports, sharing, print-history archive | 2026-10-06 | APPROVED | Refines ADR-021 §6–7 |
 
 ADR-006…011 were approved by the Project Owner on 2026-09-15 in decision gate S1-P01-T010. The same gate answered Q-004, which added GST receipt presentation to ADR-010 §3.

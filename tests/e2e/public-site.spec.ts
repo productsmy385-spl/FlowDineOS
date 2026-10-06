@@ -90,7 +90,36 @@ test.describe("public restaurant website", () => {
     for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto(SITE);
-      await axeCheck(page);
+      // The ring's turned-away cards are dimmed by design (opacity 0.30 + depth · 0.70) and aria-hidden; the same dishes
+      // are in the ring's text list and its front-card caption, which axe does check.
+      await axeCheck(page, { exclude: ["[data-ring-dimmed]"] });
+    }
+  });
+
+  test("TC-WEB-030 the menu ring is the main menu and never crops a card, from 320 to 1920 px", async ({ page }) => {
+    test.setTimeout(360_000); // nine page loads
+    for (const width of [320, 375, 390, 414, 768, 1024, 1280, 1440, 1920]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(SITE);
+      const ring = page.getByTestId("menu-ring");
+      if ((await ring.count()) === 0) continue; // this database's menu may be empty or in card style
+      // No card grid repeats the ring.
+      expect(await page.locator('section[id^="menu-"]').count(), `duplicate menu grid at ${width}px`).toBe(0);
+      const stage = ring.getByRole("group");
+      await stage.scrollIntoViewIfNeeded();
+      await page.waitForTimeout(400);
+      const fit = await stage.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        return [...element.querySelectorAll<HTMLElement>("[data-ring-index]")].map((card) => {
+          const r = card.getBoundingClientRect();
+          return { left: r.left - box.left, right: box.right - r.right, top: r.top - box.top, bottom: box.bottom - r.bottom };
+        });
+      });
+      for (const edge of fit) {
+        expect(Math.min(edge.left, edge.right, edge.top, edge.bottom), `a card is cropped at ${width}px`).toBeGreaterThanOrEqual(-1);
+      }
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow, `horizontal scroll at ${width}px`).toBeLessThanOrEqual(1);
     }
   });
 

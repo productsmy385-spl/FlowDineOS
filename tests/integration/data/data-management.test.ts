@@ -51,7 +51,7 @@ async function freshRestaurant(label: string) {
 describe("TC-DATA-001 a full backup holds the restaurant's data and none of its secrets", () => {
   it("downloads a ZIP with backup.json, an Excel workbook and CSV files, and records the export", async () => {
     const full = await freshRestaurant("export");
-    const result = await exportAs({ datasets: "restaurant,menu,dailyMenus,customers,orders,transactions,staff,social,printing,audit", format: "zip" });
+    const result = await exportAs({ datasets: "restaurant,menu,dailyMenus,customers,orders,transactions,reports,staff,social,printing,audit", format: "zip" });
     expect(result.status).toBe(200);
     expect(result.headers.get("content-type")).toBe("application/zip");
     const backupId = result.headers.get("x-backup-id")!;

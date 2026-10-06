@@ -5,6 +5,7 @@ import { formatBusinessDate } from "@/lib/ui/format";
 import { CategoryNav } from "./category-nav";
 import { HoursTable, OpenNowBadge } from "./hours";
 import { CategoryBlock, MenuItemGrid } from "./menu";
+import { DailyStrip } from "./daily-strip";
 import { MenuRing } from "./menu-ring";
 import { SectionEmpty, SectionHeading, SiteCta, SiteImage } from "./primitives";
 import { siteGradientStyle } from "./theme";
@@ -111,7 +112,12 @@ function FeaturedMenu({ section, view }: SectionProps) {
       </div>
       {daily?.note ? <p className="text-body text-fg-secondary whitespace-pre-line">{daily.note}</p> : null}
       {daily && daily.items.length > 0 ? (
-        <MenuItemGrid items={daily.items} formatting={view.formatting} labelledBy={`${anchor}-title`} />
+        // Today's menu has its own presentation, deliberately unlike the main menu's ring (owner review 2026-10-06).
+        site.presentation.dailyStyle === "STRIP" ? (
+          <DailyStrip items={daily.items} formatting={view.formatting} labelledBy={`${anchor}-title`} />
+        ) : (
+          <MenuItemGrid items={daily.items} formatting={view.formatting} labelledBy={`${anchor}-title`} />
+        )
       ) : (
         <SectionEmpty icon={CalendarDays}>
           {daily === null ? "No menu has been published for today yet." : "Today's menu has nothing to show right now."}
@@ -132,9 +138,12 @@ function Categories({ section, view }: SectionProps) {
       {site.categories.length === 0 ? (
         <SectionEmpty icon={UtensilsCrossed}>This restaurant has not published its menu yet.</SectionEmpty>
       ) : (
+        site.presentation.menuStyle === "RING" && withItems.length > 0 ? (
+          // The ring *is* the main menu: its section pills replace the category nav, and no card grid repeats it
+          // (owner review 2026-10-06). Every dish is still in the ring's text list for screen readers and search.
+          <MenuRing categories={withItems} formatting={view.formatting} title={section.headline ?? "Menu"} accents={site.presentation.brandColors.map((c) => c.hex)} share={{ restaurantName: site.restaurant.name, url: view.canonicalUrl }} />
+        ) : (
         <>
-          {/* The 3D ring of real dishes (owner brief 2026-10-06 §13), with the full readable list below it. */}
-          {withItems.length > 0 ? <MenuRing categories={withItems} formatting={view.formatting} title={section.headline ?? "Menu"} /> : null}
           {withItems.length > 1 ? <CategoryNav categories={withItems.map((c) => ({ id: c.id, name: c.name }))} label={section.headline} /> : null}
           <div className="flex flex-col gap-10">
             {site.categories.map((category) => (
@@ -142,6 +151,7 @@ function Categories({ section, view }: SectionProps) {
             ))}
           </div>
         </>
+        )
       )}
     </Band>
   );

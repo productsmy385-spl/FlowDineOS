@@ -35,6 +35,7 @@ import {
   listActivePrinters as listActivePrintersData,
   listPrintAgents,
   listPrinters as listPrintersData,
+  archivePrintJobs,
   listPrintJobs as listPrintJobsData,
   printingProfile,
   printAgentExists,
@@ -859,4 +860,23 @@ export async function reportPrinterDiscovery(ctx: AgentContext, discoveryId: str
   if (!saved) throw new ConflictError("This scan is not running on this agent.", "DISCOVERY_NOT_RUNNING");
   logger.info("printer.discovery_reported", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, discoveryId, status, found: unique.size });
   return { discoveryId, status };
+}
+
+/**
+ * Removes finished print jobs from the history (RASOIOS-ADR-022). Only PRINTED and FAILED jobs qualify; anything still
+ * waiting or printing is left exactly where it is. The rows are archived, not deleted, and the archive is audited.
+ */
+export async function archivePrintHistory(ctx: TenantContext, input: { jobIds: string[] } | { olderThanDays: number }): Promise<{ archived: number; jobIds: string[] }> {
+  const target = "jobIds" in input ? { jobIds: input.jobIds } : { before: new Date(Date.now() - input.olderThanDays * 24 * 60 * 60 * 1000) };
+  return withTx(ctx, async (tx) => {
+    const jobIds = await archivePrintJobs(tx, ctx, target);
+    if (jobIds.length > 0) {
+      await audit(tx, ctx, {
+        action: "print_job.archived",
+        resourceType: "print_job",
+        after: { count: jobIds.length, ...("olderThanDays" in input ? { olderThanDays: input.olderThanDays } : {}), jobIds: jobIds.slice(0, 100) },
+      });
+    }
+    return { archived: jobIds.length, jobIds };
+  });
 }

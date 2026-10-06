@@ -18,6 +18,7 @@ import {
   insertRows,
   lastFullBackupAt,
   memberUserIds,
+  readDailySummary,
   readStaff,
   recentDataEvents,
   restaurantIdentity,
@@ -67,6 +68,8 @@ export const DATASETS = {
   social: { label: "Social posts", tables: ["socialPost"], dated: true },
   printing: { label: "Printers and print history", tables: ["printer", "printJob"], dated: true },
   audit: { label: "Audit log", tables: ["auditLog"], dated: true },
+  // Computed, not a table: one row per day of sales, tax, payments by method and refunds (owner review 2026-10-06 §7).
+  reports: { label: "Reports: daily sales summary", tables: [], dated: true },
 } as const satisfies Record<string, { label: string; tables: readonly TableKey[]; dated: boolean }>;
 
 export type DatasetKey = keyof typeof DATASETS;
@@ -94,6 +97,11 @@ function sheetFor(table: TableKey, rows: Row[]): Sheet {
   return { name: spec.title, columns: fields.map((f) => f.name), rows: rows.map((row) => fields.map((f) => flattenValue(f, row[f.name]))) };
 }
 
+function reportSheet(rows: Row[]): Sheet {
+  const columns = ["businessDate", "orders", "subtotal", "tax", "discounts", "sales", "cash", "card", "upi", "refunds"];
+  return { name: "Daily sales summary", columns, rows: rows.map((row) => columns.map((c) => (row[c] ?? null) as Cell)) };
+}
+
 function staffSheet(rows: Row[]): Sheet {
   const columns = ["membershipId", "name", "email", "role", "status", "invitedAt", "acceptedAt", "deactivatedAt", "createdAt"];
   const cell = (v: unknown): Cell => (v instanceof Date ? v.toISOString() : v === undefined ? null : (v as Cell));
@@ -109,7 +117,7 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
   const exportedAt = now();
   const full = datasets.length === DATASET_KEYS.length && range === null;
 
-  const { identity, tables, staff } = await withTx(
+  const { identity, tables, staff, reports } = await withTx(
     ctx,
     async (tx) => {
       const identity = await restaurantIdentity(tx, ctx);
@@ -122,20 +130,21 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
         }
       }
       const staff = datasets.includes("staff") ? await readStaff(tx, ctx) : null;
+      const reports = datasets.includes("reports") ? await readDailySummary(tx, ctx, range) : null;
       const counts = Object.fromEntries(Object.entries(tables).map(([k, rows]) => [k, rows!.length]));
       await audit(tx, ctx, {
         action: "data.exported",
         resourceType: "tenant_data",
         after: { backupId, format: request.format, datasets, from: request.from ?? null, to: request.to ?? null, full, counts },
       });
-      return { identity, tables, staff };
+      return { identity, tables, staff, reports };
     },
     { isolationLevel: "RepeatableRead", timeoutMs: 120_000 },
   );
 
   const stamp = toIsoDate(businessDateFor(exportedAt, ctx.restaurant.timezone));
   const base = `${identity.slug}-${full ? "full-backup" : "export"}-${stamp}`;
-  const sheets = [...(staff ? [staffSheet(staff)] : []), ...(Object.keys(tables) as TableKey[]).map((t) => sheetFor(t, tables[t]!))];
+  const sheets = [...(reports ? [reportSheet(reports)] : []), ...(staff ? [staffSheet(staff)] : []), ...(Object.keys(tables) as TableKey[]).map((t) => sheetFor(t, tables[t]!))];
   const metadata = {
     format: BACKUP_FORMAT,
     version: BACKUP_VERSION,
@@ -148,7 +157,7 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
     // Honest about images: the backup carries their addresses, not the image files themselves.
     images: "Image addresses are included; the image files stay on the image service and can be downloaded separately.",
   };
-  const json = () => Buffer.from(JSON.stringify({ ...metadata, staff: staff ?? undefined, tables }, null, 1), "utf8");
+  const json = () => Buffer.from(JSON.stringify({ ...metadata, reports: reports ?? undefined, staff: staff ?? undefined, tables }, null, 1), "utf8");
 
   logger.info("data.exported", { requestId: ctx.requestId, tenantId: ctx.tenantId, format: request.format, datasets: datasets.length, full });
 
@@ -159,6 +168,7 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
       return { filename: `${base}.xlsx`, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", body: toXlsx(sheets, exportedAt), backupId };
     case "csv": {
       const files: ZipEntry[] = [
+        ...(reports ? [{ name: "daily_sales_summary.csv", data: toCsv(reportSheet(reports)) }] : []),
         ...(staff ? [{ name: "staff.csv", data: toCsv(staffSheet(staff)) }] : []),
         ...(Object.keys(tables) as TableKey[]).map((t) => ({ name: `${TABLES[t].file}.csv`, data: toCsv(sheetFor(t, tables[t]!)) })),
       ];
@@ -180,6 +190,7 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
             { name: "backup.json", data: json() },
             { name: "metadata.json", data: Buffer.from(JSON.stringify(metadata, null, 1)) },
             { name: `${base}.xlsx`, data: toXlsx(sheets, exportedAt) },
+            ...(reports ? [{ name: "csv/daily_sales_summary.csv", data: toCsv(reportSheet(reports)) }] : []),
             ...(staff ? [{ name: "csv/staff.csv", data: toCsv(staffSheet(staff)) }] : []),
             ...(Object.keys(tables) as TableKey[]).map((t) => ({ name: `csv/${TABLES[t].file}.csv`, data: toCsv(sheetFor(t, tables[t]!)) })),
             { name: "README.txt", data: Buffer.from(readme, "utf8") },

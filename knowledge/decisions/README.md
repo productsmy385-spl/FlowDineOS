@@ -32,6 +32,7 @@ The status summary is in [`../decisions.md`](../decisions.md).
 - [RASOIOS-ADR-010: Money, Tax, Modifiers, Business Day and Numbering](RASOIOS-ADR-010.md)
 - [RASOIOS-ADR-011: Rate Limiting, Request Integrity and Webhooks](RASOIOS-ADR-011.md)
 - [RASOIOS-ADR-021: Data Backups, Restore and Date-Range Deletion; Table QR Menus; Brand Kit](RASOIOS-ADR-021.md)
+- [RASOIOS-ADR-022: One Main Menu, Today Strip, Brand Colours, Imports, Sharing, Print-History Archive](RASOIOS-ADR-022.md)
 
 ## ADR template (brief §56)
 

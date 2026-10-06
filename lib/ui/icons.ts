@@ -217,9 +217,11 @@ export const STATUS_ICONS = {
     CANCELLED: { icon: CircleX, tone: "danger", label: "Cancelled" },
   },
   printJob: {
-    PENDING: { icon: Clock, tone: "neutral", label: "Waiting" },
-    PROCESSING: { icon: LoaderCircle, tone: "primary", label: "Printing" },
-    PRINTED: { icon: PrinterCheck, tone: "success", label: "Printed" },
+    // Labels say exactly what is known (owner review 2026-10-06): PRINTED means the print agent delivered every byte to
+    // the printer and the printer accepted them — not merely that the agent took the job.
+    PENDING: { icon: Clock, tone: "neutral", label: "Queued" },
+    PROCESSING: { icon: LoaderCircle, tone: "primary", label: "Sending to printer" },
+    PRINTED: { icon: PrinterCheck, tone: "success", label: "Delivered to printer" },
     FAILED: { icon: TriangleAlert, tone: "danger", label: "Failed" },
   },
   dailyMenu: {

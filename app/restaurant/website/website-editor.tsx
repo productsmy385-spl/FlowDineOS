@@ -1,7 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { ExternalLink, LayoutList, Link2, Palette, Type } from "lucide-react";
+import { ArrowDown, ArrowUp, ExternalLink, LayoutList, Link2, Palette, Plus, Trash2, Type } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Icon } from "@/components/ui/icon";
 import { Tabs } from "@/components/ui/tabs";
@@ -53,6 +55,9 @@ export type EditorSettings = {
     accentHex: string | null;
     gradientFromHex: string | null;
     gradientToHex: string | null;
+    brandColors: BrandColour[];
+    menuStyle: "RING" | "GRID";
+    dailyStyle: "STRIP" | "GRID";
   };
   resolvedTheme: { primary: string; secondary: string; accent: string; gradientFrom: string; gradientTo: string; surface: string; onSurface: string };
   identity: {
@@ -90,7 +95,12 @@ type ColourDraft = {
   useGradient: boolean;
   gradientFromHex: string;
   gradientToHex: string;
+  brandColors: BrandColour[];
+  menuStyle: "RING" | "GRID";
+  dailyStyle: "STRIP" | "GRID";
 };
+
+type BrandColour = { name: string; hex: string };
 
 function colourDraft(settings: EditorSettings): ColourDraft {
   const { theme, resolvedTheme } = settings;
@@ -103,6 +113,9 @@ function colourDraft(settings: EditorSettings): ColourDraft {
     useGradient: theme.gradientFromHex !== null && theme.gradientToHex !== null,
     gradientFromHex: theme.gradientFromHex ?? resolvedTheme.gradientFrom,
     gradientToHex: theme.gradientToHex ?? resolvedTheme.gradientTo,
+    brandColors: theme.brandColors.map((colour) => ({ ...colour })),
+    menuStyle: theme.menuStyle,
+    dailyStyle: theme.dailyStyle,
   };
 }
 
@@ -196,7 +209,12 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
 
   const themeAction = (): Promise<ActionResult<EditorSettings>> => {
     const draft = latest.current.colours;
-    const gradient = draft.useGradient ? { gradientFromHex: draft.gradientFromHex, gradientToHex: draft.gradientToHex } : { gradientFromHex: null, gradientToHex: null };
+    const gradient = {
+      ...(draft.useGradient ? { gradientFromHex: draft.gradientFromHex, gradientToHex: draft.gradientToHex } : { gradientFromHex: null, gradientToHex: null }),
+      brandColors: draft.brandColors,
+      menuStyle: draft.menuStyle,
+      dailyStyle: draft.dailyStyle,
+    };
     return saved(
       updateWebsiteThemeAction(
         draft.preset === "CUSTOM"
@@ -346,6 +364,34 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                   />
                 </div>
               )}
+              <BrandColoursEditor
+                colours={colours.brandColors}
+                surfaceHex={reference.surfaceHex[colours.surfaceMode]}
+                disabled={disabled}
+                onChange={(brandColors) => setColours((current) => ({ ...current, brandColors }))}
+              />
+              <RadioGroup
+                name="menuStyle"
+                label="Main menu on your website"
+                disabled={disabled}
+                value={colours.menuStyle}
+                onValueChange={(value) => setColours((current) => ({ ...current, menuStyle: value as "RING" | "GRID" }))}
+                options={[
+                  { value: "RING", label: "3D carousel", description: "Guests spin through your dishes, with a pill for each menu section." },
+                  { value: "GRID", label: "Cards", description: "Every section listed as a grid of dish cards." },
+                ]}
+              />
+              <RadioGroup
+                name="dailyStyle"
+                label="Today's menu on your website"
+                disabled={disabled}
+                value={colours.dailyStyle}
+                onValueChange={(value) => setColours((current) => ({ ...current, dailyStyle: value as "STRIP" | "GRID" }))}
+                options={[
+                  { value: "STRIP", label: "Swipe strip", description: "A row of today's dishes guests swipe through." },
+                  { value: "GRID", label: "Cards", description: "Today's dishes as a grid." },
+                ]}
+              />
               {!disabled && (
                 <div className="flex justify-end">
                   <SubmitButton>Save colours</SubmitButton>
@@ -631,5 +677,88 @@ function SectionEditor({
         onChange={(url) => onChange({ imageUrl: url })}
       />
     </div>
+  );
+}
+
+// ─── Brand colours (RASOIOS-ADR-021 §7) ───
+
+function luminance(hex: string): number {
+  const channel = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** WCAG contrast of a colour against the website background, as advice — the restaurant's choice is never changed. */
+function contrastAdvice(hex: string, surfaceHex: string): { label: string; good: boolean } {
+  if (!HEX.test(hex) || !HEX.test(surfaceHex)) return { label: "Enter a colour like #9D174D", good: false };
+  const [a, b] = [luminance(hex), luminance(surfaceHex)].sort((x, y) => y - x);
+  const ratio = (a + 0.05) / (b + 0.05);
+  if (ratio >= 4.5) return { label: `Good contrast for text (${ratio.toFixed(1)}:1)`, good: true };
+  if (ratio >= 3) return { label: `Large text and accents only (${ratio.toFixed(1)}:1)`, good: true };
+  return { label: `Needs better contrast for text (${ratio.toFixed(1)}:1) - fine for decoration`, good: false };
+}
+
+function BrandColoursEditor({ colours, surfaceHex, disabled, onChange }: { colours: BrandColour[]; surfaceHex: string; disabled: boolean; onChange: (next: BrandColour[]) => void }) {
+  const update = (index: number, patch: Partial<BrandColour>) => onChange(colours.map((colour, i) => (i === index ? { ...colour, ...patch } : colour)));
+  const move = (index: number, by: number) => {
+    const next = [...colours];
+    const [item] = next.splice(index, 1);
+    next.splice(index + by, 0, item);
+    onChange(next);
+  };
+  return (
+    <fieldset className="flex flex-col gap-3" disabled={disabled}>
+      <legend className="text-label text-fg-primary">Brand colours</legend>
+      <p className="text-caption text-fg-secondary">Name as many colours as your brand uses. Your website uses them for menu section accents; contrast is shown against your website background.</p>
+      {colours.length === 0 && <p className="text-body text-fg-secondary">No extra colours yet.</p>}
+      <ul className="flex list-none flex-col gap-2 p-0">
+        {colours.map((colour, index) => {
+          const advice = contrastAdvice(colour.hex, surfaceHex);
+          const name = colour.name || "colour";
+          return (
+            <li key={index} className="flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-raised p-2" data-testid="brand-colour-row">
+              <input
+                type="color"
+                aria-label={`${name} swatch`}
+                value={HEX.test(colour.hex) ? colour.hex : "#000000"}
+                onChange={(event) => update(index, { hex: event.target.value.toUpperCase() })}
+                className="h-10 w-12 shrink-0 cursor-pointer rounded-xl border border-border-strong bg-canvas"
+              />
+              <input
+                aria-label="Colour name"
+                value={colour.name}
+                maxLength={30}
+                placeholder="e.g. Gold"
+                onChange={(event) => update(index, { name: event.target.value })}
+                className="h-10 min-w-0 flex-1 basis-32 rounded-xl border border-border-strong bg-canvas px-3 text-body text-fg-primary"
+              />
+              <input
+                aria-label={`${name} hex value`}
+                value={colour.hex}
+                maxLength={7}
+                spellCheck={false}
+                onChange={(event) => update(index, { hex: event.target.value.toUpperCase() })}
+                className="h-10 w-28 rounded-xl border border-border-strong bg-canvas px-3 font-mono text-body text-fg-primary"
+              />
+              <span className="flex shrink-0 gap-1">
+                <IconButton icon={ArrowUp} aria-label={`Move ${name} up`} variant="ghost" disabled={index === 0} onClick={() => move(index, -1)} />
+                <IconButton icon={ArrowDown} aria-label={`Move ${name} down`} variant="ghost" disabled={index === colours.length - 1} onClick={() => move(index, 1)} />
+                <IconButton icon={Trash2} aria-label={`Delete ${name}`} variant="ghost" onClick={() => onChange(colours.filter((_, i) => i !== index))} />
+              </span>
+              <span className={advice.good ? "w-full text-caption text-status-success" : "w-full text-caption text-status-warning"}>{advice.label}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {colours.length < 16 && (
+        <div>
+          <Button variant="secondary" icon={Plus} onClick={() => onChange([...colours, { name: "", hex: "#F59E0B" }])}>
+            Add colour
+          </Button>
+        </div>
+      )}
+    </fieldset>
   );
 }

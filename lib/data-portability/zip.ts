@@ -129,7 +129,8 @@ export function unzip(buf: Buffer, limits: UnzipLimits): ZipEntry[] {
     if (name.endsWith("/")) continue; // directory entry written by another tool
     if (flags & 0x1) throw new ZipError("Password-protected ZIP files cannot be imported.");
     if (method !== 0 && method !== 8) throw new ZipError("The ZIP uses a compression method that is not supported.");
-    if (!/^[\w][\w .\-/]*$/.test(name) || name.includes("..")) throw new ZipError(`The ZIP contains an unexpected file name: ${name.slice(0, 80)}`);
+    // Plain relative names only; square brackets are allowed for Excel's own "[Content_Types].xml".
+    if (!/^[\w[][\w .\-/[\]]*$/.test(name) || name.includes("..")) throw new ZipError(`The ZIP contains an unexpected file name: ${name.slice(0, 80)}`);
 
     total += size;
     if (total > limits.maxTotalBytes) throw new ZipError("The backup is too large to import in one go.");

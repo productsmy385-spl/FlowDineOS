@@ -157,6 +157,9 @@ export function themeContrastIssues(palette: Palette, surfaceMode: WebsiteSurfac
 
 // ─── Resolution ───
 
+/** The colour part of a stored theme — all `resolveTheme` needs. */
+export type ThemePaletteRow = Pick<WebsiteThemeRow, "preset" | "surfaceMode" | "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex">;
+
 export type ResolvedTheme = {
   preset: WebsiteThemePresetName;
   surfaceMode: WebsiteSurfaceModeName;
@@ -177,7 +180,7 @@ export type ResolvedTheme = {
  * Stored theme → the palette the public page renders. A preset ignores any stored colours (the preset defines them);
  * `CUSTOM` uses the stored three and falls back to PLATFORM for anything a legacy row is missing.
  */
-export function resolveTheme(theme: WebsiteThemeRow): ResolvedTheme {
+export function resolveTheme(theme: ThemePaletteRow): ResolvedTheme {
   const surfaceMode: WebsiteSurfaceModeName = theme.surfaceMode === "LIGHT" ? "LIGHT" : "DARK";
   const preset = theme.preset as WebsiteThemePresetName;
   const fallback = THEME_PRESETS.PLATFORM[surfaceMode];
@@ -366,7 +369,7 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
 
   // A preset owns its colours: the custom columns are cleared so the stored row can never disagree with the preset
   // (and the database CHECK that binds CUSTOM to its three colours keeps holding).
-  const stored: WebsiteThemeRow = custom
+  const stored: ThemePaletteRow = custom
     ? {
         preset: input.preset,
         surfaceMode: input.surfaceMode,
@@ -386,7 +389,8 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
         gradientToHex: input.gradientToHex ?? null,
       };
 
-  const config = await updateWebsiteTheme(ctx, stored);
+  // Named brand colours and the menu presentation travel with the theme; left out, they stay as they are.
+  const config = await updateWebsiteTheme(ctx, { ...stored, brandColors: input.brandColors, menuStyle: input.menuStyle, dailyStyle: input.dailyStyle });
   await revalidatePublicSite(ctx);
   return toView(ctx, config);
 }
@@ -436,7 +440,11 @@ export async function saveSections(ctx: TenantContext, input: SaveWebsiteSection
 
 // ─── Public site (LD-PUB-01) ───
 
+/** How the public menu is presented, and the restaurant's own named colours (RASOIOS-ADR-021 §6–7, ADR-022). */
+export type SitePresentation = { brandColors: { name: string; hex: string }[]; menuStyle: "RING" | "GRID"; dailyStyle: "STRIP" | "GRID" };
+
 export type PublicSiteData = PublicRestaurantData & {
+  presentation: SitePresentation;
   theme: ResolvedTheme;
   cssVariables: Record<string, string>;
   identity: WebsiteIdentityRow;
@@ -454,6 +462,7 @@ export async function getPublicSite(slug: string): Promise<PublicSiteData> {
   const theme = resolveTheme(website.theme);
   return {
     ...restaurant,
+    presentation: { brandColors: website.theme.brandColors, menuStyle: website.theme.menuStyle, dailyStyle: website.theme.dailyStyle },
     theme,
     cssVariables: themeCssVariables(theme),
     identity: website.identity,

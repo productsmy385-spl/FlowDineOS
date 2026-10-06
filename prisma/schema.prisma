@@ -288,6 +288,20 @@ enum WebsiteSectionKey {
   @@map("website_section_key")
 }
 
+enum MenuStyle {
+  RING
+  GRID
+
+  @@map("menu_style")
+}
+
+enum DailyStyle {
+  STRIP
+  GRID
+
+  @@map("daily_style")
+}
+
 enum BackupReminder {
   MANUAL
   MONTHLY
@@ -406,6 +420,9 @@ model Restaurant {
   brandVoice       String?   @map("brand_voice") @db.VarChar(500)
   // Data backups (RASOIOS-ADR-021): how often the console reminds the admin to download a backup. Nothing is uploaded.
   backupReminder   BackupReminder @default(MANUAL) @map("backup_reminder")
+  // Public menu presentation (RASOIOS-ADR-022): the 3D ring *is* the main menu; today's menu has its own strip.
+  menuStyle        MenuStyle      @default(RING) @map("menu_style")
+  dailyStyle       DailyStyle     @default(STRIP) @map("daily_style")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -545,6 +562,7 @@ model User {
   createdPrintAgents     PrintAgent[]       @relation("PrintAgentCreatedBy")
   revokedPrintAgents     PrintAgent[]       @relation("PrintAgentRevokedBy")
   requestedPrintJobs     PrintJob[]         @relation("PrintJobRequestedBy")
+  archivedPrintJobs      PrintJob[]         @relation("PrintJobArchivedBy")
   printerDiscoveries     PrinterDiscovery[] @relation("PrinterDiscoveryRequestedBy")
   auditLogs              AuditLog[]         @relation("AuditActor")
   uploadedMediaAssets    MediaAsset[]       @relation("MediaAssetUploadedBy")
@@ -1126,10 +1144,14 @@ model PrintJob {
   lastErrorCode     String?        @map("last_error_code") @db.VarChar(40)
   lastErrorMessage  String?        @map("last_error_message") @db.VarChar(500)
   requestedByUserId String?        @map("requested_by_user_id") @db.Uuid
+  // Removed from the history view (RASOIOS-ADR-022): finished jobs only; the row and its audit stay.
+  archivedAt        DateTime?      @map("archived_at") @db.Timestamptz(6)
+  archivedByUserId  String?        @map("archived_by_user_id") @db.Uuid
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  archivedBy  User?       @relation("PrintJobArchivedBy", fields: [archivedByUserId], references: [id], onDelete: Restrict)
   printer     Printer     @relation(fields: [tenantId, printerId], references: [tenantId, id], onDelete: Restrict)
   printAgent  PrintAgent? @relation(fields: [tenantId, printAgentId], references: [tenantId, id], onDelete: Restrict)
   order       Order?      @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)

@@ -5,7 +5,7 @@ import { businessDateParam, strictObject } from "./core";
  * Inputs for backups, restore and deletion (RASOIOS-ADR-021). None of them carries a tenant: the restaurant is the
  * session's, always. `lib/services/data-management.ts` holds what each key means.
  */
-export const DATASET_KEY_LIST = ["restaurant", "menu", "dailyMenus", "customers", "orders", "transactions", "staff", "social", "printing", "audit"] as const;
+export const DATASET_KEY_LIST = ["restaurant", "menu", "dailyMenus", "customers", "orders", "transactions", "reports", "staff", "social", "printing", "audit"] as const;
 export const PURGE_CATEGORY_LIST = ["orders", "customers", "printing", "attendance", "social", "audit"] as const;
 export const EXPORT_FORMATS = ["zip", "xlsx", "csv", "json"] as const;
 

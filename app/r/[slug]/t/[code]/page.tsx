@@ -50,9 +50,11 @@ export default async function TableMenuPage({ params }: TableMenuPageProps) {
 
         {withItems.length === 0 ? (
           <SectionEmpty icon={UtensilsCrossed}>{site.restaurant.name} has not published its menu yet.</SectionEmpty>
+        ) : site.presentation.menuStyle === "RING" ? (
+          // The ring is the menu, with a pill per section (Starters, Main course, ...); no grid repeats it.
+          <MenuRing categories={withItems} formatting={view.formatting} title={site.restaurant.name} accents={site.presentation.brandColors.map((c) => c.hex)} share={{ restaurantName: site.restaurant.name, url: view.canonicalUrl }} />
         ) : (
           <>
-            <MenuRing categories={withItems} formatting={view.formatting} title={site.restaurant.name} />
             {withItems.length > 1 && (
               <nav aria-label="Menu sections" className="sticky top-0 z-10 -mx-4 overflow-x-auto bg-canvas/95 px-4 py-2 [scrollbar-width:none]">
                 <ul className="flex list-none gap-2 p-0">

@@ -3,6 +3,7 @@
 import { requirePermission, requireTenant } from "@/lib/auth/guards";
 import { action } from "@/lib/http/action";
 import {
+  archivePrintHistory,
   createPrintAgentPairing,
   createPrinter,
   createTestPrintJob,
@@ -22,6 +23,7 @@ import {
 } from "@/lib/services/printing";
 import { parseInput } from "@/lib/validation/core";
 import {
+  archivePrintJobsSchema,
   createPrintAgentSchema,
   createPrinterSchema,
   printAgentIdSchema,
@@ -41,6 +43,7 @@ import {
   type PrintReceiptInput,
   type PrinterIdInput,
   type ReprintKotInput,
+  type ArchivePrintJobsInput,
   type RetryPrintJobInput,
   type TestPrintInput,
   type UpdatePrinterInput,
@@ -127,6 +130,12 @@ export const retryPrintJobAction = action(async (input: RetryPrintJobInput) => {
   const ctx = await requireTenant("print_job:retry");
   const { jobId } = parseInput(retryPrintJobSchema, input);
   return retryPrintJob(ctx, jobId);
+});
+
+/** SA-PRN-09 remove finished jobs from the history — `printer:manage` (owner/administrator and manager). */
+export const archivePrintJobsAction = action(async (input: ArchivePrintJobsInput) => {
+  const ctx = await requireTenant("printer:manage");
+  return archivePrintHistory(ctx, parseInput(archivePrintJobsSchema, input));
 });
 
 /** SA-PRN-06 queue an order's receipt — `print_job:retry` and `transaction:read` (api.md SA-PRN-06). */

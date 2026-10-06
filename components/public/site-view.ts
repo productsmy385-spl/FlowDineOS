@@ -1,6 +1,6 @@
 import type { PublicRestaurantData } from "@/lib/data/public-restaurant";
 import type { WebsiteIdentityRow } from "@/lib/data/website";
-import type { ResolvedSection, ResolvedTheme } from "@/lib/services/website-theme";
+import type { ResolvedSection, ResolvedTheme, SitePresentation } from "@/lib/services/website-theme";
 import { localParts } from "@/lib/time";
 import { localeForCountry } from "@/lib/ui/format";
 
@@ -14,6 +14,7 @@ import { localeForCountry } from "@/lib/ui/format";
 
 /** Structural view of `PublicSiteData` from `lib/services/website-theme.ts`, without depending on the module. */
 export type PublicSite = PublicRestaurantData & {
+  presentation: SitePresentation;
   theme: ResolvedTheme;
   cssVariables: Record<string, string>;
   identity: WebsiteIdentityRow;

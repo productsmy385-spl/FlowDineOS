@@ -39,6 +39,7 @@ const DATASET_LABELS: Record<DatasetKey, string> = {
   customers: "Customers",
   orders: "Orders and kitchen tickets",
   transactions: "Payments, refunds and day closes",
+  reports: "Reports: daily sales summary",
   staff: "Staff and attendance",
   social: "Social posts",
   printing: "Printers and print history",
@@ -105,6 +106,7 @@ export function DataManagement({ overview, canImport, canDelete }: { overview: O
       <BackupCard overview={overview} />
       <CustomExportCard />
       {canImport && <ImportCard />}
+      {canImport && <ListImportCard />}
       {canDelete && <DeleteCard today={overview.today} />}
       <HistoryCard history={overview.history} />
     </div>
@@ -281,9 +283,10 @@ type Preview = {
   canImport: boolean;
 };
 
-async function postImport(file: File, mode: "preview" | "commit") {
+async function postImport(file: File, mode: "preview" | "commit", kind: "backup" | "customers" | "menuItems" = "backup") {
   const form = new FormData();
   form.set("mode", mode);
+  form.set("kind", kind);
   form.set("file", file);
   const response = await fetch("/api/v1/data/import", { method: "POST", body: form, credentials: "same-origin" });
   const body = await response.json().catch(() => null);
@@ -561,6 +564,145 @@ function DeleteCard({ today }: { today: string }) {
             </div>
           </div>
         </ConfirmDialog>
+      </CardContent>
+    </Card>
+  );
+}
+
+type ListPreview = { kind: "customers" | "menuItems"; fileName: string; total: number; toCreate: number; duplicates: number; errors: { row: number; message: string }[]; columns: string[]; newCategories: string[] };
+
+const LIST_HELP = {
+  customers: "Columns: Name (required), Phone, Email, Notes. Local 10-digit mobile numbers get your country code. A phone already on file is skipped.",
+  menuItems: "Columns: Category, Name, Price, Tax rate (all required), Description, Veg/Non-veg/Egg. Missing categories are created. A dish already in its category is skipped.",
+} as const;
+
+/** Customers or dishes from an ordinary spreadsheet (RASOIOS-ADR-022): preview, then import, nothing overwritten. */
+function ListImportCard() {
+  const router = useRouter();
+  const toast = useToast();
+  const [kind, setKind] = React.useState<"customers" | "menuItems">("customers");
+  const [file, setFile] = React.useState<File | null>(null);
+  const [preview, setPreview] = React.useState<ListPreview | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const reset = () => {
+    setPreview(null);
+    setFile(null);
+    setError(null);
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  async function check(chosen: File, which = kind) {
+    setFile(chosen);
+    setPreview(null);
+    setError(null);
+    setBusy(true);
+    try {
+      setPreview((await postImport(chosen, "preview", which)) as ListPreview);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commit() {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const result = (await postImport(file, "commit", kind)) as { created: number; duplicates: number; failed: { row: number; message: string }[] };
+      const noun = kind === "customers" ? "customer" : "dish";
+      toast.success(`Imported ${result.created} ${noun}${result.created === 1 ? "" : kind === "customers" ? "s" : "es"}. Skipped ${result.duplicates} already here.`);
+      if (result.failed.length > 0) setError(`${result.failed.length} row(s) could not be saved: ${result.failed.slice(0, 3).map((f) => `row ${f.row}: ${f.message}`).join("; ")}`);
+      else reset();
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileSpreadsheet className="size-5 text-fg-accent" aria-hidden /> Import a customer or menu list
+        </CardTitle>
+        <CardDescription>From any spreadsheet — Excel (.xlsx) or CSV. Each row is checked exactly like the console&apos;s own forms before anything is saved.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        <div role="radiogroup" aria-label="What the file contains" className="flex flex-wrap gap-2">
+          {(["customers", "menuItems"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={kind === k}
+              onClick={() => {
+                setKind(k);
+                if (file) void check(file, k);
+              }}
+              className={cn("h-10 rounded-xl border px-4 text-label", kind === k ? "border-action-primary bg-action-primary/12 text-fg-accent" : "border-border-strong bg-raised text-fg-primary")}
+            >
+              {k === "customers" ? "Customers" : "Menu items"}
+            </button>
+          ))}
+        </div>
+        <p className="text-caption text-fg-secondary">{LIST_HELP[kind]}</p>
+        <label className="flex flex-col gap-1.5 text-label text-fg-primary">
+          Spreadsheet
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={(e) => e.target.files?.[0] && check(e.target.files[0])}
+            className="block w-full max-w-full text-body text-fg-primary file:mr-3 file:h-10 file:rounded-xl file:border file:border-border-strong file:bg-raised file:px-4 file:text-label file:text-fg-primary"
+          />
+        </label>
+        {busy && !preview && <p className="text-body text-fg-secondary">Checking the file…</p>}
+        {error && (
+          <p role="alert" className="rounded-xl border border-status-danger/30 bg-status-danger/12 px-3 py-2 text-body text-status-danger">
+            {error}
+          </p>
+        )}
+        {preview && (
+          <div className="flex flex-col gap-3" data-testid="list-import-preview">
+            <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {[
+                ["Rows", preview.total],
+                ["Will be added", preview.toCreate],
+                ["Already here", preview.duplicates],
+                ["Problems", preview.errors.length],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-xl bg-raised px-3 py-2">
+                  <dt className="text-caption text-fg-secondary">{label}</dt>
+                  <dd className="text-label tabular-nums text-fg-primary">{Number(value).toLocaleString()}</dd>
+                </div>
+              ))}
+            </dl>
+            {preview.newCategories.length > 0 && <p className="text-caption text-fg-secondary">New menu sections will be created: {preview.newCategories.join(", ")}.</p>}
+            {preview.errors.length > 0 && (
+              <ul className="flex list-disc flex-col gap-1 rounded-xl border border-status-danger/30 bg-status-danger/12 py-2 pl-7 pr-3 text-caption text-fg-primary">
+                {preview.errors.slice(0, 20).map((issue) => (
+                  <li key={issue.row}>
+                    Row {issue.row}: {issue.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" onClick={reset}>
+                Cancel
+              </Button>
+              <Button onClick={commit} loading={busy} loadingLabel="Importing…" disabled={preview.errors.length > 0 || preview.toCreate === 0}>
+                {preview.errors.length > 0 ? "Fix the problem rows first" : preview.toCreate === 0 ? "Nothing new to import" : `Import ${preview.toCreate.toLocaleString()}`}
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

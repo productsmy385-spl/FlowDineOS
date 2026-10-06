@@ -66,6 +66,42 @@ export function settleVelocity(velocity: number, idle: number): number {
   return velocity + (idle - velocity) * SETTLE;
 }
 
+/**
+ * Sizes the ring for its stage so that no card is ever clipped (owner review 2026-10-06: the carousel was cropped).
+ *
+ * The radius follows R = 0.62 · min(stage width, stage height) with the stage height capped for the viewport; if a
+ * card at any angle — scaled and tilted as `cardPose` draws it — would then reach past the stage's sides, R is reduced
+ * to the largest value that keeps every card inside. The stage height is then exactly what the ring needs vertically,
+ * so the front card is never cut off at the top and the back cards never at the bottom.
+ */
+export function fitRing(stageWidth: number, card: { width: number; height: number }, options: { maxStageHeight?: number; padding?: number } = {}): { radius: number; height: number } {
+  const pad = options.padding ?? 12;
+  const halfWidth = stageWidth / 2 - pad;
+  const stageHeight = Math.min(stageWidth * 0.62, options.maxStageHeight ?? 620);
+  let radius = ringRadius(stageWidth, stageHeight);
+  const steps = 90;
+  const extent = (a: number) => {
+    const s = 0.55 + 0.55 * ((Math.cos(a) + 1) / 2);
+    const tilt = Math.abs((Math.sin(a) * 14 * Math.PI) / 180);
+    return {
+      halfW: (s * (card.width * Math.cos(tilt) + card.height * Math.sin(tilt))) / 2,
+      halfH: (s * (card.width * Math.sin(tilt) + card.height * Math.cos(tilt))) / 2,
+    };
+  };
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI;
+    const sin = Math.abs(Math.sin(a));
+    if (sin < 0.01) continue;
+    radius = Math.min(radius, Math.max(0, (halfWidth - extent(a).halfW) / sin));
+  }
+  let halfHeight = 0;
+  for (let i = 0; i <= steps; i++) {
+    const a = (i / steps) * Math.PI;
+    halfHeight = Math.max(halfHeight, Math.abs(Math.cos(a)) * radius * 0.42 + extent(a).halfH);
+  }
+  return { radius, height: Math.ceil(2 * (halfHeight + pad)) };
+}
+
 /** The rotation that brings card `index` to the front (a = 0 there, since z = cos(a)·R is largest at a = 0). */
 export function rotationToFront(index: number, slots: number, current: number): number {
   const target = -(index / slots) * TAU;

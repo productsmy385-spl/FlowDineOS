@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { PrintJobStatus, PrintJobType, PrinterHealth } from "@prisma/client";
-import { CircleDashed, Pencil, Plus, PrinterCheck, Radar, RefreshCw, TriangleAlert, WifiOff } from "lucide-react";
+import { CircleDashed, Pencil, Plus, PrinterCheck, Radar, RefreshCw, Trash2, TriangleAlert, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import {
   deactivatePrinterAction,
   getPrintingConsoleAction,
   retryPrintJobAction,
+  archivePrintJobsAction,
   revokePrintAgentAction,
 } from "./actions";
 import { PairAgentDialog } from "./pair-agent-dialog";
@@ -49,9 +50,9 @@ type Capabilities = { managePrinters: boolean; manageAgents: boolean; retryJobs:
 
 const STATUS_TABS: ReadonlyArray<{ id: string; label: string; jobStatus?: PrintJobStatus }> = [
   { id: "ALL", label: "All" },
-  { id: "PENDING", label: "Waiting", jobStatus: "PENDING" },
-  { id: "PROCESSING", label: "Printing", jobStatus: "PROCESSING" },
-  { id: "PRINTED", label: "Printed", jobStatus: "PRINTED" },
+  { id: "PENDING", label: "Queued", jobStatus: "PENDING" },
+  { id: "PROCESSING", label: "Sending", jobStatus: "PROCESSING" },
+  { id: "PRINTED", label: "Delivered", jobStatus: "PRINTED" },
   { id: "FAILED", label: "Failed", jobStatus: "FAILED" },
 ];
 
@@ -113,6 +114,10 @@ export function PrintingConsoleView({
   const [pairing, setPairing] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<PrinterDto | null>(null);
   const [revoking, setRevoking] = React.useState<PrintingConsoleAgent | null>(null);
+  // Print history clean-up (RASOIOS-ADR-022): only finished jobs can be selected or cleared.
+  const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
+  const [archiving, setArchiving] = React.useState<{ jobIds: string[] } | { olderThanDays: number } | null>(null);
+  const [olderThanDays, setOlderThanDays] = React.useState(30);
 
   const onDelta = React.useCallback((page: { jobs: PrintJobDto[] }) => {
     setJobs((current) => mergeJobs(current, page.jobs));
@@ -151,6 +156,19 @@ export function PrintingConsoleView({
     void refetch();
   }
 
+  async function archive(target: { jobIds: string[] } | { olderThanDays: number }) {
+    const result = await archivePrintJobsAction(target);
+    setArchiving(null);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    const gone = new Set(result.data.jobIds);
+    setJobs((current) => current.filter((job) => !gone.has(job.id)));
+    setSelected(new Set());
+    toast.success(result.data.archived === 0 ? "No finished jobs matched." : `Removed ${result.data.archived} finished job${result.data.archived === 1 ? "" : "s"} from the history.`);
+  }
+
   async function sendTestPrint(printer: PrinterDto) {
     setBusyId(printer.id);
     const result = await createTestPrintJobAction({ printerId: printer.id });
@@ -160,7 +178,7 @@ export function PrintingConsoleView({
       return;
     }
     setJobs((current) => mergeJobs(current, [result.data]));
-    toast.success(`Test page queued for ${printer.name}. It shows as Printed once the agent confirms.`);
+    toast.success(`Test page queued for ${printer.name}. It shows as Delivered to printer once the agent confirms the printer took it.`);
     void refetch();
   }
 
@@ -198,7 +216,31 @@ export function PrintingConsoleView({
   const failedCount = jobs.filter((job) => job.status === "FAILED").length;
   const offlineAgents = agents.filter((agent) => agent.status === "ACTIVE" && !agent.online).length;
 
+  const finished = (job: PrintJobDto) => job.status === "PRINTED" || job.status === "FAILED";
+  const selectableJobs = visibleJobs.filter(finished);
+  const allSelected = selectableJobs.length > 0 && selectableJobs.every((job) => selected.has(job.id));
+  const toggle = (id: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
   const columns: DataTableColumn<PrintJobDto>[] = [
+    ...(can.managePrinters
+      ? [
+          {
+            key: "select",
+            header: "Select",
+            cell: (job: PrintJobDto) =>
+              finished(job) ? (
+                <input type="checkbox" className="size-4 accent-action-primary" aria-label={`Select ${JOB_TYPE_LABELS[job.jobType]} ${jobReference(job)}`} checked={selected.has(job.id)} onChange={() => toggle(job.id)} />
+              ) : null,
+            text: () => "",
+          } satisfies DataTableColumn<PrintJobDto>,
+        ]
+      : []),
     { key: "type", header: "Job", primary: true, text: (job) => `${JOB_TYPE_LABELS[job.jobType]}${job.isReprint ? " (reprint)" : ""}` },
     { key: "reference", header: "Ticket / order", text: jobReference },
     { key: "printer", header: "Printer", truncate: true, text: (job) => job.printer.name },
@@ -269,6 +311,43 @@ export function PrintingConsoleView({
           ))}
         </div>
       </div>
+
+      {can.managePrinters && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-border-subtle bg-card p-3 md:flex-row md:items-center md:justify-between">
+          <label className="flex items-center gap-2 text-label text-fg-primary">
+            <input
+              type="checkbox"
+              className="size-4 accent-action-primary"
+              checked={allSelected}
+              disabled={selectableJobs.length === 0}
+              onChange={() => setSelected(allSelected ? new Set() : new Set(selectableJobs.map((job) => job.id)))}
+            />
+            Select all finished jobs shown
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="secondary" disabled={selected.size === 0} onClick={() => setArchiving({ jobIds: [...selected] })}>
+              <Icon icon={Trash2} size={16} />
+              Remove selected ({selected.size})
+            </Button>
+            <span className="flex items-center gap-2 text-caption text-fg-secondary">
+              or clear finished jobs older than
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={olderThanDays}
+                aria-label="Days"
+                onChange={(event) => setOlderThanDays(Math.max(1, Math.min(365, Number(event.target.value) || 1)))}
+                className="h-9 w-16 rounded-lg border border-border-strong bg-canvas px-2 text-body text-fg-primary"
+              />
+              days
+            </span>
+            <Button size="sm" variant="secondary" onClick={() => setArchiving({ olderThanDays })}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
 
       <DataTable
         columns={columns}
@@ -506,6 +585,15 @@ export function PrintingConsoleView({
         confirmLabel="Revoke"
         tone="destructive"
         onConfirm={() => (revoking ? revoke(revoking) : undefined)}
+      />
+      <ConfirmDialog
+        open={archiving !== null}
+        onClose={() => setArchiving(null)}
+        title={archiving && "jobIds" in archiving ? `Remove ${archiving.jobIds.length} job${archiving.jobIds.length === 1 ? "" : "s"} from the history?` : `Clear finished jobs older than ${olderThanDays} days?`}
+        description="Printed and failed jobs disappear from this list. Jobs still waiting or printing are never touched, and the record of what was printed stays in the audit log."
+        tone="destructive"
+        confirmLabel="Remove from history"
+        onConfirm={() => (archiving ? archive(archiving) : undefined)}
       />
     </div>
   );

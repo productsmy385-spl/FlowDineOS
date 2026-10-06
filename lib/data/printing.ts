@@ -203,6 +203,8 @@ export async function listPrintJobs(ctx: TenantContext, filters: PrintJobFilters
   const rows = await mapErrors("Print job", () =>
     db.printJob.findMany({
       where: tenantScope(ctx, {
+        // Archived jobs have left the history view (RASOIOS-ADR-022); the rows themselves are kept.
+        archivedAt: null,
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.jobType ? { jobType: filters.jobType } : {}),
         ...(filters.since ? { updatedAt: { gte: filters.since } } : {}),
@@ -216,7 +218,25 @@ export async function listPrintJobs(ctx: TenantContext, filters: PrintJobFilters
 }
 
 export async function countPrintJobs(ctx: TenantContext, status: PrintJobStatus): Promise<number> {
-  return mapErrors("Print job", () => db.printJob.count({ where: tenantScope(ctx, { status }) }));
+  return mapErrors("Print job", () => db.printJob.count({ where: tenantScope(ctx, { status, archivedAt: null }) }));
+}
+
+/**
+ * Removes finished jobs (PRINTED or FAILED) from the history view — by id, or everything queued before `before`.
+ * A job still waiting for or at the printer is never matched (and a database CHECK refuses it anyway). Returns the ids.
+ */
+export async function archivePrintJobs(client: Tx, ctx: TenantContext, target: { jobIds: string[] } | { before: Date }): Promise<string[]> {
+  const where = tenantScope(ctx, {
+    archivedAt: null,
+    status: { in: [PrintJobStatus.PRINTED, PrintJobStatus.FAILED] },
+    ...("jobIds" in target ? { id: { in: target.jobIds } } : { createdAt: { lt: target.before } }),
+  });
+  const rows = await client.printJob.findMany({ where: tenantScope(ctx, where), select: { id: true } });
+  const ids = rows.map((r) => r.id);
+  if (ids.length > 0) {
+    await client.printJob.updateMany({ where: tenantScope(ctx, { id: { in: ids }, archivedAt: null }), data: { archivedAt: new Date(), archivedByUserId: ctx.userId } });
+  }
+  return ids;
 }
 
 /** Every printer of the caller's tenant, active first, newest name order — the console shows inactive ones too. */
