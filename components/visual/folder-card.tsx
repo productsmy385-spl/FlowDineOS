@@ -45,6 +45,8 @@ export function FolderCard({ gradient, object, label, title, detail, active, dim
       onBlur={onDeactivate}
       onClick={onActivate}
       data-active={active || undefined}
+      // Receding cards are dimmed on purpose; marked like the menu ring's back cards so the readable state is the one checked.
+      data-ring-dimmed={dimmed && !active ? "" : undefined}
       className={cn(
         "relative aspect-[4/5] w-full cursor-pointer rounded-3xl outline-none focus-visible:ring-2 focus-visible:ring-focus-ring",
         EASE,

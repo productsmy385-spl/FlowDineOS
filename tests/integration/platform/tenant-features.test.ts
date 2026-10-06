@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTenantAction, updateTenantFeaturesAction } from "@/app/admin/actions";
 import TableMenuPage from "@/app/r/[slug]/t/[code]/page";
 import PublicRestaurantPage from "@/app/r/[slug]/page";
@@ -9,7 +9,7 @@ import { getTenantResolution } from "@/lib/auth/context";
 import { createMembership, createTenant, createUser } from "../../factories";
 import { testDb } from "../setup/db";
 import { asAnonymous, asPlatformAdmin, asSeedUser, asUserId, invokeAction, invokeLoader, seedOnce, tenantIdOf } from "../helpers/actors";
-import { newTenantInput } from "./helpers";
+import { APP_URL, newTenantInput, resetClerkStub, startClerkStub, stopClerkStub } from "./helpers";
 
 /**
  * TC-FEAT-001…006 — per-restaurant feature switches (RASOIOS-ADR-023; owner decision 2026-10-06).
@@ -17,7 +17,18 @@ import { newTenantInput } from "./helpers";
  */
 const db = testDb();
 
-beforeAll(seedOnce, 120_000);
+beforeAll(async () => {
+  await seedOnce();
+  // Creating a restaurant sends its administrator an invitation: Clerk is stubbed and the app address set, as in
+  // create-tenant.test.ts.
+  await startClerkStub();
+}, 120_000);
+afterAll(stopClerkStub);
+beforeEach(() => {
+  resetClerkStub();
+  vi.stubEnv("NEXT_PUBLIC_APP_URL", APP_URL);
+});
+afterEach(() => vi.unstubAllEnvs());
 
 /** A published restaurant of its own with its administrator. */
 async function restaurant() {
