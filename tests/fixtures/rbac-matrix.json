@@ -648,5 +648,57 @@
       "WAITER": "deny"
     },
     "test": "TC-RBAC-150"
+  },
+  {
+    "row": 51,
+    "permission": "data:export",
+    "allow": {
+      "SUPER_ADMIN": "deny",
+      "TENANT_ADMIN": "allow",
+      "MANAGER": "deny",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-151"
+  },
+  {
+    "row": 52,
+    "permission": "data:import",
+    "allow": {
+      "SUPER_ADMIN": "deny",
+      "TENANT_ADMIN": "allow",
+      "MANAGER": "deny",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-152"
+  },
+  {
+    "row": 53,
+    "permission": "data:purge",
+    "allow": {
+      "SUPER_ADMIN": "deny",
+      "TENANT_ADMIN": "allow",
+      "MANAGER": "deny",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-153"
+  },
+  {
+    "row": 54,
+    "permission": "table:manage",
+    "allow": {
+      "SUPER_ADMIN": "deny",
+      "TENANT_ADMIN": "allow",
+      "MANAGER": "allow",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-154"
   }
 ]

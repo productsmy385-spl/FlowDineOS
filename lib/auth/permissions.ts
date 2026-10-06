@@ -62,6 +62,11 @@ export const TENANT_PERMISSIONS = [
   "report:read",
   "social:manage",
   "audit:read",
+  // RASOIOS-ADR-021: backups, restore and date-range deletion (owner only), and table QR codes.
+  "data:export",
+  "data:import",
+  "data:purge",
+  "table:manage",
 ] as const;
 
 /** Print-agent credential scopes (not a role; RH-AGT-02…05, ADR-007). */
@@ -113,6 +118,7 @@ export const TENANT_ROLE_PERMISSIONS: Readonly<Record<TenantRole, readonly Tenan
     "print_job:retry",
     "report:read",
     "social:manage",
+    "table:manage",
   ],
   CASHIER: [
     ...ALL_TENANT_ROLES_READ,

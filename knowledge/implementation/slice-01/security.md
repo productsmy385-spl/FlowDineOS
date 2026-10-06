@@ -182,6 +182,10 @@ Legend: ✅ allowed · ◐ allowed with the business-rule restriction in the Not
 | 48 | `report:read` | ORDER, ORDER_ITEM, TRANSACTION (aggregates) | reports | — | ✅ | ✅ | — | — | — | own | `/restaurant/reports` | LD-RPT-01…LD-RPT-05 | TC-RBAC-148 |
 | 49 | `social:manage` | SOCIAL_POST | create/update/ready/mark posted/archive | — | ✅ | ✅ | — | — | — | own | `/restaurant/social` | LD-SOC-01, SA-SOC-01…SA-SOC-05 | TC-RBAC-149 |
 | 50 | `audit:read` | AUDIT_LOG | read tenant audit | — | ✅ | — | — | — | — | own | `/restaurant/audit` | LD-AUD-01 | TC-RBAC-150 |
+| 51 | `data:export` | TENANT DATA | download a backup (CSV / Excel / JSON / ZIP) | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | RH-DATA-01 (ADR-021) | TC-RBAC-151 |
+| 52 | `data:import` | TENANT DATA | restore missing records from a backup, menu/customer CSV | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | RH-DATA-02 (ADR-021) | TC-RBAC-152 |
+| 53 | `data:purge` | TENANT DATA | delete history before a date, after a matching backup | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | SA-DATA-03 (ADR-021) | TC-RBAC-153 |
+| 54 | `table:manage` | DINING_TABLE | add/rename/archive tables, rotate QR codes | — | ✅ | ✅ | — | — | — | own | `/restaurant/tables` | SA-TBL-01 (ADR-021) | TC-RBAC-154 |
 
 **Public (no role):** read published website data (LD-PUB-01, LD-PUB-02, LD-PUB-03, RH-PUB-01, RH-PUB-02). Submit an order only if
 Q-001 approves (SA-PUB-01). **Print agent (credential, not a role):** `agent:job:claim`, `agent:job:ack`, `agent:heartbeat`,

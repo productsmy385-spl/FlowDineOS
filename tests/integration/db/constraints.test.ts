@@ -127,7 +127,8 @@ async function buildFixture() {
       expiresAt: new Date("2126-09-15T18:30:00.000Z"),
     },
   });
-  return { tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
+  const diningTable = await db.diningTable.create({ data: { tenantId: tenant.id, label: "T1", publicCode: `c${randomUUID().replace(/-/g, "").slice(0, 11)}` } });
+  return { diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
 }
 
 beforeAll(async () => {
@@ -247,6 +248,8 @@ const CHECK_CASES: CheckCase[] = [
   { constraint: "staff_sessions_ended_after_login_check", table: "staff_sessions", set: "status = 'ENDED', end_reason = 'SIGNED_OUT', ended_at = login_at - interval '1 hour'", where: byId(() => f.staffSession.id) },
   // The database itself refuses a daily-password session for an administrator or manager (ADR-019 §1, C7).
   { constraint: "staff_sessions_role_is_staff_check", table: "staff_sessions", set: "role = 'TENANT_ADMIN'", where: byId(() => f.staffSession.id) },
+  // RASOIOS-ADR-021: a table's QR code is lower-case letters and digits only — nothing a URL could misread.
+  { constraint: "dining_tables_public_code_check", table: "dining_tables", set: "public_code = 'BAD/../code'", where: byId(() => f.diningTable.id) },
   { constraint: "website_sections_cta_pair_check", table: "website_sections", set: "cta_label = NULL", where: byId(() => f.websiteSection.id) },
   // E26 / E27
   { constraint: "tenant_counters_last_value_check", table: "tenant_counters", set: "last_value = -1", where: () => `tenant_id = '${f.tenant.id}'` },

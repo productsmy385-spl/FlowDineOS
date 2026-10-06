@@ -37,9 +37,9 @@ function parseMatrix(): Row[] {
 const matrix = parseMatrix();
 
 describe("TC-RBAC-001 permission matrix drift", () => {
-  it("parses all 50 rows of the security.md matrix", () => {
-    expect(matrix).toHaveLength(50);
-    expect(matrix.map((r) => r.row)).toEqual(Array.from({ length: 50 }, (_, i) => i + 1));
+  it("parses all 54 rows of the security.md matrix", () => {
+    expect(matrix).toHaveLength(54);
+    expect(matrix.map((r) => r.row)).toEqual(Array.from({ length: 54 }, (_, i) => i + 1));
   });
 
   it("the committed fixture equals the security.md matrix", () => {

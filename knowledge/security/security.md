@@ -25,6 +25,6 @@ related_decisions: ["RASOIOS-ADR-003","RASOIOS-ADR-006","RASOIOS-ADR-008","RASOI
 1. Never trust client-supplied tenant identifiers. Tenant context is derived server-side (ADR-003, ADR-006).
 2. Enforce authorization on the server at every entry point, before loading resources.
 3. Never log or persist secrets, passwords, OTPs, session tokens or agent tokens. Mask personal data in logs.
-4. Audit security-sensitive and financial changes to the append-only audit log, in the same transaction.
+4. Audit security-sensitive and financial changes to the append-only audit log, in the same transaction. The only deletion is the owner's date-range purge after a verified backup, and never of a `data.*` entry (RASOIOS-ADR-021 §4).
 5. Authentication fails closed. Misconfiguration never disables it.
 6. Cross-tenant and missing resources are indistinguishable (404).

@@ -288,6 +288,14 @@ enum WebsiteSectionKey {
   @@map("website_section_key")
 }
 
+enum BackupReminder {
+  MANUAL
+  MONTHLY
+  SIX_MONTHS
+
+  @@map("backup_reminder")
+}
+
 enum CounterType {
   ORDER
   KOT
@@ -339,6 +347,7 @@ model Tenant {
   staffCredentials  StaffCredential[]
   staffSessions     StaffSession[]
   counters          TenantCounter[]
+  diningTables      DiningTable[]
 
   @@index([status])
   @@map("tenants")
@@ -387,6 +396,16 @@ model Restaurant {
   autoPrintKot     Boolean   @default(true) @map("auto_print_kot")
   receiptFooter    String?   @map("receipt_footer") @db.VarChar(280)
   gstin            String?   @db.VarChar(15)
+  // Brand Kit (RASOIOS-ADR-021): named colours in the tenant's own order, fonts from an allow-list, extra logos, voice.
+  brandColors      Json      @default("[]") @map("brand_colors") @db.JsonB
+  headingFont      String?   @map("heading_font") @db.VarChar(40)
+  bodyFont         String?   @map("body_font") @db.VarChar(40)
+  accentFont       String?   @map("accent_font") @db.VarChar(40)
+  logoLightUrl     String?   @map("logo_light_url") @db.VarChar(2048)
+  logoDarkUrl      String?   @map("logo_dark_url") @db.VarChar(2048)
+  brandVoice       String?   @map("brand_voice") @db.VarChar(500)
+  // Data backups (RASOIOS-ADR-021): how often the console reminds the admin to download a backup. Nothing is uploaded.
+  backupReminder   BackupReminder @default(MANUAL) @map("backup_reminder")
   createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt        DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -422,6 +441,28 @@ model WebsiteSection {
   @@unique([tenantId, restaurantId, key])
   @@index([tenantId, restaurantId, sortOrder])
   @@map("website_sections")
+}
+
+// ───────────────────────── E30 DINING_TABLE (table QR menus, RASOIOS-ADR-021) ─────────────────────────
+
+/// A table a customer can sit at. Its QR code carries `publicCode` — a random, rotatable code — never the tenant id or
+/// the row id; the public route resolves it only together with the restaurant's own slug.
+model DiningTable {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  label      String    @db.VarChar(20)
+  publicCode String    @unique @map("public_code") @db.VarChar(16)
+  isActive   Boolean   @default(true) @map("is_active")
+  sortOrder  Int       @default(0) @map("sort_order") @db.SmallInt
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, sortOrder])
+  @@map("dining_tables")
 }
 
 // ───────────────────────── E03 RESTAURANT_HOURS ─────────────────────────

@@ -20,6 +20,13 @@ export const metadata: Metadata = { title: "Settings" };
  * first paint; the baseline's hard-coded demo profile (BA-27) is gone. The time zone, currency and country lists are
  * built from Intl here, so the browser receives plain options and they cannot drift from what the schema accepts.
  */
+/** Settings areas with their own page; each shows only to roles the server would let in. */
+const SETTINGS_LINKS = [
+  { href: "/restaurant/website", label: "Website and Brand Kit", permission: "website:update" },
+  { href: "/restaurant/tables", label: "Tables and QR codes", permission: "table:manage" },
+  { href: "/restaurant/settings/data", label: "Data and backups", permission: "data:export" },
+] as const;
+
 export default async function RestaurantSettingsPage() {
   // Management only — the same gate as its navigation entry. Staff roles are sent to /account/forbidden rather than
   // shown a read-only copy of settings they have no part in (ADR-019, owner 2026-10-02).
@@ -32,11 +39,13 @@ export default async function RestaurantSettingsPage() {
         title="Settings"
         description="How this restaurant is described, when it is open, how it runs and where its tickets go."
         actions={
-          hasPermission(ctx, "website:update") ? (
-            <Link href="/restaurant/website" className="inline-flex h-10 items-center rounded-xl border border-border-strong bg-raised px-4 text-label text-fg-primary hover:bg-border-subtle">
-              Website and branding
-            </Link>
-          ) : undefined
+          <div className="flex flex-wrap gap-2">
+            {SETTINGS_LINKS.filter((link) => hasPermission(ctx, link.permission)).map((link) => (
+              <Link key={link.href} href={link.href} className="inline-flex h-10 items-center rounded-xl border border-border-strong bg-raised px-4 text-label text-fg-primary hover:bg-border-subtle">
+                {link.label}
+              </Link>
+            ))}
+          </div>
         }
       />
 

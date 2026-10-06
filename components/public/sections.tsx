@@ -5,6 +5,7 @@ import { formatBusinessDate } from "@/lib/ui/format";
 import { CategoryNav } from "./category-nav";
 import { HoursTable, OpenNowBadge } from "./hours";
 import { CategoryBlock, MenuItemGrid } from "./menu";
+import { MenuRing } from "./menu-ring";
 import { SectionEmpty, SectionHeading, SiteCta, SiteImage } from "./primitives";
 import { siteGradientStyle } from "./theme";
 import { SECTION_ANCHOR, galleryImages, menuAnchor, type SiteView } from "./site-view";
@@ -132,6 +133,8 @@ function Categories({ section, view }: SectionProps) {
         <SectionEmpty icon={UtensilsCrossed}>This restaurant has not published its menu yet.</SectionEmpty>
       ) : (
         <>
+          {/* The 3D ring of real dishes (owner brief 2026-10-06 §13), with the full readable list below it. */}
+          {withItems.length > 0 ? <MenuRing categories={withItems} formatting={view.formatting} title={section.headline ?? "Menu"} /> : null}
           {withItems.length > 1 ? <CategoryNav categories={withItems.map((c) => ({ id: c.id, name: c.name }))} label={section.headline} /> : null}
           <div className="flex flex-col gap-10">
             {site.categories.map((category) => (

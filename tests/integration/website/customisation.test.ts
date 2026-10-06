@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -57,7 +58,7 @@ afterEach(async () => {
     void tenantId;
     void createdAt;
     void updatedAt;
-    await db.restaurant.update({ where: { id }, data: columns });
+    await db.restaurant.update({ where: { id }, data: { ...columns, brandColors: columns.brandColors as Prisma.InputJsonValue } });
   }
 });
 

@@ -118,6 +118,17 @@ export const AUDIT_ACTIONS = [
   // Media (Q-009)
   "media.uploaded",
   "media.deleted",
+  // Brand Kit and table QR codes (RASOIOS-ADR-021)
+  "restaurant.brand_kit_updated",
+  "dining_table.created",
+  "dining_table.updated",
+  "dining_table.archived",
+  "dining_table.code_rotated",
+  // Data management (RASOIOS-ADR-021). The audit log never deletes a `data.*` row, so this record is permanent.
+  "data.exported",
+  "data.imported",
+  "data.deleted",
+  "data.backup_reminder_updated",
 ] as const;
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];

@@ -24,6 +24,10 @@ import { createKitchenSectionAction } from "@/app/restaurant/settings/sections-a
 import { updateWebsiteSettingsAction } from "@/app/restaurant/settings/website-actions";
 import { changeStaffRoleAction, deactivateStaffAction, inviteStaffAction, listStaffAction } from "@/app/restaurant/staff/actions";
 import { getSocialPostsAction } from "@/app/restaurant/social/actions";
+import { NextRequest } from "next/server";
+import { POST as importRoute } from "@/app/api/v1/data/import/route";
+import { getDataOverviewAction, purgeDataAction } from "@/app/restaurant/settings/data/actions";
+import { editTableAction } from "@/app/restaurant/tables/actions";
 import type { Permission } from "@/lib/auth/permissions";
 import { invokeAction, invokeLoader } from "../helpers/actors";
 
@@ -198,4 +202,22 @@ export const ENDPOINT_REGISTRY: Readonly<Record<Permission, RegistryEntry>> = {
     endpoint: "AuditPage (LD-AUD-01)",
     invoke: () => invokeLoader(AuditPage, { searchParams: Promise.resolve({}) }),
   },
+  "data:export": { endpoint: "getDataOverviewAction (LD-DATA-01)", invoke: () => invokeAction(getDataOverviewAction) },
+  "data:import": {
+    endpoint: "POST /api/v1/data/import (RH-DATA-02)",
+    // A body that is not a form: an allowed role gets past the guard to validation (422); a denied one is refused first.
+    invoke: async () => {
+      const response = await importRoute(
+        new NextRequest("http://localhost:3000/api/v1/data/import", { method: "POST", headers: { origin: "http://localhost:3000", "sec-fetch-site": "same-origin", "content-type": "text/plain" }, body: "probe" }),
+        undefined as never,
+      );
+      const body = (await response.json()) as { error: { code: string } };
+      return { ok: false, error: { code: response.status === 422 ? "VALIDATION_ERROR" : body.error.code } };
+    },
+  },
+  "data:purge": {
+    endpoint: "purgeDataAction (SA-DATA-03)",
+    invoke: () => invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-01-01", backupId: RANDOM_UUID, confirmation: "probe", rbacProbe: true } as never),
+  },
+  "table:manage": { endpoint: "editTableAction (SA-TBL-02)", invoke: () => invokeAction(editTableAction, { id: RANDOM_UUID, label: "Probe" }) },
 };

@@ -25,6 +25,9 @@ export const RATE_LIMITS = {
   "session.mutation": { limit: 120, windowSec: 60, failOpen: true },
   // Image uploads (ADR-017 §8, api.md RH-MEDIA-01): per user; each one costs re-encoding CPU and ImageKit storage.
   "media.upload": { limit: 30, windowSec: 60 * 60, failOpen: false },
+  // Backups (RASOIOS-ADR-021): an export reads the whole restaurant, so it is metered; restore preview + commit per file.
+  "data.export": { limit: 30, windowSec: 60 * 60, failOpen: false },
+  "data.import": { limit: 30, windowSec: 60 * 60, failOpen: false },
   // Staff daily-password sign-in (ADR-019 §5). Two buckets: one per email so a colleague's typos cannot lock a
   // person out, one per address so a spray across many emails from one machine is still stopped. Fail closed —
   // a guessable eight-character password must never fall back to unlimited attempts because the database blinked.

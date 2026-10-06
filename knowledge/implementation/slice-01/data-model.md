@@ -70,6 +70,9 @@ This convention is already used in the baseline (`prisma/schema.prisma` uses `@m
 
 - **Never hard-deleted:** tenants, users, memberships, menu categories/items/variants/add-ons, customers,
   orders and all order children, KOTs, transactions, print jobs, audit logs. They use status or `archived_at`.
+- **Superseded in part by RASOIOS-ADR-021 (2026-10-06):** finished orders and their children, KOTs, transactions,
+  day closes, print jobs, customers without orders, staff attendance, social posts and audit entries *before a date* may
+  be deleted by the owner/administrator, only after a matching backup (ADR-021 §3–4). `data.*` audit rows are never deleted.
 - **Hard-deletable:** `DAILY_MENU` in `DRAFT` (cascades to its items), `RESTAURANT_HOURS` rows (replaced as a set),
   `RATE_LIMIT_BUCKET` rows (expiry), `TENANT_COUNTER` never.
 - All tenant FKs are `ON DELETE RESTRICT`.
