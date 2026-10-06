@@ -147,14 +147,15 @@ describe("header navigation (ADR-013 §3)", () => {
 
 describe("bottom bar (< 768 px)", () => {
   it("shows at most four of the role's allowed areas, in preset order", () => {
-    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["orders", "customers", "menu", "dailyMenu"]);
-    expect(bottomNavItemsFor("KITCHEN", permissionsForTenantRole("KITCHEN")).map((i) => i.key)).toEqual(["orders", "menu", "printing", "dailyMenu"]);
-    expect(bottomNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toEqual(["orders", "transactions", "customers", "printing"]);
+    expect(bottomNavItemsFor("TENANT_ADMIN", permissionsForTenantRole("TENANT_ADMIN")).map((i) => i.key)).toEqual(["dashboard", "orders"]);
+    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["orders", "customers"]);
+    expect(bottomNavItemsFor("KITCHEN", permissionsForTenantRole("KITCHEN")).map((i) => i.key)).toEqual(["orders", "dailyMenu"]);
+    expect(bottomNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toEqual(["orders", "transactions"]);
     for (const role of ROLES) {
       const caps = permissionsForTenantRole(role);
       const items = bottomNavItemsFor(role, caps);
-      // Reports left the TENANT_ADMIN and MANAGER phone bar at the Project Owner's request (2026-09-25).
-      const expected = role === "TENANT_ADMIN" || role === "MANAGER" ? 3 : 4;
+      // Two destinations for every role; with the centre action and More, four slots (owner review 2026-10-06).
+      const expected = 2;
       expect(items.length, role).toBe(expected);
       for (const item of items) expect(caps.has(item.capability), `${role} ${item.key}`).toBe(true);
       expect(BOTTOM_NAV_PRESETS[role].length).toBe(expected);

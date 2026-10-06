@@ -3,15 +3,15 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { KotStatus } from "@prisma/client";
-import { Card } from "@/components/ui/card";
+import { Icon } from "@/components/ui/icon";
 import { useToast } from "@/components/ui/toast";
-import { EmptyState } from "@/components/states/empty-state";
 import { StaleBanner } from "@/components/states/stale-banner";
 import type { BoardPage, BoardTicket } from "@/lib/data/kitchen";
 import type { KitchenSectionOption } from "@/lib/data/kot";
 import { DOMAIN_ICONS } from "@/lib/ui/icons";
 import { usePolling } from "@/lib/ui/use-polling";
 import { updateKOTStatusAction } from "@/app/restaurant/kitchen/actions";
+import { reprintKotAction } from "@/app/restaurant/printing/actions";
 import { KITCHEN_NEXT, KotCard } from "./kot-card";
 
 /**
@@ -52,12 +52,18 @@ export function KitchenBoard({
   sections,
   timezone,
   allowedTargets,
+  canOpenOrder = false,
+  canReprint = false,
 }: {
   initial: BoardPage;
   sections: readonly KitchenSectionOption[];
   timezone: string;
   /** Which KOT targets this role may request (`kot:update_status` / `kot:serve`). */
   allowedTargets: readonly KotStatus[];
+  /** `order:read` — the opened ticket links to its order. */
+  canOpenOrder?: boolean;
+  /** `kot:reprint` — the opened ticket offers a reprint. */
+  canReprint?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -66,6 +72,8 @@ export function KitchenBoard({
   const [column, setColumn] = React.useState<KotStatus>("QUEUED");
   const [now, setNow] = React.useState(() => Date.now());
   const [pendingId, setPendingId] = React.useState<string | null>(null);
+  // One ticket open at a time across the board (owner review 2026-10-06: the focused ticket carries its caption).
+  const [focusedId, setFocusedId] = React.useState<string | null>(null);
 
   // The section the cook chose is a device preference, so it survives a reload of this screen only.
   React.useEffect(() => {
@@ -121,6 +129,12 @@ export function KitchenBoard({
     router.refresh();
   }
 
+  async function reprint(ticket: BoardTicket) {
+    const result = await reprintKotAction({ kotId: ticket.id });
+    if (!result.ok) toast.error(result.error.message);
+    else toast.success(`Ticket ${ticket.kotNumber} sent to the kitchen printer again.`);
+  }
+
   const inSection = tickets.filter((ticket) => sectionId === "ALL" || ticket.sectionId === sectionId);
   const byColumn = (status: KotStatus) => inSection.filter((ticket) => ticket.status === status);
 
@@ -129,7 +143,19 @@ export function KitchenBoard({
     const action = next && allowedTargets.includes(next.to) ? next : null;
     return (
       <li key={ticket.id} className="flex">
-        <KotCard ticket={ticket} now={now} action={action} pending={pendingId === ticket.id} onAdvance={(to) => void advance(ticket, to)} />
+        <KotCard
+          ticket={ticket}
+          now={now}
+          action={action}
+          pending={pendingId === ticket.id}
+          onAdvance={(to) => void advance(ticket, to)}
+          focused={focusedId === ticket.id}
+          dimmed={focusedId !== null && focusedId !== ticket.id && byColumn(ticket.status).some((t) => t.id === focusedId)}
+          onFocusChange={(open) => setFocusedId(open ? ticket.id : null)}
+          canOpenOrder={canOpenOrder}
+          canReprint={canReprint}
+          onReprint={() => void reprint(ticket)}
+        />
       </li>
     );
   }
@@ -168,43 +194,55 @@ export function KitchenBoard({
       </div>
 
       <div className="lg:hidden">
-        <Column title={COLUMNS.find((entry) => entry.status === column)!.title} tickets={byColumn(column)} renderCard={renderCard} />
+        <Column status={column} title={COLUMNS.find((entry) => entry.status === column)!.title} tickets={byColumn(column)} renderCard={renderCard} />
       </div>
 
+      {/* One board, three equal lanes: same panel, same header, each scrolling on its own. */}
       <div className="hidden gap-4 lg:grid lg:grid-cols-3">
         {COLUMNS.map((entry) => (
-          <Column key={entry.status} title={entry.title} tickets={byColumn(entry.status)} renderCard={renderCard} showHeading />
+          <Column key={entry.status} status={entry.status} title={entry.title} tickets={byColumn(entry.status)} renderCard={renderCard} showHeading />
         ))}
       </div>
     </div>
   );
 }
 
+const LANE_ACCENT: Record<string, string> = { QUEUED: "bg-fg-secondary", PREPARING: "bg-status-warning", READY: "bg-status-success" };
+
 function Column({
+  status,
   title,
   tickets,
   renderCard,
   showHeading = false,
 }: {
+  status: KotStatus;
   title: string;
   tickets: readonly BoardTicket[];
   renderCard: (ticket: BoardTicket) => React.ReactNode;
   showHeading?: boolean;
 }) {
   return (
-    <section aria-label={`${title} tickets`} className="flex min-w-0 flex-col gap-4">
+    <section aria-label={`${title} tickets`} className="flex min-w-0 flex-col rounded-3xl border border-border-subtle bg-raised/60 p-3" data-testid={`kitchen-lane-${status}`}>
       {showHeading && (
-        <h2 className="flex items-baseline gap-2 text-heading text-fg-primary">
+        <h2 className="flex items-center gap-2 px-1 pb-3 text-heading text-fg-primary">
+          <span aria-hidden className={`size-2.5 rounded-full ${LANE_ACCENT[status] ?? "bg-fg-secondary"}`} />
           {title}
-          <span className="text-subheading text-numeric text-fg-secondary">{tickets.length}</span>
+          <span className="ml-auto rounded-full bg-card px-2.5 py-0.5 text-subheading text-numeric text-fg-secondary">{tickets.length}</span>
         </h2>
       )}
       {tickets.length === 0 ? (
-        <Card>
-          <EmptyState icon={DOMAIN_ICONS.kitchen} title={`No tickets ${title.toLowerCase()}`} description="Tickets appear here as orders reach the kitchen." />
-        </Card>
+        <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong px-4 py-6 text-center">
+          <span className="text-fg-secondary">
+            <Icon icon={DOMAIN_ICONS.kitchen} size={24} />
+          </span>
+          <p className="text-label text-fg-secondary">No tickets {title.toLowerCase()}</p>
+        </div>
       ) : (
-        <ul className="flex flex-col gap-4">{tickets.map(renderCard)}</ul>
+        // Each lane scrolls on its own on a large screen, so a long queue never pushes the other lanes down.
+        <ul tabIndex={0} aria-label={`${title} tickets, ${tickets.length}`} className="flex flex-col gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:max-h-[calc(100dvh-15rem)] lg:overflow-y-auto lg:pr-1">
+          {tickets.map(renderCard)}
+        </ul>
       )}
     </section>
   );

@@ -191,8 +191,9 @@ export function OrderBoard({
     <div className="flex flex-col gap-6">
       <StaleBanner stale={stale} lastSuccessAt={lastSuccessAt} timezone={timezone} />
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div role="tablist" aria-label="Order status" className="-mx-1 flex flex-wrap gap-2 px-1">
+      <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        {/* A swipeable rail on a phone (no scrollbar), wrapping rows from a tablet up — never wider than the page. */}
+        <div role="tablist" aria-label="Order status" className="-mx-4 flex min-w-0 flex-nowrap gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
           {TABS.map((entry) => (
             <button
               key={entry.id}
@@ -200,7 +201,7 @@ export function OrderBoard({
               role="tab"
               aria-selected={tab === entry.id}
               onClick={() => setTab(entry.id)}
-              className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-3 text-label transition-colors duration-fast ease-standard ${
+              className={`inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-xl border px-3 text-label transition-colors duration-fast ease-standard ${
                 tab === entry.id ? "border-action-primary bg-action-primary/12 text-fg-accent" : "border-border-subtle bg-card text-fg-secondary hover:text-fg-primary"
               }`}
             >
@@ -209,7 +210,7 @@ export function OrderBoard({
             </button>
           ))}
         </div>
-        <div className="w-full lg:w-72">
+        <div className="w-full shrink-0 lg:w-72">
           <SearchField label="Search orders" placeholder="Order number, table or customer" value={query} onChange={(event) => setQuery(event.target.value)} />
         </div>
       </div>
@@ -242,43 +243,48 @@ export function OrderBoard({
           empty={<EmptyState icon={DOMAIN_ICONS.orders} title="Nothing closed today yet" description="Completed and cancelled orders from today appear here." />}
         />
       ) : (
-        <ul className="grid items-stretch gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 md:gap-6">
-          {visible.map((order) => (
-            <li key={order.id} className="flex">
-              <OrderCard
-                order={order}
-                now={now}
-                locale={locale}
-                actions={
-                  <>
-                    {(transitions[order.status] ?? []).map((target) =>
-                      target === "CANCELLED" ? (
-                        <Button
-                          key={target}
-                          size="sm"
-                          variant="ghost"
-                          disabled={pendingId === order.id}
-                          onClick={() => {
-                            setCancelError(null);
-                            setCancelling(order);
-                          }}
-                        >
-                          {TRANSITION_LABELS[target]}
-                        </Button>
-                      ) : (
-                        <Button key={target} size="sm" variant="primary" loading={pendingId === order.id} loadingLabel="Saving…" onClick={() => void move(order, target)}>
-                          {TRANSITION_LABELS[target]}
-                        </Button>
-                      ),
-                    )}
-                    <Link href={`/restaurant/orders/${order.id}`} className="ml-auto text-label text-fg-accent hover:underline">
-                      Open
-                    </Link>
-                  </>
-                }
-              />
-            </li>
-          ))}
+        // One column on a phone, then as many columns of at least 20rem as fit: 2 on a tablet, 3–4 on a desktop. Cards
+        // stretch to the tallest in their row, so rows line up.
+        <ul className="grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] items-stretch gap-4 p-0 md:gap-5">
+          {visible.map((order) => {
+            const targets = transitions[order.status] ?? [];
+            const forward = targets.filter((target) => target !== "CANCELLED");
+            return (
+              <li key={order.id} className="flex min-w-0">
+                <OrderCard
+                  order={order}
+                  now={now}
+                  locale={locale}
+                  primaryAction={
+                    forward.length > 0 ? (
+                      <span className="flex flex-wrap gap-2">
+                        {forward.map((target) => (
+                          <Button key={target} size="sm" variant="primary" loading={pendingId === order.id} loadingLabel="Saving…" onClick={() => void move(order, target)}>
+                            {TRANSITION_LABELS[target]}
+                          </Button>
+                        ))}
+                      </span>
+                    ) : null
+                  }
+                  secondaryAction={
+                    targets.includes("CANCELLED") ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={pendingId === order.id}
+                        onClick={() => {
+                          setCancelError(null);
+                          setCancelling(order);
+                        }}
+                      >
+                        {TRANSITION_LABELS.CANCELLED}
+                      </Button>
+                    ) : null
+                  }
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
 

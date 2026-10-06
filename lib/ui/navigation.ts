@@ -167,15 +167,14 @@ export function activeNavItem<T extends Pick<NavItem, "href"> & { activePrefix?:
  * centre action (`primaryActionFor`) is deliberately not in the presets — it gets its own raised button.
  */
 export const BOTTOM_NAV_PRESETS: Readonly<Record<TenantRole, readonly NavKey[]>> = {
-  // Reports left the phone bar on the Project Owner's request (2026-09-25); it stays in the side panel / More.
-  TENANT_ADMIN: ["dashboard", "orders", "menu"],
-  MANAGER: ["dashboard", "orders", "menu"],
-  CASHIER: ["orders", "transactions", "customers", "printing"],
-  // Settings left the staff bars with the screen itself (owner 2026-10-02): staff see only their own work. The slot
-  // goes to today's menu, which both roles check during a service. (A cook's kitchen board is already the centre
-  // action, so it cannot also take a slot.)
-  WAITER: ["orders", "customers", "menu", "dailyMenu"],
-  KITCHEN: ["orders", "menu", "printing", "dailyMenu"],
+  // Four slots for every role (owner review 2026-10-06: "Dashboard, Orders, Kitchen, More" — not every feature at the
+  // bottom): two destinations here, the role's centre action (the kitchen board for every role that has it) and More.
+  // Everything else, Menu and Reports included, stays one tap away under More.
+  TENANT_ADMIN: ["dashboard", "orders"],
+  MANAGER: ["dashboard", "orders"],
+  CASHIER: ["orders", "transactions"],
+  WAITER: ["orders", "customers"],
+  KITCHEN: ["orders", "dailyMenu"],
 };
 
 export function bottomNavItemsFor(role: string, capabilities: Iterable<string>): NavItem[] {

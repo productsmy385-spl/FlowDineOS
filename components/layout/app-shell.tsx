@@ -74,7 +74,7 @@ export function AppShell({ children, indicators = [] }: { children: React.ReactN
           </div>
         </header>
 
-        <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-console flex-1 px-4 pt-6 pb-28 focus:outline-none sm:px-6 lg:px-8 lg:py-8 md:pb-8">
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full min-w-0 max-w-console flex-1 px-4 pt-6 pb-bottom-bar focus:outline-none sm:px-6 lg:px-8 lg:py-8 md:pb-8">
           {children}
         </main>
       </div>

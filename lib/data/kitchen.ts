@@ -30,6 +30,7 @@ const BOARD_SELECT = {
   readyAt: true,
   servedAt: true,
   updatedAt: true,
+  orderId: true,
   order: { select: { orderNumber: true } },
   items: {
     select: {
@@ -52,6 +53,7 @@ export type BoardTicket = {
   id: string;
   kotNumber: string;
   roundNumber: number;
+  orderId: string;
   orderNumber: string;
   orderType: BoardRow["orderTypeSnapshot"];
   tableLabel: string | null;
@@ -81,6 +83,7 @@ function toBoardTicket(row: BoardRow, printStatus: KotPrintStatus): BoardTicket 
     id: row.id,
     kotNumber: row.kotNumber,
     roundNumber: row.roundNumber,
+    orderId: row.orderId,
     orderNumber: row.order.orderNumber,
     orderType: row.orderTypeSnapshot,
     tableLabel: row.tableLabelSnapshot,

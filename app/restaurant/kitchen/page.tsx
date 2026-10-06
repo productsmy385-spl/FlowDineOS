@@ -25,7 +25,7 @@ export default async function KitchenPage() {
   return (
     <div className="flex flex-col gap-4">
       <h1 className="text-display-m text-fg-primary">Kitchen</h1>
-      <KitchenBoard initial={board} sections={sections} timezone={ctx.restaurant.timezone} allowedTargets={allowedTargets} />
+      <KitchenBoard initial={board} sections={sections} timezone={ctx.restaurant.timezone} allowedTargets={allowedTargets} canOpenOrder={hasPermission(ctx, "order:read")} canReprint={hasPermission(ctx, "kot:reprint")} />
     </div>
   );
 }

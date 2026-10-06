@@ -275,6 +275,10 @@
 }
 
 @layer utilities {
+  /* Room under page content for the phone bottom bar (64 px) plus the home indicator; the bar is hidden from md up. */
+  .pb-bottom-bar {
+    padding-bottom: calc(6rem + env(safe-area-inset-bottom));
+  }
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }

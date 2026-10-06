@@ -30,9 +30,10 @@ describe("TC-KITCH-001 kitchen board", () => {
     expect(Date.parse(board.serverTime)).toBeGreaterThan(0);
 
     const first = board.tickets[0];
+    // `orderId` lets the opened ticket link to its order (owner review 2026-10-06); still no customer or money.
     expect(Object.keys(first).sort()).toEqual(
       [
-        "id", "kotNumber", "roundNumber", "orderNumber", "orderType", "tableLabel", "priority", "status", "sectionId",
+        "id", "kotNumber", "roundNumber", "orderId", "orderNumber", "orderType", "tableLabel", "priority", "status", "sectionId",
         "notes", "queuedAt", "preparingAt", "readyAt", "servedAt", "items", "targetPrepMinutes", "printStatus",
       ].sort(),
     );

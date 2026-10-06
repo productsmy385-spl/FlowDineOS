@@ -388,7 +388,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 value={colours.dailyStyle}
                 onValueChange={(value) => setColours((current) => ({ ...current, dailyStyle: value as "STRIP" | "GRID" }))}
                 options={[
-                  { value: "STRIP", label: "Swipe strip", description: "A row of today's dishes guests swipe through." },
+                  { value: "STRIP", label: "Folder cards", description: "Today's dishes as cards that lift out of a folder as guests swipe or hover." },
                   { value: "GRID", label: "Cards", description: "Today's dishes as a grid." },
                 ]}
               />
