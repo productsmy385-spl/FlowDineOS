@@ -66,3 +66,15 @@ The Railway CLI on the development machine (v5.43.1) is signed in, but no `rasoi
    - `LOG_LEVEL=debug`, `ALLOWED_IMAGE_HOSTS` (empty for now)
 5. Generate a Railway domain for `web` and add it to the Clerk development instance's allowed origins.
 6. Merge to `main` and verify TC-OPS-001: the staging URL serves the new build over HTTPS. Record the URL and deployment id in the table above.
+
+## Known issue — migrations not applied on deploy (seen 2026-10-02 and 2026-10-07)
+
+[observed] Twice a deploy went live with migrations pending (`/api/ready` →
+`{"status":"unavailable","reason":"MIGRATIONS_PENDING",...}`) although `railway.json` sets
+`preDeployCommand: npm run prisma:deploy` and `healthcheckPath: /api/ready`. Both times the fix was
+`npx prisma migrate deploy` against the production `DATABASE_URL`, after which `/api/ready` returned ready.
+
+[assumption] The Railway service's dashboard settings override or ignore `railway.json` (pre-deploy command and/or
+health check). Not yet verified — check Railway → service → Settings → Deploy: the pre-deploy command should be
+`npm run prisma:deploy` and the health check path `/api/ready`. Until then, after every push that adds a migration,
+check `/api/ready` and apply migrations if it reports MIGRATIONS_PENDING.
