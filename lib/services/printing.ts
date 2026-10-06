@@ -289,11 +289,49 @@ export async function reprintKot(ctx: TenantContext, kotId: string): Promise<Pri
 
 /** SA-PRN-06 — queues the thermal receipt of an order on a RECEIPT-capable printer. */
 export async function printReceipt(ctx: TenantContext, orderId: string): Promise<PrintJobDto> {
+  const job = await queueReceipt(ctx, orderId, "manual");
+  if (!job) throw new ValidationError("No receipt printer is set up.", undefined, "NO_PRINTER_CONFIGURED");
+  return job;
+}
+
+/** What happened to the receipt a payment asked for. "QUEUED" means handed to the print agent, not printed. */
+export type ReceiptQueueOutcome =
+  | { status: "QUEUED"; printJobId: string }
+  | { status: "NO_PRINTER" }
+  | { status: "FAILED" }
+  | { status: "NOT_REQUESTED" };
+
+/**
+ * The receipt a completed payment prints (owner brief 2026-10-06 §15–17: customer pays, cashier records it, the
+ * receipt prints on the restaurant's own printer).
+ *
+ * Keyed to the payment, `RECEIPT:PAYMENT:<transactionId>`, so the same payment can never queue a second receipt —
+ * `createPrintJob` inserts with ON CONFLICT DO NOTHING on (tenant_id, dedupe_key). Never throws: the payment has
+ * already committed and is the thing that matters, so a missing printer or a queue failure is reported back to the
+ * cashier, not turned into a failed payment. "QUEUED" is all this can honestly say — the agent's confirmation is what
+ * marks the job PRINTED.
+ */
+export async function queueReceiptForPayment(ctx: TenantContext, orderId: string, transactionId: string): Promise<ReceiptQueueOutcome> {
+  try {
+    const job = await queueReceipt(ctx, orderId, `RECEIPT:PAYMENT:${transactionId}`);
+    return job ? { status: "QUEUED", printJobId: job.id } : { status: "NO_PRINTER" };
+  } catch (error) {
+    logger.error("receipt.auto_print_failed", { requestId: ctx.requestId, tenantId: ctx.tenantId, orderId, transactionId, error: String(error) });
+    return { status: "FAILED" };
+  }
+}
+
+/**
+ * Renders and queues one receipt. `dedupe` is either "manual" — a cashier asking again gets a new copy each time
+ * (`RECEIPT:<order>:v<n>`) — or a fixed key, which makes the call idempotent. Returns null when the restaurant has no
+ * receipt printer.
+ */
+async function queueReceipt(ctx: TenantContext, orderId: string, dedupe: "manual" | string): Promise<PrintJobDto | null> {
   const receipt = required(await getReceipt(ctx, orderId), "Order");
 
   const job = await withTx(ctx, async (tx) => {
     const printer = await resolveReceiptPrinter(tx, ctx);
-    if (!printer) throw new ValidationError("No receipt printer is set up.", undefined, "NO_PRINTER_CONFIGURED");
+    if (!printer) return null;
     const profile = await printingProfile(tx, ctx);
 
     const document = renderReceiptDocument({
@@ -322,25 +360,28 @@ export async function printReceipt(ctx: TenantContext, orderId: string): Promise
       footer: profile.receiptFooter,
     });
 
-    const version = (await countReceiptJobs(tx, ctx, orderId)) + 1;
-    const { id } = await createPrintJob(tx, ctx, {
+    const dedupeKey = dedupe === "manual" ? `RECEIPT:${orderId}:v${(await countReceiptJobs(tx, ctx, orderId)) + 1}` : dedupe;
+    const { id, created } = await createPrintJob(tx, ctx, {
       printerId: printer.id,
       jobType: PrintJobType.RECEIPT,
-      dedupeKey: `RECEIPT:${orderId}:v${version}`,
+      dedupeKey,
       payload: document,
       orderId,
       requestedByUserId: ctx.userId,
     });
-    await audit(tx, ctx, {
-      action: "print_job.created",
-      resourceType: "print_job",
-      resourceId: id,
-      after: { jobType: PrintJobType.RECEIPT, printerId: printer.id, orderId, orderNumber: receipt.orderNumber },
-    });
+    // An already-queued receipt for the same key is returned as it is, and audited once — when it was created.
+    if (created) {
+      await audit(tx, ctx, {
+        action: "print_job.created",
+        resourceType: "print_job",
+        resourceId: id,
+        after: { jobType: PrintJobType.RECEIPT, printerId: printer.id, orderId, orderNumber: receipt.orderNumber, trigger: dedupe === "manual" ? "manual" : "payment" },
+      });
+    }
     return getPrintJob(tx, ctx, id);
   });
 
-  logger.info("print_job.created", { requestId: ctx.requestId, tenantId: ctx.tenantId, printJobId: job.id, jobType: job.jobType });
+  if (job) logger.info("print_job.created", { requestId: ctx.requestId, tenantId: ctx.tenantId, printJobId: job.id, jobType: job.jobType });
   return job;
 }
 

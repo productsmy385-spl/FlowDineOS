@@ -19,6 +19,7 @@ import { withTx } from "@/lib/data/tx";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { statusAfterRefund } from "@/lib/services/orders";
+import { queueReceiptForPayment, type ReceiptQueueOutcome } from "@/lib/services/printing";
 import { businessDateFor, now } from "@/lib/time";
 import type { CreateRefundData, RecordPaymentData } from "@/lib/validation/payments";
 
@@ -77,6 +78,8 @@ export type PaymentResult = {
   balance: MoneyString;
   /** True when this call replayed an earlier submit with the same idempotency key. */
   replayed: boolean;
+  /** The receipt this payment queued, if it settled the bill (see `queueReceiptForPayment`). */
+  receipt: ReceiptQueueOutcome;
 };
 
 function paymentResult(row: LedgerRow, order: Pick<LedgerOrder, "paymentStatus" | "totalAmount" | "paidAmount" | "refundedAmount">, replayed: boolean): PaymentResult {
@@ -91,6 +94,7 @@ function paymentResult(row: LedgerRow, order: Pick<LedgerOrder, "paymentStatus" 
     paidAmount: moneyDto(order.paidAmount),
     balance: moneyDto(outstandingOf(order)),
     replayed,
+    receipt: { status: "NOT_REQUESTED" },
   };
 }
 
@@ -197,6 +201,12 @@ export async function recordPayment(ctx: TenantContext, input: RecordPaymentData
 
     if (!result.replayed) {
       logger.info("payment.recorded", { requestId: ctx.requestId, transactionId: result.transactionId, orderId: result.orderId, method: result.method, amount: result.amount });
+    }
+    // The bill is settled: print the receipt on the restaurant's receipt printer (owner brief 2026-10-06 §15). Only
+    // after the payment has committed, only when it settles the bill, and never for a replayed submit — a double click
+    // replays the same payment, and the job is keyed to that payment, so it cannot print twice.
+    if (!result.replayed && result.paymentStatus === PaymentStatus.PAID) {
+      return { ...result, receipt: await queueReceiptForPayment(ctx, result.orderId, result.transactionId) };
     }
     return result;
   } catch (error) {

@@ -16,6 +16,9 @@ import { TextArea } from "@/components/ui/inputs/text-area";
 import { TextField } from "@/components/ui/inputs/text-field";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useToast } from "@/components/ui/toast";
+
+/** What a payment did about the receipt, as reported by the server (`ReceiptQueueOutcome`). */
+type ReceiptStatus = "QUEUED" | "NO_PRINTER" | "FAILED" | "NOT_REQUESTED";
 import type { TransactionListItem } from "@/lib/data/transactions";
 import type { ActionResult } from "@/lib/http/action";
 import { moneyDifference } from "@/lib/ui/decimal-input";
@@ -145,9 +148,14 @@ export function PaymentPanel({ orderId, orderNumber, currencyCode, paidAmount, r
         orderId={orderId}
         currencyCode={currencyCode}
         balanceDue={balanceDue ?? "0.00"}
-        onDone={() => {
+        onDone={(receipt) => {
           setPaying(false);
-          toast.success("Payment recorded.");
+          // Say what happened to the receipt, honestly: "sent to the printer" is the most the server knows; the print
+          // agent's own report is what marks it printed (owner brief 2026-10-06 §15–20).
+          if (receipt === "QUEUED") toast.success("Payment recorded. Receipt sent to the printer.");
+          else if (receipt === "NO_PRINTER") toast.success("Payment recorded. No receipt printer is set up, so nothing was printed.");
+          else if (receipt === "FAILED") toast.error("Payment recorded, but the receipt could not be queued. Print it from the order.");
+          else toast.success("Payment recorded.");
           router.refresh();
         }}
       />
@@ -189,7 +197,7 @@ function RecordPaymentDialog({
   orderId: string;
   currencyCode: string;
   balanceDue: string;
-  onDone: () => void;
+  onDone: (receipt: ReceiptStatus) => void;
 }) {
   const idempotency = useIdempotencyKey();
   const [method, setMethod] = React.useState<string>("CASH");
@@ -223,9 +231,9 @@ function RecordPaymentDialog({
             ...(reference === "" ? {} : { reference }),
           });
         }}
-        onSuccess={() => {
+        onSuccess={(data) => {
           idempotency.reset();
-          onDone();
+          onDone((data as { receipt?: { status: ReceiptStatus } } | null)?.receipt?.status ?? "NOT_REQUESTED");
         }}
       >
         <RadioGroup
