@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Installs the RASOIOS print agent on a Windows 10/11 counter PC (S1-P17-T009, Q-010).
+  Installs the FlowDineOS print agent on a Windows 10/11 counter PC (S1-P17-T009, Q-010).
 
 .DESCRIPTION
   1. Checks Node.js 22 or later is installed.
@@ -64,7 +64,7 @@ $action = New-ScheduledTaskAction -Execute $node -Argument "`"$(Join-Path $Insta
 $trigger = New-ScheduledTaskTrigger -AtStartup
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Prints RASOIOS kitchen tickets and bills on this restaurant''s printers.' | Out-Null
+Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Prints FlowDineOS kitchen tickets and bills on this restaurant''s printers.' | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
 Write-Host "Installed and started '$TaskName'. Check Printing -> Agents in RASOIOS: this PC should show as online within a minute."

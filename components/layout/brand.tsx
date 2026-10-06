@@ -4,7 +4,7 @@ import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/ui/cn";
 
 /**
- * RASOIOS wordmark (frontend.md §3.1 "Brand"). The mark is the only element that carries the brand gradient at full
+ * FlowDineOS wordmark (frontend.md §3.1 "Brand"). The mark is the only element that carries the brand gradient at full
  * strength (design.md §2.4); the glyph sits on it in the checked on-primary colour, never as coloured text.
  */
 export function BrandMark({ href, context, className }: { href: string; /** e.g. "Platform" in the admin console */ context?: string; className?: string }) {
@@ -14,7 +14,7 @@ export function BrandMark({ href, context, className }: { href: string; /** e.g.
         <Icon icon={UtensilsCrossed} size={20} />
       </span>
       <span className="font-display text-heading text-fg-primary">
-        RASOI<span className="text-fg-accent">OS</span>
+        FlowDine<span className="text-fg-accent">OS</span>
       </span>
       {context && <span className="hidden rounded-full bg-fg-secondary/12 px-2.5 py-0.5 text-caption text-fg-secondary sm:inline-flex">{context}</span>}
     </Link>

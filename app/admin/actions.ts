@@ -12,6 +12,7 @@ import {
   revokeTenantAdminInvite,
   suspendTenant,
   updateTenant,
+  updateTenantFeatures,
 } from "@/lib/services/platform-tenants";
 import { parseInput } from "@/lib/validation/core";
 import {
@@ -31,6 +32,8 @@ import {
   type SlugAvailabilityInput,
   type SuspendTenantInput,
   type UpdateTenantInput,
+  updateTenantFeaturesSchema,
+  type UpdateTenantFeaturesInput,
 } from "@/lib/validation/platform";
 
 /**
@@ -95,4 +98,11 @@ export const revokeTenantAdminInviteAction = action(async (input: RevokeTenantAd
   const ctx = await requirePlatform("platform:tenant_admin:invite");
   await consumePlatformMutation(ctx);
   return revokeTenantAdminInvite(ctx, parseInput(revokeTenantAdminInviteSchema, input));
+});
+
+/** SA-ADM-10 — `platform:tenant:update`: which features a restaurant has (RASOIOS-ADR-023). Audited. */
+export const updateTenantFeaturesAction = action(async (input: UpdateTenantFeaturesInput) => {
+  const ctx = await requirePlatform("platform:tenant:update");
+  await consumePlatformMutation(ctx);
+  return updateTenantFeatures(ctx, parseInput(updateTenantFeaturesSchema, input));
 });

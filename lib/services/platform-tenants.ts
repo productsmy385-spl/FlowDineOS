@@ -1,10 +1,13 @@
 import "server-only";
 import type { TenantStatus } from "@prisma/client";
 import { audit } from "@/lib/audit/write";
+import { FEATURE_KEYS, FEATURES, type FeatureKey } from "@/lib/auth/features";
 import { ClerkAdminError, clerkAdmin, maskEmail } from "@/lib/auth/clerk-admin";
 import type { PlatformContext } from "@/lib/auth/context-types";
 import { instantDto } from "@/lib/data/dto";
 import {
+  disabledFeaturesOf,
+  writeFeatureSwitches,
   assertPlatform,
   countActiveTenantAdmins,
   createInvitee,
@@ -247,6 +250,9 @@ export async function createTenant(ctx: PlatformContext, data: CreateTenantData)
     assertInvitable(existing);
     const invitee = existing ?? (await createInvitee(ctx, tx, data.adminEmail, data.adminFullName));
     const membership = await insertInvitedAdmin(ctx, tx, { tenantId, userId: invitee.id, invitedAt, clerkInvitationId: null });
+    // Features chosen at creation (RASOIOS-ADR-023); left out, the restaurant starts with every feature on.
+    const disabled = data.enabledFeatures ? FEATURE_KEYS.filter((key) => !data.enabledFeatures!.includes(key)) : [];
+    if (disabled.length > 0) await writeFeatureSwitches(ctx, tx, tenantId, Object.fromEntries(disabled.map((key) => [key, false])));
 
     await audit(tx, ctx, {
       action: "tenant.created",
@@ -259,6 +265,7 @@ export async function createTenant(ctx: PlatformContext, data: CreateTenantData)
         status: "ACTIVE",
         restaurant: { name: data.restaurantName, timezone: data.timezone, currencyCode: data.currencyCode, countryCode: data.countryCode },
         hours: "CLOSED_ALL_WEEK",
+        disabledFeatures: data.enabledFeatures ? FEATURE_KEYS.filter((key) => !data.enabledFeatures!.includes(key)) : [],
       },
     });
     await audit(tx, ctx, {
@@ -534,4 +541,41 @@ export async function revokeTenantAdminInvite(ctx: PlatformContext, data: { targ
     });
   });
   return { tenantId: membership.tenantId, membershipId: membership.id, status: "INACTIVE" };
+}
+
+// ─── Feature switches (RASOIOS-ADR-023) ───
+
+export type TenantFeatureView = { key: FeatureKey; label: string; description: string; enabled: boolean };
+
+export async function getTenantFeatures(ctx: PlatformContext, targetTenantId: string): Promise<TenantFeatureView[]> {
+  assertPlatform(ctx, "platform:tenant:read");
+  if (!(await platformTenantExists(ctx, targetTenantId))) throw new NotFoundError("Tenant not found");
+  const off = new Set(await disabledFeaturesOf(ctx, targetTenantId));
+  return FEATURE_KEYS.map((key) => ({ key, label: FEATURES[key].label, description: FEATURES[key].description, enabled: !off.has(key) }));
+}
+
+/**
+ * SA-ADM-10 — turns features on or off for one restaurant. Takes effect on that restaurant's next request (sessions
+ * re-read permissions every request). Audited with exactly what changed.
+ */
+export async function updateTenantFeatures(ctx: PlatformContext, data: { targetTenantId: string; enabled: FeatureKey[] }): Promise<TenantFeatureView[]> {
+  assertPlatform(ctx, "platform:tenant:update");
+  if (!(await platformTenantExists(ctx, data.targetTenantId))) throw new NotFoundError("Tenant not found");
+  await withTx(ctx, async (tx) => {
+    const before = new Set(await disabledFeaturesOf(ctx, data.targetTenantId, tx));
+    const wanted = new Set(data.enabled);
+    const switches = Object.fromEntries(FEATURE_KEYS.map((key) => [key, wanted.has(key)]));
+    const changed = FEATURE_KEYS.filter((key) => before.has(key) === wanted.has(key));
+    if (changed.length === 0) return;
+    await writeFeatureSwitches(ctx, tx, data.targetTenantId, switches);
+    await audit(tx, ctx, {
+      action: "tenant.features_updated",
+      resourceType: "tenant",
+      resourceId: data.targetTenantId,
+      tenantId: data.targetTenantId,
+      before: Object.fromEntries(changed.map((key) => [key, before.has(key) ? "disabled" : "enabled"])),
+      after: Object.fromEntries(changed.map((key) => [key, wanted.has(key) ? "enabled" : "disabled"])),
+    });
+  });
+  return getTenantFeatures(ctx, data.targetTenantId);
 }

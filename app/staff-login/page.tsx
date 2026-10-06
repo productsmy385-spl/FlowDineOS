@@ -4,7 +4,7 @@ import { SignInAudience, SignInDoor } from "@/components/layout/sign-in-door";
 import { AuthLayout } from "@/components/layout/auth-layout";
 import { StaffLoginForm } from "./staff-login-form";
 
-export const metadata: Metadata = { title: "Staff sign in — RASOIOS" };
+export const metadata: Metadata = { title: "Staff sign in — FlowDineOS" };
 export const dynamic = "force-dynamic";
 
 /**

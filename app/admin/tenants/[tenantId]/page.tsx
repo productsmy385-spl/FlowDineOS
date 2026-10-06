@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { requirePlatformPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
 import { NotFoundError } from "@/lib/errors";
-import { inspectTenant } from "@/lib/services/platform-tenants";
+import { getTenantFeatures, inspectTenant, type TenantFeatureView } from "@/lib/services/platform-tenants";
+import { TenantFeaturesCard } from "@/components/admin/feature-switches";
 import { normalizeRootDomain } from "@/lib/tenancy/hostnames";
 import { formatInZone } from "@/lib/ui/format";
 import { DOMAIN_ICONS } from "@/lib/ui/icons";
@@ -44,8 +45,10 @@ export default async function TenantDetailPage({ params, searchParams }: { param
   const query = await searchParams;
 
   let inspection;
+  let features: TenantFeatureView[] = [];
   try {
     inspection = await inspectTenant(ctx, tenantId);
+    features = await getTenantFeatures(ctx, tenantId);
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     throw error;
@@ -146,6 +149,13 @@ export default async function TenantDetailPage({ params, searchParams }: { param
         <p className="text-caption text-fg-secondary">
           Counts only. The platform console cannot open this restaurant&apos;s orders, customers, transactions or menu.
         </p>
+      </section>
+
+      <section aria-labelledby="tenant-features-title" className="mt-8 flex flex-col gap-4">
+        <h2 id="tenant-features-title" className="text-heading text-fg-primary">
+          Access and features
+        </h2>
+        <TenantFeaturesCard tenantId={tenant.id} initial={features.filter((f) => f.enabled).map((f) => f.key)} canEdit={hasPermission(ctx, "platform:tenant:update")} />
       </section>
 
       <section className="mt-8">

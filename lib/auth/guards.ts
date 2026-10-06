@@ -1,6 +1,7 @@
 import "server-only";
 import { redirect } from "next/navigation";
 import {
+  FeatureDisabledError,
   ForbiddenError,
   NoActiveMembershipError,
   TenantSelectionRequiredError,
@@ -8,6 +9,7 @@ import {
   UnauthenticatedError,
 } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+import { FEATURES, featureOfPermission, type FeatureKey } from "./features";
 import { currentRequestId, getPlatformResolution, getTenantResolution, type PlatformResolution, type TenantResolution } from "./context";
 import type { PlatformContext, TenantContext } from "./context-types";
 import { hasPermission, type PlatformPermission, type TenantPermission } from "./permissions";
@@ -37,11 +39,18 @@ function tenantFailure(resolution: Exclude<TenantResolution, { outcome: "OK" }>)
   }
 }
 
-function assertPermission(ctx: { permissions: ReadonlySet<string>; requestId: string }, permission: string): void {
+function assertPermission(ctx: { permissions: ReadonlySet<string>; requestId: string; disabledFeatures?: ReadonlySet<string> }, permission: string): void {
   if (!hasPermission(ctx, permission)) {
-    logger.warn("security.forbidden", { requestId: ctx.requestId, permission });
-    throw new ForbiddenError();
+    const feature = disabledFeatureFor(ctx, permission);
+    logger.warn("security.forbidden", { requestId: ctx.requestId, permission, ...(feature ? { feature } : {}) });
+    throw feature ? new FeatureDisabledError(FEATURES[feature].label) : new ForbiddenError();
   }
+}
+
+/** The switched-off feature that took this permission away, if that is why it is missing (RASOIOS-ADR-023). */
+function disabledFeatureFor(ctx: { disabledFeatures?: ReadonlySet<string> }, permission: string): FeatureKey | null {
+  const feature = featureOfPermission(permission);
+  return feature && ctx.disabledFeatures?.has(feature) ? feature : null;
 }
 
 /** Re-checks a permission on an existing context (e.g. a second permission inside the same action). */
@@ -91,8 +100,9 @@ export async function requireTenantPage(permission: TenantPermission): Promise<T
   const resolution = await getTenantResolution();
   if (resolution.outcome !== "OK") redirect(accountRedirectFor(resolution));
   if (!hasPermission(resolution.ctx, permission)) {
-    logger.warn("security.forbidden", { requestId: resolution.ctx.requestId, permission });
-    redirect("/account/forbidden");
+    const feature = disabledFeatureFor(resolution.ctx, permission);
+    logger.warn("security.forbidden", { requestId: resolution.ctx.requestId, permission, ...(feature ? { feature } : {}) });
+    redirect(feature ? `/account/feature-disabled?feature=${feature}` : "/account/forbidden");
   }
   return resolution.ctx;
 }

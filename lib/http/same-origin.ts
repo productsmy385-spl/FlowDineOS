@@ -19,7 +19,7 @@ export function assertSameOrigin(request: NextRequest, requestId: string): void 
 
   if ((site !== null && site !== "same-origin") || origin === null || !allowed.has(origin)) {
     logger.warn("security.cross_origin_refused", { requestId, site, originPresent: origin !== null });
-    throw new ForbiddenError("This request must come from the RASOIOS console.");
+    throw new ForbiddenError("This request must come from the FlowDineOS console.");
   }
 }
 

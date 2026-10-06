@@ -2,7 +2,7 @@
 #Requires -RunAsAdministrator
 <#
 .SYNOPSIS
-  Removes the RASOIOS print agent. Also revoke the agent in Printing -> Agents so its token stops working.
+  Removes the FlowDineOS print agent. Also revoke the agent in Printing -> Agents so its token stops working.
 .PARAMETER KeepData
   Keep %ProgramData%\RasoiOS\PrintAgent (config, credential, printed-job journal).
 #>
@@ -17,4 +17,4 @@ Remove-Item -Recurse -Force (Join-Path $env:ProgramFiles 'RasoiOS\PrintAgent') -
 if (-not $KeepData) {
   Remove-Item -Recurse -Force (Join-Path $env:ProgramData 'RasoiOS\PrintAgent') -ErrorAction SilentlyContinue
 }
-Write-Host 'RasoiOS print agent removed. Revoke it in Printing -> Agents if you have not already.'
+Write-Host 'FlowDineOS print agent removed. Revoke it in Printing -> Agents if you have not already.'

@@ -172,7 +172,7 @@ export async function getPublicRestaurant(slug: string, now: Date = new Date()):
 
   const tenant = await mapErrors("Restaurant", () =>
     db.tenant.findFirst({
-      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } } },
+      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         id: true,
         slug: true,
@@ -343,7 +343,7 @@ export function publicBusinessDate(timezone: string, now: Date = new Date()): st
 export async function listPublicSiteSlugs(): Promise<Array<{ slug: string; updatedAt: Date }>> {
   const tenants = await mapErrors("Restaurant", () =>
     db.tenant.findMany({
-      where: { status: "ACTIVE", restaurant: { is: { websitePublished: true } } },
+      where: { status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       orderBy: { slug: "asc" },
       select: { slug: true, restaurant: { select: { updatedAt: true } } },
     }),

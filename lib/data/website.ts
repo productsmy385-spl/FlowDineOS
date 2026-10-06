@@ -192,7 +192,7 @@ export async function getPublicWebsite(slug: string): Promise<PublicWebsiteData>
 
   const tenant = await mapErrors("Restaurant", () =>
     db.tenant.findFirst({
-      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } } },
+      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         slug: true,
         restaurant: {

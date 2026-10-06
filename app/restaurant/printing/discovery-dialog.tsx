@@ -100,7 +100,7 @@ export function DiscoveryDialog({
       <div className="flex flex-col gap-4">
         {online.length === 0 ? (
           <Notice icon={WifiOff} tone="warning" title="No print agent is online">
-            Start the RASOIOS print agent on a PC connected to the same network as the printers (Printing → Agents shows its status), then try again.
+            Start the FlowDineOS print agent on a PC connected to the same network as the printers (Printing → Agents shows its status), then try again.
           </Notice>
         ) : (
           online.length > 1 && (

@@ -177,7 +177,7 @@ export async function buildExport(ctx: TenantContext, request: ExportRequest): P
     }
     case "zip": {
       const readme =
-        `${identity.name} - RasoiOS backup\r\nExported ${metadata.exportedAt}\r\n\r\n` +
+        `${identity.name} - FlowDineOS backup\r\nExported ${metadata.exportedAt}\r\n\r\n` +
         `backup.json      everything in this backup; import it in Settings > Data to restore missing records\r\n` +
         `${base}.xlsx  the same data as an Excel workbook, one sheet per kind of record\r\n` +
         `csv/             the same data as CSV files\r\n\r\n` +
@@ -236,7 +236,7 @@ function parseJsonBackup(text: string): ParsedBackup {
     throw importError("The file is not valid JSON.");
   }
   const d = doc as { format?: unknown; version?: unknown; tables?: unknown; restaurant?: unknown; exportedAt?: unknown };
-  if (!d || typeof d !== "object" || d.format !== BACKUP_FORMAT) throw importError("This is not a RasoiOS backup file.");
+  if (!d || typeof d !== "object" || d.format !== BACKUP_FORMAT) throw importError("This is not a FlowDineOS backup file.");
   if (d.version !== BACKUP_VERSION) throw importError(`This backup was made by a different version (${String(d.version)}); it cannot be imported here.`);
   if (!d.tables || typeof d.tables !== "object") throw importError("The backup has no data in it.");
   const tables: ParsedBackup["tables"] = {};

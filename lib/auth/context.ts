@@ -4,6 +4,7 @@ import { cookies, headers } from "next/headers";
 import { activeMembershipsOfUser, type MembershipRow } from "@/lib/data/memberships";
 import { ACTIVE_MEMBERSHIP_COOKIE, parseActiveMembershipCookie } from "./active-membership-cookie";
 import type { PlatformContext, TenantContext } from "./context-types";
+import { withoutDisabledFeatures } from "./features";
 import { permissionsForPlatformRole, permissionsForTenantRole, type Permission } from "./permissions";
 import { getSessionUser, type SessionState } from "./session";
 
@@ -71,7 +72,9 @@ export function resolveTenant(session: SessionState, memberships: MembershipRow[
       membershipId: chosen.membershipId,
       tenantId: chosen.tenantId,
       role: chosen.role,
-      permissions: permissionsForTenantRole(chosen.role) as ReadonlySet<Permission>,
+      // The role's permissions minus those of any feature switched off for this restaurant (RASOIOS-ADR-023).
+      permissions: withoutDisabledFeatures(permissionsForTenantRole(chosen.role), chosen.disabledFeatures ?? []) as ReadonlySet<Permission>,
+      disabledFeatures: new Set(chosen.disabledFeatures ?? []),
       restaurant: { id: restaurant.id, timezone: restaurant.timezone, currencyCode: restaurant.currencyCode },
     },
   };

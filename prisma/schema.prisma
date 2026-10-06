@@ -362,6 +362,7 @@ model Tenant {
   staffSessions     StaffSession[]
   counters          TenantCounter[]
   diningTables      DiningTable[]
+  features          TenantFeature[]
 
   @@index([status])
   @@map("tenants")
@@ -458,6 +459,25 @@ model WebsiteSection {
   @@unique([tenantId, restaurantId, key])
   @@index([tenantId, restaurantId, sortOrder])
   @@map("website_sections")
+}
+
+// ───────────────────────── E31 TENANT_FEATURE (RASOIOS-ADR-023) ─────────────────────────
+
+/// A platform-owner switch for one feature of one restaurant. No row means the feature is on; `enabled = false` turns
+/// it off, which removes its permissions from every session of that restaurant (lib/auth/features.ts).
+model TenantFeature {
+  tenantId        String   @map("tenant_id") @db.Uuid
+  featureKey      String   @map("feature_key") @db.VarChar(40)
+  enabled         Boolean
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  updatedBy User?  @relation("TenantFeatureUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@id([tenantId, featureKey])
+  @@map("tenant_features")
 }
 
 // ───────────────────────── E30 DINING_TABLE (table QR menus, RASOIOS-ADR-021) ─────────────────────────
@@ -563,6 +583,7 @@ model User {
   revokedPrintAgents     PrintAgent[]       @relation("PrintAgentRevokedBy")
   requestedPrintJobs     PrintJob[]         @relation("PrintJobRequestedBy")
   archivedPrintJobs      PrintJob[]         @relation("PrintJobArchivedBy")
+  tenantFeatureChanges   TenantFeature[]    @relation("TenantFeatureUpdatedBy")
   printerDiscoveries     PrinterDiscovery[] @relation("PrinterDiscoveryRequestedBy")
   auditLogs              AuditLog[]         @relation("AuditActor")
   uploadedMediaAssets    MediaAsset[]       @relation("MediaAssetUploadedBy")

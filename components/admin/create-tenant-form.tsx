@@ -6,6 +6,8 @@ import { CircleCheck, TriangleAlert } from "lucide-react";
 import { createTenantAction, checkTenantSlugAction } from "@/app/admin/actions";
 import { Card } from "@/components/ui/card";
 import { Form, SubmitButton } from "@/components/ui/form";
+import { FEATURE_KEYS, type FeatureKey } from "@/lib/auth/features";
+import { FeatureChecklist } from "./feature-switches";
 import { Icon } from "@/components/ui/icon";
 import { Select } from "@/components/ui/inputs/select";
 import { TextField } from "@/components/ui/inputs/text-field";
@@ -101,6 +103,8 @@ export function CreateTenantForm({ timeZones, currencies, countries, addressTemp
     if (!slugEdited) setSlug(suggestSlug(value));
   }
 
+  const [features, setFeatures] = React.useState<Set<FeatureKey>>(() => new Set(FEATURE_KEYS));
+
   async function submit(formData: FormData): Promise<ActionResult<CreateTenantResult>> {
     const text = (name: string) => String(formData.get(name) ?? "").trim();
     return createTenantAction({
@@ -112,6 +116,7 @@ export function CreateTenantForm({ timeZones, currencies, countries, addressTemp
       countryCode: text("countryCode"),
       adminEmail: text("adminEmail"),
       adminFullName: text("adminFullName"),
+      enabledFeatures: [...features],
     });
   }
 
@@ -197,6 +202,14 @@ export function CreateTenantForm({ timeZones, currencies, countries, addressTemp
           <TextField name="adminEmail" label="Email address" type="email" required autoComplete="off" placeholder="owner@example.com" />
           <TextField name="adminFullName" label="Full name" autoComplete="off" help="Optional. Shown until they sign in and set their own." />
         </div>
+      </Card>
+
+      <Card className="gap-4" padding="feature">
+        <div>
+          <h2 className="text-heading text-fg-primary">Access and features</h2>
+          <p className="mt-1 text-body text-fg-secondary">Choose what this restaurant can use. You can change it at any time from the restaurant&apos;s page.</p>
+        </div>
+        <FeatureChecklist value={features} onChange={setFeatures} />
       </Card>
 
       <div className="flex flex-wrap justify-end gap-3">

@@ -46,7 +46,9 @@ export function DailyStrip({ items, formatting, labelledBy }: { items: readonly 
       <ul
         ref={scroller}
         aria-labelledby={labelledBy}
-        className="-mx-4 flex snap-x snap-mandatory list-none gap-4 overflow-x-auto scroll-smooth px-4 pb-4 pt-2 [scrollbar-width:thin] motion-reduce:scroll-auto md:-mx-6 md:px-6"
+        // Focusable so keyboard users can scroll the strip with the arrow keys (WCAG 2.1.1; axe scrollable-region-focusable).
+        tabIndex={0}
+        className="-mx-4 flex snap-x outline-none focus-visible:ring-2 focus-visible:ring-focus-ring snap-mandatory list-none gap-4 overflow-x-auto scroll-smooth px-4 pb-4 pt-2 [scrollbar-width:thin] motion-reduce:scroll-auto md:-mx-6 md:px-6"
       >
         {items.map((item, index) => (
           <li

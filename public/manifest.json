@@ -1,6 +1,6 @@
 {
-  "short_name": "RASOIOS",
-  "name": "RASOIOS — Multi-Tenant Restaurant OS",
+  "short_name": "FlowDineOS",
+  "name": "FlowDineOS — Restaurant Operations Platform",
   "icons": [
     {
       "src": "/icon-192.png",

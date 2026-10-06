@@ -21,6 +21,8 @@ export type TenantContext = {
   role: TenantRole;
   permissions: ReadonlySet<Permission>;
   restaurant: { id: string; timezone: string; currencyCode: string };
+  /** Features switched off for this restaurant by the platform owner (RASOIOS-ADR-023); their permissions are absent. */
+  disabledFeatures?: ReadonlySet<string>;
 };
 
 export type PlatformContext = {

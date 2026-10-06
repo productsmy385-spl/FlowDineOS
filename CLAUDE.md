@@ -1,11 +1,11 @@
-# CLAUDE.md - RESTAURANT SaaS PLATFORM (RASOIOS)
+# CLAUDE.md - RESTAURANT SaaS PLATFORM (FlowDineOS, formerly RASOIOS)
 
 ## Master Guidance & Source of Truth
 
 This repository is governed by the **Knowledge Base** in `knowledge/`. The Knowledge Base is the authoritative source of truth.
 
 ### Primary Guidelines
-1. **Commercial Model**: Sold strictly as a restaurant software product/license. **NO subscription tiers (Starter/Pro/Enterprise)** and **NO recurring tenant billing**. `USER_TENANT` is purely authorization/membership context.
+1. **Commercial Model**: Sold strictly as a restaurant software product/license. **NO subscription tiers (Starter/Pro/Enterprise)** and **NO recurring tenant billing**. The platform owner may switch individual features on/off per restaurant (RASOIOS-ADR-023) — switches, never packages or prices. `USER_TENANT` is purely authorization/membership context.
 2. **Multi-Tenancy**: Every tenant-owned record MUST be associated with a tenant. Tenant context is resolved **strictly server-side** from authenticated context. Never trust client-provided `tenantId` in URLs, request bodies, headers, or query parameters.
 3. **Authorization**: Strict Role-Based Access Control (RBAC) enforced on the server. Roles: `SUPER_ADMIN`, `TENANT_ADMIN`, `MANAGER`, `CASHIER`, `KITCHEN`, `WAITER`. UI visibility is NOT authorization.
 4. **Data Integrity**: Monetary values MUST use `Decimal`/`NUMERIC` persistence. NEVER use floating-point numbers for money. `ORDER_ITEM` must snapshot historical names, prices, and tax rates at order creation time.

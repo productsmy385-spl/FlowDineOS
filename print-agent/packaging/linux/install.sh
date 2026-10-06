@@ -1,5 +1,5 @@
 #!/bin/sh
-# Installs the RASOIOS print agent on Linux / Raspberry Pi OS with systemd (S1-P17-T009, Q-010).
+# Installs the FlowDineOS print agent on Linux / Raspberry Pi OS with systemd (S1-P17-T009, Q-010).
 #
 #   sudo sh install.sh https://app.example.com ABCD2345
 #

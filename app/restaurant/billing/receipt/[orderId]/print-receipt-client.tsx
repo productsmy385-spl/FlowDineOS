@@ -137,7 +137,7 @@ export function PrintReceiptClient({ data }: { data: ReceiptDto }) {
         <div className="text-center pt-4 text-caption text-fg-secondary space-y-1">
           <p className="font-bold text-fg-primary">Thank you for dining with us!</p>
           <p>Please come again.</p>
-          <p className="text-fg-secondary pt-2">Powered by RASOIOS Platform</p>
+          <p className="text-fg-secondary pt-2">Powered by FlowDineOS</p>
         </div>
       </div>
     </main>

@@ -590,3 +590,24 @@ export async function membersLosingAllAccess(ctx: PlatformContext, tenantId: str
   );
   return rows.filter((r) => r.user.memberships.length === 0 && r.user.clerkUserId).map((r) => ({ userId: r.user.id, clerkUserId: r.user.clerkUserId! }));
 }
+
+// ─── Feature switches (RASOIOS-ADR-023) ───
+
+/** The features switched off for one restaurant. A feature with no row is on. */
+export async function disabledFeaturesOf(ctx: PlatformContext, tenantId: string, client: Tx = db): Promise<string[]> {
+  assertPlatform(ctx, "platform:tenant:read");
+  const rows = await client.tenantFeature.findMany({ where: { tenantId, enabled: false }, select: { featureKey: true } });
+  return rows.map((r) => r.featureKey);
+}
+
+/** Writes one switch per feature given, recording who changed it. */
+export async function writeFeatureSwitches(ctx: PlatformContext, tx: Tx, tenantId: string, switches: Record<string, boolean>): Promise<void> {
+  for (const [featureKey, enabled] of Object.entries(switches)) {
+    // tenant-scope-exempt: the compound key tenantId_featureKey names the tenant; platform-only writer (ADR-023)
+    await tx.tenantFeature.upsert({
+      where: { tenantId_featureKey: { tenantId, featureKey } },
+      create: { tenantId, featureKey, enabled, updatedByUserId: ctx.userId },
+      update: { enabled, updatedByUserId: ctx.userId },
+    });
+  }
+}

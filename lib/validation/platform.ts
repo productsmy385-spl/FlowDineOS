@@ -10,6 +10,7 @@
  *   visible starting value in the form, never a default this schema applies.
  */
 import { z } from "zod";
+import { FEATURE_KEYS, type FeatureKey } from "@/lib/auth/features";
 import { RESERVED_HOST_LABELS, isReservedHostLabel } from "@/lib/tenancy/hostnames";
 import { isValidTimeZone } from "@/lib/time/zone";
 import { boundedText, emailField, optionalText, SLUG_PATTERN, strictObject, uuidParam } from "./core";
@@ -82,6 +83,8 @@ export const createTenantSchema = strictObject({
   countryCode: countryCodeField,
   adminEmail: emailField,
   adminFullName: optionalText(120, "Full name"),
+  /** The features this restaurant starts with (RASOIOS-ADR-023). Omitted: all of them. */
+  enabledFeatures: z.array(z.enum(FEATURE_KEYS as [FeatureKey, ...FeatureKey[]])).max(FEATURE_KEYS.length).optional(),
 });
 export type CreateTenantInput = z.input<typeof createTenantSchema>;
 export type CreateTenantData = z.output<typeof createTenantSchema>;
@@ -178,3 +181,11 @@ export function tenantListQueryFromSearchParams(searchParams: Record<string, str
 
 /** A target tenant id from a route segment (`/admin/tenants/[tenantId]`); invalid ids render not-found. */
 export const targetTenantIdParam = uuidParam;
+
+// ─── SA-ADM-10 updateTenantFeaturesAction (RASOIOS-ADR-023) ───
+
+export const updateTenantFeaturesSchema = strictObject({
+  targetTenantId: uuidParam,
+  enabled: z.array(z.enum(FEATURE_KEYS as [FeatureKey, ...FeatureKey[]])).max(FEATURE_KEYS.length),
+});
+export type UpdateTenantFeaturesInput = z.input<typeof updateTenantFeaturesSchema>;

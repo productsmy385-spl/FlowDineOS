@@ -10,7 +10,7 @@ import { signInAppearance } from "@/lib/ui/clerk-appearance";
 import { safeRedirect } from "@/lib/ui/safe-redirect";
 import { ClearTenantPreference } from "../clear-tenant-preference";
 
-export const metadata: Metadata = { title: "Sign in — RASOIOS" };
+export const metadata: Metadata = { title: "Sign in — FlowDineOS" };
 
 /** Where a signed-in user goes when no (valid) redirect was requested: /admin or /restaurant (see ../landing). */
 const AFTER_SIGN_IN = "/sign-in/landing";
@@ -33,7 +33,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
     <AuthLayout
       title="Sign in to your restaurant"
       description="Owners, administrators and managers sign in here with a one-time code sent to their work email."
-      footer="Administrators and managers join by invitation from RASOIOS or their restaurant administrator."
+      footer="Administrators and managers join by invitation from FlowDineOS or their restaurant administrator."
     >
       {clearStalePreference && <ClearTenantPreference />}
       {/* Two doors, each labelled for who it is for (ADR-019 section 1). This form is the account holders' one, so it

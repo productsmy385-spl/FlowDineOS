@@ -1,7 +1,7 @@
 # RASOIOS local print agent (S1-P17-T009, Q-010). Installed by install.sh.
 # Exit status 2 means "not paired / token revoked": systemd must not restart-loop on it.
 [Unit]
-Description=RASOIOS print agent
+Description=FlowDineOS print agent
 Wants=network-online.target
 After=network-online.target
 

@@ -61,6 +61,13 @@ export class ForbiddenError extends AppError {
 }
 
 /** 404 — missing, or owned by another tenant (indistinguishable by design). */
+/** A feature the platform owner has switched off for this restaurant (RASOIOS-ADR-023). 403, not a role problem. */
+export class FeatureDisabledError extends AppError {
+  constructor(featureLabel: string) {
+    super(`${featureLabel} is not enabled for this restaurant. Contact the platform owner to turn it on.`, 403, "FEATURE_DISABLED");
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = "Not found.") {
     super(message, 404, "NOT_FOUND");

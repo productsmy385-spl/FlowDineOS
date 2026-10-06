@@ -5,7 +5,7 @@ import { AuthLayout } from "@/components/layout/auth-layout";
 import { EmptyState } from "@/components/states/empty-state";
 import { signUpAppearance } from "@/lib/ui/clerk-appearance";
 
-export const metadata: Metadata = { title: "Accept your invitation — RASOIOS" };
+export const metadata: Metadata = { title: "Accept your invitation — FlowDineOS" };
 
 /** After accepting an invitation the new user lands on their role home (see /sign-in/landing). */
 const AFTER_SIGN_UP = "/sign-in/landing";
@@ -25,7 +25,7 @@ export default async function SignUpPage({ params, searchParams }: { params: Pro
 
   if (!ticket && !continuingSignUp) {
     return (
-      <AuthLayout title="Join your restaurant on RASOIOS">
+      <AuthLayout title="Join your restaurant on FlowDineOS">
         <div className="rounded-2xl border border-border-subtle bg-card shadow-e1">
           <EmptyState
             icon={MailCheck}

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Removes the RASOIOS print agent. Also revoke the agent in Printing -> Agents so its token stops working.
+# Removes the FlowDineOS print agent. Also revoke the agent in Printing -> Agents so its token stops working.
 #   sudo sh uninstall.sh [--keep-data]
 set -eu
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)." >&2; exit 1; }
@@ -11,4 +11,4 @@ if [ "${1:-}" != "--keep-data" ]; then
   rm -rf /var/lib/rasoios-print-agent
   userdel rasoios-agent 2>/dev/null || true
 fi
-echo "RASOIOS print agent removed."
+echo "FlowDineOS print agent removed."

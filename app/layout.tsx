@@ -39,7 +39,7 @@ const sans = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "RASOIOS — Restaurant Operations",
+  title: "FlowDineOS — Restaurant Operations Platform",
   description: "Menu management, counter ordering, kitchen tickets and thermal printing for restaurants.",
   manifest: "/manifest.json",
 };
