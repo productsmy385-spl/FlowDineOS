@@ -15,8 +15,9 @@ import { cn } from "@/lib/ui/cn";
  * prefers-reduced-motion. Content never depends on the motion: the title and detail are always on the face.
  */
 export type FolderCardProps = {
-  /** Background of layer 1 (any CSS background). */
-  gradient: string;
+  /** Background of layer 1: a CSS background value, or a class that sets one (`gradientClassName`). */
+  gradient?: string;
+  gradientClassName?: string;
   /** Layer 2: the object that lifts out of the folder. */
   object: React.ReactNode;
   /** Layer 4: a short tag on the face that fades when the card opens. */
@@ -32,7 +33,7 @@ export type FolderCardProps = {
 
 const EASE = "transition-[transform,opacity,filter] duration-[600ms] ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none";
 
-export function FolderCard({ gradient, object, label, title, detail, active, dimmed, onActivate, onDeactivate, className }: FolderCardProps) {
+export function FolderCard({ gradient, gradientClassName, object, label, title, detail, active, dimmed, onActivate, onDeactivate, className }: FolderCardProps) {
   const maskId = React.useId().replace(/:/g, "");
   return (
     <div
@@ -55,7 +56,7 @@ export function FolderCard({ gradient, object, label, title, detail, active, dim
       )}
     >
       {/* 1. iridescent gradient */}
-      <div aria-hidden className="absolute inset-0 overflow-hidden rounded-3xl" style={{ background: gradient }}>
+      <div aria-hidden className={cn("absolute inset-0 overflow-hidden rounded-3xl", gradientClassName)} style={gradient ? { background: gradient } : undefined}>
         <div className="absolute inset-0 bg-[conic-gradient(from_200deg_at_70%_20%,rgb(255_255_255/0.35),transparent_30%,rgb(255_255_255/0.18)_55%,transparent_75%)] mix-blend-overlay" />
       </div>
 

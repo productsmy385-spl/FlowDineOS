@@ -13,7 +13,6 @@ import { DietaryMark, SiteImage, menuIconFor } from "./primitives";
  * daily-menu items are passed in; there is no filler. Each card's gradient is the restaurant's own theme colours, and
  * its object is the dish's own photo (or its chosen icon when it has none).
  */
-const GRADIENT = "linear-gradient(140deg, var(--site-primary) 0%, var(--site-secondary) 55%, var(--site-accent) 100%)";
 
 export function DailyStrip({ items, formatting, labelledBy }: { items: readonly PublicMenuItemData[]; formatting: MenuFormatting; labelledBy?: string }) {
   return (
@@ -24,7 +23,8 @@ export function DailyStrip({ items, formatting, labelledBy }: { items: readonly 
         keyOf={(item) => item.id}
         render={(item, state) => (
           <FolderCard
-            gradient={GRADIENT}
+            // The restaurant's own colours, read from the variables its page root sets (one style attribute, ADR-013 §6).
+            gradientClassName="site-folder-gradient"
             title={item.name}
             label={item.isAvailable ? "Today" : "Sold out"}
             detail={
