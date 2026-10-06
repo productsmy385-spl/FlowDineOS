@@ -11,7 +11,8 @@ const alias = {
 // unit — pure logic; static — repository rule checks; integration — real PostgreSQL (harness: tests/integration/setup).
 export default defineConfig({
   // Tests render Server Components/pages directly; use the automatic JSX runtime (tsconfig keeps "preserve" for Next).
-  esbuild: { jsx: "automatic" },
+  // Vite 8 (Vitest 4) transforms with oxc rather than esbuild.
+  oxc: { jsx: { runtime: "automatic" } },
   test: {
     globals: true,
     environment: "node",

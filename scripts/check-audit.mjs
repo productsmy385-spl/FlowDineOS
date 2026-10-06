@@ -23,6 +23,16 @@ const EXCEPTIONS = {
       "is not part of the deployed server. npm's only offered fix is a breaking upgrade to Tailwind 4. Re-check by the " +
       "review date for a patched braces or a Tailwind/eslint-config-next release that drops it.",
   },
+  "GHSA-rj75-hqrm-r3gf": {
+    package: "postcss-selector-parser",
+    reviewBy: "2026-11-03",
+    reason:
+      "Moderate: quadratic CPU cost parsing crafted flat selectors. Patched only in postcss-selector-parser 7.1.6, " +
+      "while Tailwind 3 (via postcss-nested) requires the 6.x line, so npm's only fix is a breaking upgrade to " +
+      "Tailwind 4. It parses our own stylesheets at build time only - never user input - and is not part of the " +
+      "deployed server. It fails the gate only because it rolls up into tailwindcss, which audits as high. Re-check " +
+      "by the review date for a 6.x backport or plan the Tailwind 4 move.",
+  },
 };
 
 const FAILING = new Set(["high", "critical"]);
