@@ -31,15 +31,21 @@ const variables: Appearance["variables"] = {
 
 const elements = {
   rootBox: "w-full",
-  cardBox: "w-full max-w-none rounded-2xl border border-border-subtle shadow-e2",
+  // Opaque card: no glass or blur behind the form (owner brief 2026-10-06 §14).
+  cardBox: "w-full max-w-none rounded-2xl border border-border-strong shadow-e2",
   card: "bg-card shadow-none",
   header: "hidden",
   formFieldLabel: "text-label text-fg-primary",
-  formFieldInput: "h-10 rounded-xl border-border-strong text-fg-primary",
-  otpCodeFieldInput: "border-border-strong text-fg-primary",
-  formButtonPrimary: "h-10 rounded-xl bg-action-primary text-label text-action-primary-fg shadow-none hover:bg-action-primary-hover",
+  formFieldInput: "h-12 rounded-xl border-2 border-border-strong bg-canvas px-3 text-body text-fg-primary focus:border-focus-ring",
+  // One-time code: six large, clearly bordered boxes.
+  otpCodeFieldInputs: "gap-2",
+  otpCodeFieldInput: "h-14 w-11 rounded-xl border-2 border-border-strong bg-canvas text-heading text-fg-primary focus:border-focus-ring",
+  formButtonPrimary: "h-12 w-full rounded-xl bg-action-primary text-label text-action-primary-fg shadow-none hover:bg-action-primary-hover",
+  formFieldErrorText: "text-label text-status-danger",
+  alert: "rounded-xl border border-status-danger/40 bg-status-danger/12",
+  alertText: "text-body text-status-danger",
   footerActionLink: "text-fg-accent hover:text-fg-primary",
-  formResendCodeLink: "text-fg-accent hover:text-fg-primary",
+  formResendCodeLink: "text-label text-fg-accent hover:text-fg-primary",
   identityPreviewEditButton: "text-fg-accent",
 };
 
