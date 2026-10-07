@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DataShortcuts } from "@/components/settings/data-shortcuts";
 import Link from "next/link";
 import { PaymentMethod, TransactionStatus, TransactionType } from "@prisma/client";
 import { PageHeader } from "@/components/layout/page-header";
@@ -125,16 +126,19 @@ export default async function TransactionsPage({ searchParams }: { searchParams:
     <div className="mx-auto flex w-full max-w-6xl flex-col">
       <PageHeader
         title="Transactions"
-        description="Every payment and refund this restaurant has recorded. Nothing here is ever deleted or rewritten."
+        description="Every payment and refund this restaurant has recorded. Nothing is ever rewritten; old history can be removed only after a backup."
         actions={
-          canCloseDay ? (
+          <div className="flex flex-wrap items-center gap-2">
+          {hasPermission(ctx, "data:export") && <DataShortcuts datasets={["transactions"]} label="Payments" deleteCategory={hasPermission(ctx, "data:purge") ? "orders" : undefined} />}
+          {canCloseDay ? (
             <Link
               href={`${BASE_PATH}/day-close`}
               className="inline-flex h-10 items-center rounded-xl border border-border-strong bg-raised px-4 text-label text-fg-primary transition-colors duration-fast ease-standard hover:bg-border-subtle"
             >
               Close the day
             </Link>
-          ) : undefined
+          ) : null}
+          </div>
         }
       />
 

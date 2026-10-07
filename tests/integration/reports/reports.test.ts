@@ -232,13 +232,10 @@ describe("reports page and data (report:read)", () => {
 });
 
 describe("dashboard (restaurant:read, aggregates only with dashboard:read)", () => {
-  it("renders for CASHIER, KITCHEN and WAITER without any sales aggregates", async () => {
+  it("refuses CASHIER, KITCHEN and WAITER — the dashboard is for owners and managers (owner request 2026-10-07)", async () => {
     for (const role of ["CASHIER", "KITCHEN", "WAITER"] as const) {
       await asSeedUser("A", role);
-      const page = await invokeLoader(DashboardPage);
-      expect(page).not.toHaveProperty("redirect");
-      expect(findTestId(page, "dashboard-sales-today"), role).toBeNull();
-      expect(textOf(page)).not.toContain("Net sales today");
+      expect(await invokeLoader(DashboardPage), role).toEqual({ redirect: "/account/forbidden" });
     }
   });
 

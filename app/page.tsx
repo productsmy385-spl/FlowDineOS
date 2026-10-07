@@ -290,8 +290,12 @@ export default function Home() {
             />
             <div className="flex flex-col gap-2 text-body">
               <p className="text-label text-fg-primary">Legal</p>
-              {/* No policy text has been written yet; the links appear when the pages do (nothing invented here). */}
-              <p className="text-fg-secondary">Privacy Policy and Terms — being prepared</p>
+              <Link href="/privacy" className="inline-flex min-h-9 items-center text-fg-secondary hover:text-fg-primary">
+                Privacy Policy
+              </Link>
+              <Link href="/terms" className="inline-flex min-h-9 items-center text-fg-secondary hover:text-fg-primary">
+                Terms
+              </Link>
             </div>
           </div>
           {/* The one place the company's contact details appear (owner brief 2026-10-07 §29–32). */}

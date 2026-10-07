@@ -17,6 +17,9 @@ const ALLOW_LIST: Record<string, string> = {
   "app/r/[slug]/page.tsx#default": "Public website: published data only, selected by slug (SC-PUB-01)",
   "app/r/[slug]/daily/page.tsx#default": "Public website: today's published daily menu only, selected by slug (SC-PUB-01, LD-PUB-02)",
   "app/page.tsx#default": "Public landing page (no data)",
+  "app/privacy/page.tsx#default": "Public Privacy Policy (static text, no data)",
+  "app/terms/page.tsx#default": "Public Terms (static text, no data)",
+  "app/book-demo/page.tsx#default": "Public Book-a-demo page (renders the form only, no data)",
   "app/book-demo/actions.ts#requestDemoAction":
     "Book a demo (RASOIOS-ADR-024): a visitor has no account; the action can only create a request — never read one — and the service checks a spam trap and fail-closed per-email/per-address rate limits before writing",
   "app/api/health/route.ts#GET": "Liveness probe for Railway/uptime monitors: static body, no data (RH-OPS-01)",

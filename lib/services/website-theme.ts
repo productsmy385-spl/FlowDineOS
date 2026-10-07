@@ -457,8 +457,8 @@ export type PublicSiteData = PublicRestaurantData & {
  * Everything the public website renders: the LD-PUB-01 menu projection plus the resolved theme, identity and section
  * list. Unknown slug, suspended tenant and unpublished website all raise the same `NotFoundError`.
  */
-export async function getPublicSite(slug: string): Promise<PublicSiteData> {
-  const [restaurant, website]: [PublicRestaurantData, PublicWebsiteData] = await Promise.all([getPublicRestaurantBySlug(slug), getPublicWebsite(slug)]);
+export async function getPublicSite(slug: string, audience: "website" | "table" = "website"): Promise<PublicSiteData> {
+  const [restaurant, website]: [PublicRestaurantData, PublicWebsiteData] = await Promise.all([getPublicRestaurantBySlug(slug, audience), getPublicWebsite(slug, audience)]);
   const theme = resolveTheme(website.theme);
   return {
     ...restaurant,

@@ -187,12 +187,14 @@ const PUBLIC_NOT_FOUND = "Restaurant not found.";
  * LD-PUB-01 theme and sections by public slug. No authentication, no tenant identifiers in the result, and the same
  * `NotFoundError` for an unknown slug, a SUSPENDED tenant and an unpublished website.
  */
-export async function getPublicWebsite(slug: string): Promise<PublicWebsiteData> {
+export async function getPublicWebsite(slug: string, audience: "website" | "table" = "website"): Promise<PublicWebsiteData> {
   if (typeof slug !== "string" || !SLUG_PATTERN.test(slug)) throw new NotFoundError(PUBLIC_NOT_FOUND);
 
   const tenant = await mapErrors("Restaurant", () =>
     db.tenant.findFirst({
-      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
+      // A table's QR menu (audience "table") is for guests already seated in the restaurant: it needs the Table QR
+      // feature, not a published website (owner request 2026-10-07). The website itself still needs both.
+      where: audience === "table" ? { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } } : { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         slug: true,
         restaurant: {
@@ -210,7 +212,7 @@ export async function getPublicWebsite(slug: string): Promise<PublicWebsiteData>
   );
 
   const restaurant = tenant?.restaurant;
-  if (!tenant || !restaurant || !restaurant.websitePublished) throw new NotFoundError(PUBLIC_NOT_FOUND);
+  if (!tenant || !restaurant || (audience === "website" && !restaurant.websitePublished)) throw new NotFoundError(PUBLIC_NOT_FOUND);
 
   return {
     slug: tenant.slug,

@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { hasPermission } from "@/lib/auth/permissions";
+import { DataShortcuts } from "@/components/settings/data-shortcuts";
 import { AuditEntryRow } from "@/components/audit/audit-entry";
 import { PageHeader } from "@/components/layout/page-header";
 import { EmptyState } from "@/components/states/empty-state";
@@ -53,6 +55,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
       <PageHeader
         title="Audit log"
         description={`Who changed what in this restaurant. Times are shown in ${ctx.restaurant.timezone}.`}
+        actions={hasPermission(ctx, "data:export") ? <DataShortcuts datasets={["audit"]} label="Audit entries" deleteCategory={hasPermission(ctx, "data:purge") ? "audit" : undefined} /> : undefined}
       />
 
       <Card className="p-4">

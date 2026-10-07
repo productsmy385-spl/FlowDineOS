@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { DataShortcuts } from "@/components/settings/data-shortcuts";
 import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
 import { NewCustomerButton } from "@/components/customers/customer-dialogs";
@@ -88,7 +89,19 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <PageHeader
         title="Customers"
         description="The people who order here, with what they last spent. Their details never leave this restaurant."
-        actions={<NewCustomerButton can={hasPermission(ctx, "customer:create")} />}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {hasPermission(ctx, "data:export") && (
+              <DataShortcuts
+                datasets={["customers"]}
+                label="Customers"
+                importHref={hasPermission(ctx, "data:import") ? "/restaurant/settings/data#import-list" : undefined}
+                deleteCategory={hasPermission(ctx, "data:purge") ? "customers" : undefined}
+              />
+            )}
+            <NewCustomerButton can={hasPermission(ctx, "customer:create")} />
+          </div>
+        }
       />
 
       {result.ok ? (

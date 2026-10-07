@@ -2,6 +2,8 @@ import jsQR from "jsqr";
 import { NextRequest } from "next/server";
 import { GET as downloadQrCodes } from "@/app/api/v1/tables/qr-codes/route";
 import { unzip } from "@/lib/data-portability/zip";
+import type { ReactElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import TableMenuPage from "@/app/r/[slug]/t/[code]/page";
 import { addTablesAction, archiveTableAction, editTableAction, listTablesAction, rotateTableCodeAction } from "@/app/restaurant/tables/actions";
@@ -182,5 +184,25 @@ describe("TC-TBL-004 every live table's QR downloads as one ZIP", () => {
     expect((await download()).status).toBe(403);
     await asSeedUser("A", "TENANT_ADMIN");
     expect((await download("cross-site")).status).toBe(403);
+  });
+});
+
+describe("TC-TBL-005 a seated guest sees the available menu even before the website is published", () => {
+  it("renders the table menu for an unpublished website, without sold-out dishes", async () => {
+    await asSeedUser("A", "TENANT_ADMIN");
+    ok(await invokeAction(addTablesAction, { label: "Unpublished 1" }));
+    const table = await tableNamed(A, "Unpublished 1");
+    await db.restaurant.updateMany({ where: { tenantId: A }, data: { websitePublished: false } });
+    const soldOut = await db.menuItem.findFirstOrThrow({ where: { tenantId: A, archivedAt: null, isPublished: true } });
+    await db.menuItem.update({ where: { id: soldOut.id }, data: { isAvailable: false } });
+    try {
+      const element = await invokeLoader(TableMenuPage, { params: Promise.resolve({ slug: await slugOf(A), code: table.publicCode }) });
+      expect(element).not.toEqual({ notFound: true });
+      const html = renderToStaticMarkup(element as ReactElement);
+      expect(html).toContain("Unpublished 1");
+      expect(html).not.toContain(`>${soldOut.name}<`);
+    } finally {
+      await db.menuItem.update({ where: { id: soldOut.id }, data: { isAvailable: true } });
+    }
   });
 });

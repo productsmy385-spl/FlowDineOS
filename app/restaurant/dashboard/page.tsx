@@ -58,7 +58,9 @@ const ORDER_TYPE_LABEL: Record<string, string> = { DINE_IN: "Dine in", TAKEAWAY:
  * is not allowed to read. "Today" is the restaurant's own business date, never the server's.
  */
 export default async function RestaurantDashboardPage() {
-  const ctx = await requireTenantPage("restaurant:read");
+  // Owners, administrators and managers only (owner request 2026-10-07): counter and kitchen staff are refused here like
+  // on every other management screen, rather than shown a trimmed copy. Their home is the kitchen board or orders.
+  const ctx = await requireTenantPage("dashboard:read");
   const timezone = ctx.restaurant.timezone;
   const currency = ctx.restaurant.currencyCode;
   const now = clockNow();

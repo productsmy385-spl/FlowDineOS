@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { UtensilsCrossed } from "lucide-react";
 import { CategoryBlock } from "@/components/public/menu";
+import { DailyStrip } from "@/components/public/daily-strip";
 import { MenuRing } from "@/components/public/menu-ring";
 import { SectionEmpty } from "@/components/public/primitives";
 import { PublicSiteFrame } from "@/components/public/site-shell";
@@ -27,13 +28,19 @@ export const metadata: Metadata = { title: "Menu", robots: { index: false, follo
  */
 export default async function TableMenuPage({ params }: TableMenuPageProps) {
   const { slug, code } = await params;
-  const site = await loadPublicSite(slug);
-  const table = await findPublicTable(site.slug, code);
+  // The table code is checked first, so an unknown code learns nothing about the restaurant.
+  const table = await findPublicTable(String(slug).toLowerCase(), code);
   if (!table) notFound();
+  // Audience "table": a seated guest sees the menu even when the restaurant has not published its website.
+  const site = await loadPublicSite(slug, "table");
 
   const onTenantHost = (await resolvedTenantSlug()) !== null;
   const view = siteView(site, { canonicalUrl: canonicalPublicUrl(site.slug), homeHref: siteHomeHref(site.slug, onTenantHost) });
-  const withItems = site.categories.filter((category) => category.items.length > 0);
+  // Only what can be ordered right now (owner request 2026-10-07): sold-out dishes are left off the table menu.
+  const withItems = site.categories
+    .map((category) => ({ ...category, items: category.items.filter((item) => item.isAvailable) }))
+    .filter((category) => category.items.length > 0);
+  const today = (site.dailyMenu?.items ?? []).filter((item) => item.isAvailable);
 
   return (
     <PublicSiteFrame view={view}>
@@ -48,6 +55,17 @@ export default async function TableMenuPage({ params }: TableMenuPageProps) {
           <p className="text-body-public text-fg-secondary">Browse the menu. Your server will take your order at the table.</p>
         </header>
 
+        {today.length > 0 && (
+          <section aria-labelledby="table-today-title" className="flex flex-col gap-3">
+            <h2 id="table-today-title" className="text-display-m">
+              {site.dailyMenu?.title ?? "Today's menu"}
+            </h2>
+            {site.dailyMenu?.note ? <p className="text-body-public text-fg-secondary whitespace-pre-line">{site.dailyMenu.note}</p> : null}
+            <DailyStrip items={today} formatting={view.formatting} labelledBy="table-today-title" />
+          </section>
+        )}
+
+        {withItems.length > 0 && <h2 className="text-display-m">Full menu</h2>}
         {withItems.length === 0 ? (
           <SectionEmpty icon={UtensilsCrossed}>{site.restaurant.name} has not published its menu yet.</SectionEmpty>
         ) : site.presentation.menuStyle === "RING" ? (

@@ -4,6 +4,7 @@ import { KeyRound } from "lucide-react";
 import { Icon } from "@/components/ui/icon";
 import { PageHeader } from "@/components/layout/page-header";
 import { ErrorState } from "@/components/states/error-state";
+import { RoleAccess } from "@/components/staff/role-access";
 import { StaffBoard } from "@/components/staff/staff-board";
 import { requireTenantPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -60,6 +61,9 @@ export default async function StaffPage() {
       ) : (
         <ErrorState requestId={staff.error.requestId} message={staff.error.message} />
       )}
+      <div className="mt-8">
+        <RoleAccess />
+      </div>
     </div>
   );
 }

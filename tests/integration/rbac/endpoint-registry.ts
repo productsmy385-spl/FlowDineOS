@@ -19,7 +19,7 @@ import { deleteDraftDailyMenuAction, getDailyMenuAction } from "@/app/restaurant
 import { setMenuItemAvailabilityAction } from "@/app/restaurant/menu/items-actions";
 import { createStaffOrderAction, getOrdersAction, setOrderPriorityAction, updateOrderStatusAction } from "@/app/restaurant/orders/actions";
 import { createTestPrintJobAction, getPrintAgentsAction, getPrintJobsAction, reprintKotAction, retryPrintJobAction } from "@/app/restaurant/printing/actions";
-import { updateOperationalSettingsAction, updateRestaurantProfileAction } from "@/app/restaurant/settings/actions";
+import { getRestaurantSettingsAction, updateOperationalSettingsAction, updateRestaurantProfileAction } from "@/app/restaurant/settings/actions";
 import { createKitchenSectionAction } from "@/app/restaurant/settings/sections-actions";
 import { updateWebsiteSettingsAction } from "@/app/restaurant/settings/website-actions";
 import { changeStaffRoleAction, deactivateStaffAction, inviteStaffAction, listStaffAction } from "@/app/restaurant/staff/actions";
@@ -100,7 +100,7 @@ export const ENDPOINT_REGISTRY: Readonly<Record<Permission, RegistryEntry>> = {
         : { ok: false, error: { code: "FORBIDDEN", message: "No sales figures for this role", requestId: "rbac-probe" } };
     },
   },
-  "restaurant:read": { endpoint: "RestaurantDashboardPage", invoke: () => invokeLoader(RestaurantDashboardPage) },
+  "restaurant:read": { endpoint: "getRestaurantSettingsAction (LD-RST-01)", invoke: () => invokeAction(getRestaurantSettingsAction) },
   "restaurant:update": {
     endpoint: "updateRestaurantProfileAction (SA-RST-01)",
     invoke: () => invokeAction(updateRestaurantProfileAction, { rbacProbe: true } as never),

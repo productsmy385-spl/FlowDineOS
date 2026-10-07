@@ -12,13 +12,13 @@ import { parseParamOrNotFound, slugParam } from "@/lib/validation/core";
  * An invalid slug, an unknown slug, a suspended tenant and an unpublished website all render the same not-found page
  * with HTTP 404 — the host can never be used to tell them apart (ADR-012 §7; TC-SEC-005, TC-WEB-004, TC-WEB-018).
  */
-export async function loadPublicSite(rawSlug: unknown): Promise<PublicSiteData> {
+export async function loadPublicSite(rawSlug: unknown, audience: "website" | "table" = "website"): Promise<PublicSiteData> {
   const slug = parseParamOrNotFound(slugParam, rawSlug);
   const hostSlug = await resolvedTenantSlug();
   // On a tenant host the path is the middleware's own rewrite; anything else is a forged request.
   if (hostSlug !== null && hostSlug !== slug) notFound();
   try {
-    return await getPublicSite(slug);
+    return await getPublicSite(slug, audience);
   } catch (error) {
     if (error instanceof NotFoundError) notFound();
     throw error;

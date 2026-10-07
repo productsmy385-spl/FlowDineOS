@@ -1,4 +1,6 @@
+import { DataShortcuts } from "@/components/settings/data-shortcuts";
 import { requireTenantPage } from "@/lib/auth/guards";
+import { hasPermission } from "@/lib/auth/permissions";
 import { reportRangeOrDefault, salesSummary } from "@/lib/data/reports";
 import { Card } from "@/components/ui/card";
 import { formatMoney } from "@/lib/ui/format";
@@ -32,6 +34,11 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <p className="text-xs text-fg-secondary mt-1 tabular-nums">
           Business dates {range.from} to {range.to} ({ctx.restaurant.timezone})
         </p>
+        {hasPermission(ctx, "data:export") && (
+          <div className="mt-3">
+            <DataShortcuts datasets={["reports", "orders", "transactions"]} label="Report data" from={range.from} to={range.to} deleteCategory={hasPermission(ctx, "data:purge") ? "orders" : undefined} />
+          </div>
+        )}
       </div>
 
       {/* Analytics Cards */}

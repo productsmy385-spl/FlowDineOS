@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ConfirmDialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { cn } from "@/lib/ui/cn";
+import { downloadExport } from "@/lib/ui/export-download";
 import { DATASET_KEY_LIST, PURGE_CATEGORY_LIST } from "@/lib/validation/data";
 
 /**
@@ -76,29 +77,7 @@ const shiftDate = (iso: string, days: number) => {
   return d.toISOString().slice(0, 10);
 };
 
-/** Fetches an export and saves it through the browser. Returns the backup id the server recorded, or throws. */
-async function download(params: { datasets: DatasetKey[]; format: string; from?: string; to?: string; backupId?: string }): Promise<{ backupId: string; filename: string }> {
-  const query = new URLSearchParams({ datasets: params.datasets.join(","), format: params.format });
-  if (params.from) query.set("from", params.from);
-  if (params.to) query.set("to", params.to);
-  if (params.backupId) query.set("backupId", params.backupId);
-  const response = await fetch(`/api/v1/data/export?${query}`, { credentials: "same-origin" });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
-    throw new Error(body?.error?.message ?? "The backup could not be downloaded. Try again.");
-  }
-  const filename = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1] ?? "restaurant-backup";
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  return { backupId: response.headers.get("x-backup-id") ?? "", filename };
-}
+const download = (params: { datasets: DatasetKey[]; format: string; from?: string; to?: string; backupId?: string }) => downloadExport(params);
 
 export function DataManagement({ overview, canImport, canDelete }: { overview: Overview; canImport: boolean; canDelete: boolean }) {
   return (
@@ -433,6 +412,12 @@ function DeleteCard({ today }: { today: string }) {
   const router = useRouter();
   const toast = useToast();
   const [categories, setCategories] = React.useState<PurgeKey[]>([]);
+  // Opened from a screen's "Delete old …" shortcut: start with that kind of data ticked (still nothing is deleted
+  // without the backup and the typed confirmation).
+  React.useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get("delete");
+    if (wanted && (PURGE_CATEGORY_LIST as readonly string[]).includes(wanted)) setCategories([wanted as PurgeKey]);
+  }, []);
   const [before, setBefore] = React.useState(shiftDate(today, -365));
   const [backup, setBackup] = React.useState<{ backupId: string; filename: string; key: string } | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -474,7 +459,7 @@ function DeleteCard({ today }: { today: string }) {
   }
 
   return (
-    <Card className="border-status-danger/40">
+    <Card id="delete-old-data" className="scroll-mt-24 border-status-danger/40">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-status-danger">
           <ShieldAlert className="size-5" aria-hidden /> Delete old data
@@ -626,7 +611,7 @@ function ListImportCard() {
   }
 
   return (
-    <Card>
+    <Card id="import-list" className="scroll-mt-24">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <FileSpreadsheet className="size-5 text-fg-accent" aria-hidden /> Import a customer or menu list

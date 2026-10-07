@@ -167,12 +167,16 @@ export function shiftsOf(week: readonly PublicOpeningDay[]): Shift[] {
  * LD-PUB-01 — everything the public website of `slug` may show, plus LD-PUB-02's daily menu for today.
  * `now` is injectable so the business-date and open-now boundaries are testable; it defaults to the wall clock.
  */
-export async function getPublicRestaurant(slug: string, now: Date = new Date()): Promise<PublicRestaurantData> {
+export type PublicAudience = "website" | "table";
+
+export async function getPublicRestaurant(slug: string, now: Date = new Date(), audience: PublicAudience = "website"): Promise<PublicRestaurantData> {
   if (typeof slug !== "string" || !SLUG_PATTERN.test(slug)) throw new NotFoundError(NOT_FOUND_MESSAGE);
 
   const tenant = await mapErrors("Restaurant", () =>
     db.tenant.findFirst({
-      where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
+      // A table's QR menu (audience "table") is for guests already seated in the restaurant: it needs the Table QR
+      // feature, not a published website (owner request 2026-10-07). The website itself still needs both.
+      where: audience === "table" ? { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } } : { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         id: true,
         slug: true,
@@ -221,7 +225,7 @@ export async function getPublicRestaurant(slug: string, now: Date = new Date()):
   );
 
   const restaurant = tenant?.restaurant;
-  if (!tenant || !restaurant || !restaurant.websitePublished) throw new NotFoundError(NOT_FOUND_MESSAGE);
+  if (!tenant || !restaurant || (audience === "website" && !restaurant.websitePublished)) throw new NotFoundError(NOT_FOUND_MESSAGE);
 
   const address = restaurant.showAddress
     ? [restaurant.addressLine1, restaurant.addressLine2, restaurant.city, restaurant.region, restaurant.postalCode]

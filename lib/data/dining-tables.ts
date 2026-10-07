@@ -37,7 +37,8 @@ export async function updateTable(tx: Tx, ctx: TenantContext, id: string, data: 
 /** Public: the label of an active table, by the restaurant's slug and the code printed on the QR. `null` otherwise. */
 export async function findPublicTable(slug: string, code: string): Promise<{ label: string } | null> {
   if (!SLUG_PATTERN.test(slug) || !/^[a-z0-9]{8,16}$/.test(code)) return null;
-  const tenant = await db.tenant.findFirst({ where: { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: { in: ["WEBSITE", "QR_MENU"] }, enabled: false } } }, select: { id: true } });
+  // The table menu needs the Table QR feature on; it no longer needs a published website (owner request 2026-10-07).
+  const tenant = await db.tenant.findFirst({ where: { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } }, select: { id: true } });
   if (!tenant) return null;
   return db.diningTable.findFirst({ where: { tenantId: tenant.id, publicCode: code, isActive: true, archivedAt: null }, select: { label: true } });
 }

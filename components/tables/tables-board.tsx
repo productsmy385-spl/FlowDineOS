@@ -75,7 +75,7 @@ function printCards(tables: Table[], restaurant: string) {
   return true;
 }
 
-export function TablesBoard({ restaurantName, websitePublished, tables }: { restaurantName: string; websitePublished: boolean; tables: Table[] }) {
+export function TablesBoard({ restaurantName, tables }: { restaurantName: string; websitePublished: boolean; tables: Table[] }) {
   const router = useRouter();
   const toast = useToast();
   const [count, setCount] = React.useState(10);
@@ -105,11 +105,6 @@ export function TablesBoard({ restaurantName, websitePublished, tables }: { rest
 
   return (
     <div className="flex min-w-0 flex-col gap-6">
-      {!websitePublished && (
-        <p role="status" className="rounded-xl border border-status-warning/30 bg-status-warning/12 px-3 py-2 text-body text-fg-primary">
-          Your website is not published yet, so the QR codes will open a &ldquo;not found&rdquo; page. Publish it from Website before putting codes on tables.
-        </p>
-      )}
 
       <Card>
         <CardContent className="flex flex-col gap-4 pt-6 md:flex-row md:items-end">

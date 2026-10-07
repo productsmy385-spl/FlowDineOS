@@ -95,7 +95,7 @@ export function DemoForm({ onDone }: { onDone?: () => void }) {
       {field("message", "Message or requirements", <textarea name="message" rows={3} maxLength={1000} className={cn(FIELD, "h-auto py-2")} />, false)}
       {/* Spam trap: hidden from people and from assistive technology; only bots fill it. */}
       <input name="website" tabIndex={-1} autoComplete="off" aria-hidden className="sr-only" />
-      <p className="text-caption text-fg-secondary">We use these details only to arrange your demo. The date and time are your preference; we will confirm with you.</p>
+      <p className="text-caption text-fg-secondary">We use these details only to arrange your demo (see our <a href="/privacy" className="text-fg-accent underline-offset-4 hover:underline">Privacy Policy</a>). The date and time are your preference; we will confirm with you.</p>
       <Button type="submit" size="lg" icon={CalendarCheck} loading={pending} loadingLabel="Sending…" className="w-full sm:w-auto sm:self-end">
         Request demo
       </Button>
