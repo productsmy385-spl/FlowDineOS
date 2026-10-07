@@ -19,6 +19,7 @@ import { useConsoleSession } from "@/lib/ui/session-context";
 import { usePolling } from "@/lib/ui/use-polling";
 import { updateOrderStatusAction } from "@/app/restaurant/orders/actions";
 import { CancelOrderDialog } from "./cancel-order-dialog";
+import { CardRail } from "@/components/visual/card-rail";
 import { OrderCard } from "./order-card";
 import { ORDER_TYPE_LABELS, TRANSITION_LABELS, type TransitionTarget } from "./order-labels";
 
@@ -243,49 +244,52 @@ export function OrderBoard({
           empty={<EmptyState icon={DOMAIN_ICONS.orders} title="Nothing closed today yet" description="Completed and cancelled orders from today appear here." />}
         />
       ) : (
-        // One column on a phone, then as many columns of at least 20rem as fit: 2 on a tablet, 3–4 on a desktop. Cards
-        // stretch to the tallest in their row, so rows line up.
-        <ul className="grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,20rem),1fr))] items-stretch gap-4 p-0 md:gap-5">
-          {visible.map((order) => {
+        // Every active order the filter keeps, on one rail — 1 card or 100, nothing sliced (owner brief 2026-10-07 §3).
+        <CardRail
+          items={visible}
+          keyOf={(order) => order.id}
+          label="Orders"
+          onOpen={(order) => router.push(`/restaurant/orders/${order.id}`)}
+          renderCard={(order, state) => {
             const targets = transitions[order.status] ?? [];
             const forward = targets.filter((target) => target !== "CANCELLED");
             return (
-              <li key={order.id} className="flex min-w-0">
-                <OrderCard
-                  order={order}
-                  now={now}
-                  locale={locale}
-                  primaryAction={
-                    forward.length > 0 ? (
-                      <span className="flex flex-wrap gap-2">
-                        {forward.map((target) => (
-                          <Button key={target} size="sm" variant="primary" loading={pendingId === order.id} loadingLabel="Saving…" onClick={() => void move(order, target)}>
-                            {TRANSITION_LABELS[target]}
-                          </Button>
-                        ))}
-                      </span>
-                    ) : null
-                  }
-                  secondaryAction={
-                    targets.includes("CANCELLED") ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={pendingId === order.id}
-                        onClick={() => {
-                          setCancelError(null);
-                          setCancelling(order);
-                        }}
-                      >
-                        {TRANSITION_LABELS.CANCELLED}
-                      </Button>
-                    ) : null
-                  }
-                />
-              </li>
+              <OrderCard
+                order={order}
+                now={now}
+                locale={locale}
+                active={state.active}
+                fresh={state.fresh}
+                primaryAction={
+                  forward.length > 0 ? (
+                    <span className="flex flex-wrap gap-2">
+                      {forward.map((target) => (
+                        <Button key={target} size="sm" variant="primary" loading={pendingId === order.id} loadingLabel="Saving…" onClick={() => void move(order, target)}>
+                          {TRANSITION_LABELS[target]}
+                        </Button>
+                      ))}
+                    </span>
+                  ) : null
+                }
+                secondaryAction={
+                  targets.includes("CANCELLED") ? (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={pendingId === order.id}
+                      onClick={() => {
+                        setCancelError(null);
+                        setCancelling(order);
+                      }}
+                    >
+                      {TRANSITION_LABELS.CANCELLED}
+                    </Button>
+                  ) : null
+                }
+              />
             );
-          })}
-        </ul>
+          }}
+        />
       )}
 
       <CancelOrderDialog

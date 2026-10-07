@@ -1,26 +1,26 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, Flame, Printer } from "lucide-react";
+import { ChefHat, Flame, Printer } from "lucide-react";
 import type { KotStatus } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { RailCard } from "@/components/visual/card-rail";
 import type { BoardTicket } from "@/lib/data/kitchen";
 import { cn } from "@/lib/ui/cn";
 import { DOMAIN_ICONS, STATUS_ICONS } from "@/lib/ui/icons";
 import { ORDER_TYPE_LABELS, elapsedMinutes, formatDuration } from "@/components/orders/order-labels";
 
 /**
- * One kitchen ticket on the rail (design.md §11; owner review 2026-10-06, "framed tickets on a rail, the focused one
- * opened out to carry its caption").
+ * One kitchen ticket on a status rail (owner brief 2026-10-07 §15–21): the same bookmark-tab card as the orders rail,
+ * with kitchen content.
  *
- * Closed, a ticket shows what a cook needs at arm's length — KOT number, table, timer, urgency, every item with its
- * quantity, and its one next action. Focused (tap, click or keyboard focus), it opens out to carry the rest: add-ons,
- * instructions, notes, order number, round, print state, and Open order / Reprint. It opens by animating its own row
- * height (grid-template-rows 0fr → 1fr over 0.6 s, cubic-bezier(.22,1,.36,1)) — never by scaling, so text and icons stay
- * their size. Other tickets dim slightly while one is open, never to unreadable. No customer name or money reaches
- * this card: the kitchen projection never sends them.
+ * Closed: KOT number, order number, table or type, timer, urgency, the first items and the one next action — what a
+ * cook needs at arm's length. Active (hover, keyboard focus or tap on its rail): the full ticket — every item, add-ons,
+ * instructions, notes, round, target time, print state — plus Open order and Reprint KOT where the role may use them.
+ * It opens by row height, never by scaling. No customer name or money reaches this card: the kitchen projection never
+ * sends them (security.md, kitchen projection), so the brief's "customer" line is deliberately absent.
  */
 export const KITCHEN_NEXT: Partial<Record<KotStatus, { to: KotStatus; label: string }>> = {
   QUEUED: { to: "PREPARING", label: "Start" },
@@ -35,7 +35,13 @@ export function lateness(minutes: number, target: number | null): "ontime" | "wa
   return minutes >= target ? "warning" : "ontime";
 }
 
-const EASE = "duration-[600ms] ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:duration-0";
+const BLOOM: Record<string, string> = {
+  QUEUED: "radial-gradient(circle at 50% 45%, rgb(var(--accent)), rgb(var(--secondary)) 55%, transparent 80%)",
+  PREPARING: "radial-gradient(circle at 50% 45%, rgb(var(--text-warning)), rgb(var(--danger)) 60%, transparent 80%)",
+  READY: "radial-gradient(circle at 50% 45%, rgb(var(--text-success)), rgb(var(--primary)) 55%, transparent 80%)",
+};
+
+const COMPACT_ITEMS = 2;
 
 export function KotCard({
   ticket,
@@ -44,8 +50,7 @@ export function KotCard({
   pending,
   onAdvance,
   focused = false,
-  dimmed = false,
-  onFocusChange,
+  fresh = false,
   canOpenOrder = false,
   canReprint = false,
   onReprint,
@@ -57,9 +62,7 @@ export function KotCard({
   pending: boolean;
   onAdvance: (to: KotStatus) => void;
   focused?: boolean;
-  /** Another ticket in the column is open. */
-  dimmed?: boolean;
-  onFocusChange?: (focused: boolean) => void;
+  fresh?: boolean;
   canOpenOrder?: boolean;
   canReprint?: boolean;
   onReprint?: () => void;
@@ -68,138 +71,112 @@ export function KotCard({
   const minutes = elapsedMinutes(since, now);
   const state = lateness(minutes, ticket.targetPrepMinutes);
   const timerClass = state === "overdue" ? "text-status-danger" : state === "warning" ? "text-status-warning" : "text-fg-secondary";
-  const hasExtras = ticket.items.some((i) => i.addons || i.instructions) || Boolean(ticket.notes);
-  const detailsId = `kot-details-${ticket.id}`;
+  const urgent = ticket.priority === "HIGH";
+  const shown = focused ? ticket.items : ticket.items.slice(0, COMPACT_ITEMS);
+  const hidden = ticket.items.length - shown.length;
+
+  const art = (
+    <span className="flex h-full w-full items-center justify-center bg-raised text-fg-secondary">
+      <ChefHat aria-hidden className="size-14" strokeWidth={1.25} />
+    </span>
+  );
 
   return (
-    <article
-      data-testid="kot-card"
-      data-focused={focused || undefined}
-      onClick={(event) => {
-        // A tap anywhere on the ticket except its buttons and links opens or closes it.
-        if (!(event.target as HTMLElement).closest("button, a")) onFocusChange?.(!focused);
-      }}
-      className={cn(
-        "flex w-full cursor-pointer flex-col rounded-2xl border bg-card p-4 transition-[opacity,filter,box-shadow,border-color]",
-        EASE,
-        ticket.priority === "HIGH" ? "border-status-danger/50" : "border-border-subtle",
-        focused ? "border-action-primary/60 shadow-e2" : "shadow-e1",
-        dimmed && !focused && "opacity-80 saturate-[.85]",
-      )}
-    >
-      <header className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <div className="min-w-0">
-          <p className="text-kitchen-number text-fg-primary">{ticket.kotNumber}</p>
-          <p className="truncate text-subheading text-fg-secondary">{ticket.tableLabel ? `Table ${ticket.tableLabel}` : ORDER_TYPE_LABELS[ticket.orderType]}</p>
-        </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <p className={cn("inline-flex items-center gap-1.5 text-subheading text-numeric", timerClass)}>
-            <Icon icon={DOMAIN_ICONS.timer} size={20} />
-            {state === "overdue" ? `+${formatDuration(minutes - (ticket.targetPrepMinutes ?? 0))}` : formatDuration(minutes)}
-          </p>
-          {ticket.priority === "HIGH" && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-status-danger/12 px-2 py-0.5 text-label text-status-danger">
-              <Icon icon={Flame} size={16} />
-              Urgent
-            </span>
-          )}
-        </div>
-      </header>
-
-      <ul className="mt-3 flex flex-col gap-1.5">
-        {ticket.items.map((item) => (
-          <li key={item.id} className="text-kitchen-item text-fg-primary">
-            <span className="text-numeric">{item.quantity} ×</span> {item.label}
-          </li>
-        ))}
-      </ul>
-
-      {/* The part that opens out. Height animates through grid rows; content keeps its size. */}
-      <div id={detailsId} className={cn("grid transition-[grid-template-rows,opacity]", EASE, focused ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")} aria-hidden={!focused}>
-        <div className="min-h-0 overflow-hidden">
-          <div className="flex flex-col gap-3 pt-3">
-            {hasExtras && (
-              <ul className="flex flex-col gap-2">
-                {ticket.items
-                  .filter((item) => item.addons || item.instructions)
-                  .map((item) => (
-                    <li key={item.id}>
-                      <p className="text-label text-fg-primary">{item.label}</p>
-                      {item.addons && <p className="text-body text-fg-secondary">{item.addons}</p>}
-                      {item.instructions && <p className="mt-1 border-l-2 border-status-warning pl-2 text-body text-status-warning">{item.instructions}</p>}
-                    </li>
-                  ))}
-                {ticket.notes && <li className="border-l-2 border-status-warning pl-2 text-body text-status-warning">{ticket.notes}</li>}
-              </ul>
-            )}
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-caption">
-              <dt className="text-fg-secondary">Order</dt>
-              <dd className="text-numeric text-fg-primary">{ticket.orderNumber}</dd>
-              {ticket.roundNumber > 1 && (
-                <>
-                  <dt className="text-fg-secondary">Round</dt>
-                  <dd className="text-fg-primary">{ticket.roundNumber}</dd>
-                </>
-              )}
-              {ticket.targetPrepMinutes !== null && (
-                <>
-                  <dt className="text-fg-secondary">Target</dt>
-                  <dd className="text-fg-primary">{formatDuration(ticket.targetPrepMinutes)}</dd>
-                </>
-              )}
-              <dt className="text-fg-secondary">Status</dt>
-              <dd>
-                <StatusBadge domain="kot" status={ticket.status} />
-              </dd>
-              {ticket.printStatus !== "NONE" && (
-                <>
-                  <dt className="text-fg-secondary">Ticket print</dt>
-                  <dd>
-                    <StatusBadge domain="printJob" status={ticket.printStatus} />
-                  </dd>
-                </>
-              )}
-            </dl>
-            {(canOpenOrder || canReprint) && (
-              <div className="flex flex-wrap gap-2">
-                {canOpenOrder && (
-                  <Link href={`/restaurant/orders/${ticket.orderId}`} tabIndex={focused ? 0 : -1} className="inline-flex h-10 items-center rounded-xl border border-border-strong px-3 text-label text-fg-primary hover:bg-raised">
-                    Open order
-                  </Link>
-                )}
-                {canReprint && (
-                  <Button size="sm" variant="secondary" icon={Printer} tabIndex={focused ? 0 : -1} onClick={onReprint}>
-                    Reprint KOT
-                  </Button>
-                )}
-              </div>
+    <RailCard art={art} bloom={BLOOM[ticket.status] ?? BLOOM.QUEUED} active={focused} fresh={fresh} accent={urgent || state === "overdue" ? "danger" : state === "warning" ? "warning" : "neutral"}>
+      <article data-testid="kot-card" data-focused={focused || undefined} className="flex h-full flex-col gap-3">
+        <header className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+          <div className="min-w-0">
+            <p className="text-kitchen-number leading-none text-fg-primary">{ticket.kotNumber}</p>
+            <p className="mt-1 truncate text-label text-fg-secondary">
+              {ticket.orderNumber} · {ticket.tableLabel ? `Table ${ticket.tableLabel}` : ORDER_TYPE_LABELS[ticket.orderType]}
+            </p>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <p className={cn("inline-flex items-center gap-1 text-label text-numeric", timerClass)}>
+              <Icon icon={DOMAIN_ICONS.timer} size={16} />
+              {state === "overdue" ? `+${formatDuration(minutes - (ticket.targetPrepMinutes ?? 0))}` : formatDuration(minutes)}
+            </p>
+            {urgent && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-status-danger/12 px-2 py-0.5 text-caption text-status-danger">
+                <Icon icon={Flame} size={16} />
+                Urgent
+              </span>
             )}
           </div>
-        </div>
-      </div>
+        </header>
 
-      <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
-        {action ? (
-          <Button variant="primary" size="touch" className="w-full" loading={pending} loadingLabel="Saving…" onClick={() => onAdvance(action.to)}>
-            {action.label}
-          </Button>
-        ) : (
-          <p className="inline-flex items-center gap-2 text-label text-fg-secondary">
-            <Icon icon={STATUS_ICONS.kot[ticket.status].icon} size={18} />
-            {STATUS_ICONS.kot[ticket.status].label}
-          </p>
-        )}
-        <button
-          type="button"
-          aria-expanded={focused}
-          aria-controls={detailsId}
-          aria-label={focused ? `Close ticket ${ticket.kotNumber}` : `Open ticket ${ticket.kotNumber}`}
-          onClick={() => onFocusChange?.(!focused)}
-          className="flex size-12 items-center justify-center rounded-xl border border-border-strong text-fg-primary hover:bg-raised"
-        >
-          <ChevronDown aria-hidden className={cn("size-5 transition-transform", EASE, focused && "rotate-180")} />
-        </button>
-      </div>
-    </article>
+        <ul className="flex flex-col gap-1">
+          {shown.map((item) => (
+            <li key={item.id}>
+              <p className="text-subheading text-fg-primary">
+                <span className="text-numeric">{item.quantity} ×</span> {item.label}
+              </p>
+              {focused && item.addons && <p className="text-body text-fg-secondary">{item.addons}</p>}
+              {focused && item.instructions && <p className="mt-1 border-l-2 border-status-warning pl-2 text-body text-status-warning">{item.instructions}</p>}
+            </li>
+          ))}
+          {hidden > 0 && <li className="text-label text-fg-secondary">+{hidden} more</li>}
+        </ul>
+
+        <div className={cn("grid transition-[grid-template-rows,opacity] duration-[600ms] ease-[cubic-bezier(.22,1,.36,1)] motion-reduce:transition-none", focused ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")} aria-hidden={!focused}>
+          <div className="min-h-0 overflow-hidden">
+            <div className="flex flex-col gap-3">
+              {ticket.notes && <p className="border-l-2 border-status-warning pl-2 text-body text-status-warning">{ticket.notes}</p>}
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-caption">
+                <dt className="text-fg-secondary">Type</dt>
+                <dd className="text-fg-primary">{ORDER_TYPE_LABELS[ticket.orderType]}</dd>
+                {ticket.roundNumber > 1 && (
+                  <>
+                    <dt className="text-fg-secondary">Round</dt>
+                    <dd className="text-fg-primary">{ticket.roundNumber}</dd>
+                  </>
+                )}
+                {ticket.targetPrepMinutes !== null && (
+                  <>
+                    <dt className="text-fg-secondary">Target</dt>
+                    <dd className="text-fg-primary">{formatDuration(ticket.targetPrepMinutes)}</dd>
+                  </>
+                )}
+                {ticket.printStatus !== "NONE" && (
+                  <>
+                    <dt className="text-fg-secondary">Ticket print</dt>
+                    <dd className="min-w-0">
+                      <StatusBadge domain="printJob" status={ticket.printStatus} />
+                    </dd>
+                  </>
+                )}
+              </dl>
+              {(canOpenOrder || canReprint) && (
+                <div className="flex flex-wrap gap-2">
+                  {canOpenOrder && (
+                    <Link href={`/restaurant/orders/${ticket.orderId}`} tabIndex={focused ? 0 : -1} className="inline-flex h-10 items-center rounded-xl border border-border-strong px-3 text-label text-fg-primary hover:bg-raised">
+                      Open order
+                    </Link>
+                  )}
+                  {canReprint && (
+                    <Button size="sm" variant="secondary" icon={Printer} tabIndex={focused ? 0 : -1} onClick={onReprint}>
+                      Reprint KOT
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-auto">
+          {action ? (
+            <Button variant="primary" size="touch" className="w-full" loading={pending} loadingLabel="Saving…" onClick={() => onAdvance(action.to)}>
+              {action.label}
+            </Button>
+          ) : (
+            <p className="inline-flex items-center gap-2 text-label text-fg-secondary">
+              <Icon icon={STATUS_ICONS.kot[ticket.status].icon} size={18} />
+              {STATUS_ICONS.kot[ticket.status].label}
+            </p>
+          )}
+        </div>
+      </article>
+    </RailCard>
   );
 }

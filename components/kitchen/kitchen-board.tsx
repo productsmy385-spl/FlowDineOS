@@ -12,6 +12,7 @@ import { DOMAIN_ICONS } from "@/lib/ui/icons";
 import { usePolling } from "@/lib/ui/use-polling";
 import { updateKOTStatusAction } from "@/app/restaurant/kitchen/actions";
 import { reprintKotAction } from "@/app/restaurant/printing/actions";
+import { CardRail, type RailCardState } from "@/components/visual/card-rail";
 import { KITCHEN_NEXT, KotCard } from "./kot-card";
 
 /**
@@ -69,11 +70,8 @@ export function KitchenBoard({
   const toast = useToast();
   const [tickets, setTickets] = React.useState<BoardTicket[]>(() => merge([], initial.tickets));
   const [sectionId, setSectionId] = React.useState<string>("ALL");
-  const [column, setColumn] = React.useState<KotStatus>("QUEUED");
   const [now, setNow] = React.useState(() => Date.now());
   const [pendingId, setPendingId] = React.useState<string | null>(null);
-  // One ticket open at a time across the board (owner review 2026-10-06: the focused ticket carries its caption).
-  const [focusedId, setFocusedId] = React.useState<string | null>(null);
 
   // The section the cook chose is a device preference, so it survives a reload of this screen only.
   React.useEffect(() => {
@@ -138,30 +136,27 @@ export function KitchenBoard({
   const inSection = tickets.filter((ticket) => sectionId === "ALL" || ticket.sectionId === sectionId);
   const byColumn = (status: KotStatus) => inSection.filter((ticket) => ticket.status === status);
 
-  function renderCard(ticket: BoardTicket) {
+  function renderCard(ticket: BoardTicket, state: RailCardState) {
     const next = KITCHEN_NEXT[ticket.status];
     const action = next && allowedTargets.includes(next.to) ? next : null;
     return (
-      <li key={ticket.id} className="flex">
-        <KotCard
-          ticket={ticket}
-          now={now}
-          action={action}
-          pending={pendingId === ticket.id}
-          onAdvance={(to) => void advance(ticket, to)}
-          focused={focusedId === ticket.id}
-          dimmed={focusedId !== null && focusedId !== ticket.id && byColumn(ticket.status).some((t) => t.id === focusedId)}
-          onFocusChange={(open) => setFocusedId(open ? ticket.id : null)}
-          canOpenOrder={canOpenOrder}
-          canReprint={canReprint}
-          onReprint={() => void reprint(ticket)}
-        />
-      </li>
+      <KotCard
+        ticket={ticket}
+        now={now}
+        action={action}
+        pending={pendingId === ticket.id}
+        onAdvance={(to) => void advance(ticket, to)}
+        focused={state.active}
+        fresh={state.fresh}
+        canOpenOrder={canOpenOrder}
+        canReprint={canReprint}
+        onReprint={() => void reprint(ticket)}
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <StaleBanner stale={stale} lastSuccessAt={lastSuccessAt} timezone={timezone} />
 
       {sections.length > 0 && (
@@ -173,77 +168,51 @@ export function KitchenBoard({
         </div>
       )}
 
-      {/* Below lg one column at a time, chosen with a segmented control. */}
-      {/* Three equal columns that may shrink: on a narrow phone the count moves under the label instead of pushing the
-          row wider than the screen; each button stays a 48 px touch target. */}
-      <div className="grid grid-cols-3 gap-2 lg:hidden" role="group" aria-label="Ticket status">
-        {COLUMNS.map((entry) => (
-          <button
-            key={entry.status}
-            type="button"
-            aria-pressed={column === entry.status}
-            onClick={() => setColumn(entry.status)}
-            className={`inline-flex min-h-12 min-w-0 flex-col items-center justify-center gap-0 rounded-xl border px-2 py-1 text-label transition-colors duration-fast ease-standard min-[400px]:flex-row min-[400px]:gap-2 min-[400px]:px-3 sm:text-subheading ${
-              column === entry.status ? "border-action-primary bg-action-primary/12 text-fg-accent" : "border-border-subtle bg-card text-fg-secondary"
-            }`}
-          >
-            {entry.title}
-            <span className="text-numeric">{byColumn(entry.status).length}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="lg:hidden">
-        <Column status={column} title={COLUMNS.find((entry) => entry.status === column)!.title} tickets={byColumn(column)} renderCard={renderCard} />
-      </div>
-
-      {/* One board, three equal lanes: same panel, same header, each scrolling on its own. */}
-      <div className="hidden gap-4 lg:grid lg:grid-cols-3">
-        {COLUMNS.map((entry) => (
-          <Column key={entry.status} status={entry.status} title={entry.title} tickets={byColumn(entry.status)} renderCard={renderCard} showHeading />
-        ))}
-      </div>
+      {/* Three status rails, top to bottom on every screen; each holds every ticket in that state and scrolls sideways
+          on its own (owner brief 2026-10-07 §15). A ticket moves rail only when the server says its status changed. */}
+      {COLUMNS.map((entry) => (
+        <Lane key={entry.status} status={entry.status} title={entry.title} tickets={byColumn(entry.status)} renderCard={renderCard} />
+      ))}
     </div>
   );
 }
 
 const LANE_ACCENT: Record<string, string> = { QUEUED: "bg-fg-secondary", PREPARING: "bg-status-warning", READY: "bg-status-success" };
 
-function Column({
+function Lane({
   status,
   title,
   tickets,
   renderCard,
-  showHeading = false,
 }: {
   status: KotStatus;
   title: string;
   tickets: readonly BoardTicket[];
-  renderCard: (ticket: BoardTicket) => React.ReactNode;
-  showHeading?: boolean;
+  renderCard: (ticket: BoardTicket, state: RailCardState) => React.ReactNode;
 }) {
   return (
-    <section aria-label={`${title} tickets`} className="flex min-w-0 flex-col rounded-3xl border border-border-subtle bg-raised/60 p-3" data-testid={`kitchen-lane-${status}`}>
-      {showHeading && (
-        <h2 className="flex items-center gap-2 px-1 pb-3 text-heading text-fg-primary">
-          <span aria-hidden className={`size-2.5 rounded-full ${LANE_ACCENT[status] ?? "bg-fg-secondary"}`} />
-          {title}
-          <span className="ml-auto rounded-full bg-card px-2.5 py-0.5 text-subheading text-numeric text-fg-secondary">{tickets.length}</span>
-        </h2>
-      )}
-      {tickets.length === 0 ? (
-        <div className="flex min-h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong px-4 py-6 text-center">
-          <span className="text-fg-secondary">
-            <Icon icon={DOMAIN_ICONS.kitchen} size={24} />
-          </span>
-          <p className="text-label text-fg-secondary">No tickets {title.toLowerCase()}</p>
-        </div>
-      ) : (
-        // Each lane scrolls on its own on a large screen, so a long queue never pushes the other lanes down.
-        <ul tabIndex={0} aria-label={`${title} tickets, ${tickets.length}`} className="flex flex-col gap-3 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-focus-ring lg:max-h-[calc(100dvh-15rem)] lg:overflow-y-auto lg:pr-1">
-          {tickets.map(renderCard)}
-        </ul>
-      )}
+    <section aria-label={`${title} tickets`} className="flex min-w-0 flex-col rounded-3xl border border-border-subtle bg-raised/60 px-3 pt-3" data-testid={`kitchen-lane-${status}`}>
+      <h2 className="flex items-center gap-2 px-1 text-heading text-fg-primary">
+        <span aria-hidden className={`size-2.5 rounded-full ${LANE_ACCENT[status] ?? "bg-fg-secondary"}`} />
+        {title}
+        <span className="ml-auto rounded-full bg-card px-2.5 py-0.5 text-subheading text-numeric text-fg-secondary" aria-label={`${tickets.length} tickets`}>
+          {tickets.length}
+        </span>
+      </h2>
+      <CardRail
+        items={tickets}
+        keyOf={(ticket) => ticket.id}
+        label={`${title} tickets`}
+        renderCard={renderCard}
+        empty={
+          <div className="my-3 flex min-h-24 items-center justify-center gap-2 rounded-2xl border border-dashed border-border-strong px-4 py-5 text-center">
+            <span className="text-fg-secondary">
+              <Icon icon={DOMAIN_ICONS.kitchen} size={20} />
+            </span>
+            <p className="text-label text-fg-secondary">No tickets {title.toLowerCase()}</p>
+          </div>
+        }
+      />
     </section>
   );
 }

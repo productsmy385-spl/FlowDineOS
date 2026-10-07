@@ -1,6 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { expect, test, type Page } from "@playwright/test";
-import { hashStaffPassword } from "@/lib/auth/staff-password";
+import { issueStaffPassword, signInAsStaff } from "./fixtures/staff";
 
 /**
  * TC-RESP-010 — the console fits every width (owner brief 2026-10-06 §22): no horizontal page scroll and no visible
@@ -12,7 +12,6 @@ import { hashStaffPassword } from "@/lib/auth/staff-password";
  * real /staff-login form, then every screen that role can open is checked at every width.
  */
 const WIDTHS = [320, 360, 375, 390, 414, 480, 768, 834, 1024, 1280, 1440, 1920];
-const PASSWORD = "E2E7-TEST";
 
 const ONLY = process.env.RESP_ONLY; // e.g. "CASHIER:/restaurant/printing" while debugging one screen
 const ROLES = {
@@ -23,35 +22,6 @@ const ROLES = {
 
 const db = new PrismaClient();
 test.afterAll(() => db.$disconnect());
-
-/** Today's password for the seeded Spice Route member with this role; returns their email. */
-async function issuePassword(role: keyof typeof ROLES): Promise<string> {
-  const tenant = await db.tenant.findUniqueOrThrow({ where: { slug: "spice-route" }, include: { restaurant: true } });
-  const membership = await db.userTenant.findFirstOrThrow({ where: { tenantId: tenant.id, role, status: "ACTIVE" }, include: { user: true } });
-  const admin = await db.userTenant.findFirstOrThrow({ where: { tenantId: tenant.id, role: "TENANT_ADMIN", status: "ACTIVE" } });
-  const today = new Date(`${new Intl.DateTimeFormat("en-CA", { timeZone: tenant.restaurant!.timezone }).format(new Date())}T00:00:00.000Z`);
-  await db.staffCredential.updateMany({ where: { tenantId: tenant.id, membershipId: membership.id, status: "ACTIVE" }, data: { status: "REVOKED", revokedAt: new Date() } });
-  await db.staffCredential.create({
-    data: {
-      tenantId: tenant.id,
-      membershipId: membership.id,
-      userId: membership.userId,
-      passwordHash: await hashStaffPassword(PASSWORD),
-      businessDate: today,
-      expiresAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
-      generatedByUserId: admin.userId,
-    },
-  });
-  return membership.user.email;
-}
-
-async function signIn(page: Page, email: string) {
-  await page.goto("/staff-login");
-  await page.getByLabel("Work email").fill(email);
-  await page.getByLabel(/password/i).fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
-  await page.waitForURL(/\/restaurant\//, { timeout: 60_000 });
-}
 
 /** Horizontal page scroll, plus any visible element whose right edge passes the viewport (ignoring inner scrollers). */
 async function overflowAt(page: Page) {
@@ -84,7 +54,7 @@ const selected = (Object.entries(ROLES) as Array<[keyof typeof ROLES, readonly s
 for (const [role, paths] of selected) {
   test(`TC-RESP-010 ${role} screens fit 320–1920 px`, async ({ page }) => {
     test.setTimeout(15 * 60_000);
-    await signIn(page, await issuePassword(role));
+    await signInAsStaff(page, await issueStaffPassword(db, role));
     for (const path of paths) {
       for (const width of WIDTHS) {
         await page.setViewportSize({ width, height: 900 });

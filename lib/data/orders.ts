@@ -163,6 +163,10 @@ export type OrderBoardItem = {
   currencyCode: string;
   totalAmount: string | null;
   itemCount: number;
+  /** The first lines, for the rail card's details and artwork (owner brief 2026-10-07 §6, §11). */
+  lines: Array<{ name: string; quantity: number }>;
+  /** The first line's dish photo, if it has one — the card's artwork. */
+  imageUrl: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -196,6 +200,7 @@ const boardSelect = {
   updatedAt: true,
   customer: { select: { fullName: true } },
   _count: { select: { items: true } },
+  items: { take: 4, orderBy: { createdAt: "asc" }, select: { itemNameSnapshot: true, quantity: true, menuItem: { select: { imageUrl: true } } } },
 } satisfies Prisma.OrderSelect;
 
 type BoardRow = Prisma.OrderGetPayload<{ select: typeof boardSelect }>;
@@ -213,6 +218,8 @@ function toBoardItem(row: BoardRow): OrderBoardItem {
     currencyCode: row.currencyCode,
     totalAmount: moneyDto(row.totalAmount),
     itemCount: row._count.items,
+    lines: row.items.map((item) => ({ name: item.itemNameSnapshot, quantity: item.quantity })),
+    imageUrl: row.items.find((item) => item.menuItem.imageUrl)?.menuItem.imageUrl ?? null,
     createdAt: instantDto(row.createdAt),
     updatedAt: instantDto(row.updatedAt),
   };
