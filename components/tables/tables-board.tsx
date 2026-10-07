@@ -139,9 +139,16 @@ export function TablesBoard({ restaurantName, websitePublished, tables }: { rest
             </span>
           </label>
           {tables.length > 0 && (
-            <Button variant="secondary" icon={Printer} onClick={() => print(tables.filter((t) => t.isActive))}>
-              Print all QR codes
-            </Button>
+            <span className="flex flex-wrap gap-2">
+              <Button variant="secondary" icon={Printer} onClick={() => print(tables.filter((t) => t.isActive))}>
+                Print all QR codes
+              </Button>
+              {/* A plain link: the browser saves the ZIP the server builds from this restaurant's live tables. */}
+              <a href="/api/v1/tables/qr-codes" download className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong px-4 text-label text-fg-primary hover:bg-raised">
+                <Download aria-hidden className="size-4" />
+                Download all (ZIP)
+              </a>
+            </span>
           )}
         </CardContent>
       </Card>

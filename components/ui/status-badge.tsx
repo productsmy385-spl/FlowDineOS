@@ -15,7 +15,9 @@ export function StatusBadge<D extends StatusDomain>({ domain, status, className 
       icon={visual.icon}
       className={cn(visual.muted && "opacity-80", domain === "printJob" && status === "PROCESSING" && "[&_svg]:motion-safe:animate-spin", className)}
     >
-      <span className={cn(visual.strike && "line-through")}>{visual.label}</span>
+      <span title={visual.label} className={cn("min-w-0 truncate", visual.strike && "line-through")}>
+        {visual.label}
+      </span>
     </Badge>
   );
 }

@@ -1,4 +1,7 @@
 import jsQR from "jsqr";
+import { NextRequest } from "next/server";
+import { GET as downloadQrCodes } from "@/app/api/v1/tables/qr-codes/route";
+import { unzip } from "@/lib/data-portability/zip";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import TableMenuPage from "@/app/r/[slug]/t/[code]/page";
 import { addTablesAction, archiveTableAction, editTableAction, listTablesAction, rotateTableCodeAction } from "@/app/restaurant/tables/actions";
@@ -146,5 +149,38 @@ describe("TC-TBL-003 tables are managed only by the owner/administrator and mana
   it("a tenant id smuggled into the input is rejected", async () => {
     await asSeedUser("A", "TENANT_ADMIN");
     expect(await invokeAction(editTableAction, { id: RANDOM_UUID, label: "x", tenantId: B } as never)).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+  });
+});
+
+describe("TC-TBL-004 every live table's QR downloads as one ZIP", () => {
+  const download = (site = "same-origin") => downloadQrCodes(new NextRequest("http://localhost:3000/api/v1/tables/qr-codes", { headers: { "sec-fetch-site": site } }), undefined as never);
+
+  it("holds one SVG per live table of this restaurant and none of another's", async () => {
+    await asSeedUser("B", "TENANT_ADMIN");
+    ok(await invokeAction(addTablesAction, { label: "B Only" }));
+    await asSeedUser("A", "TENANT_ADMIN");
+    ok(await invokeAction(addTablesAction, { label: "Zip 1" }));
+    ok(await invokeAction(addTablesAction, { label: "Zip Off" }));
+    const off = await tableNamed(A, "Zip Off");
+    ok(await invokeAction(editTableAction, { id: off.id, isActive: false }));
+
+    const response = await download();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/zip");
+    const files = unzip(Buffer.from(await response.arrayBuffer()), { maxEntries: 500, maxTotalBytes: 50 * 1024 * 1024 });
+    const names = files.map((f) => f.name);
+    expect(names).toContain("zip-1.svg");
+    expect(names).not.toContain("zip-off.svg");
+    expect(names).not.toContain("b-only.svg");
+    const live = await db.diningTable.count({ where: { tenantId: A, isActive: true, archivedAt: null } });
+    expect(files).toHaveLength(live);
+    expect(files[0].data.toString("utf8")).toMatch(/^<svg /);
+  });
+
+  it("is refused to staff roles and to cross-site requests", async () => {
+    await asSeedUser("A", "CASHIER");
+    expect((await download()).status).toBe(403);
+    await asSeedUser("A", "TENANT_ADMIN");
+    expect((await download("cross-site")).status).toBe(403);
   });
 });

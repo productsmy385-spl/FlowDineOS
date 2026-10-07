@@ -29,8 +29,10 @@ export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
 export function Badge({ className, tone, variant, icon, children, ...props }: BadgeProps) {
   const resolved: Tone = tone ?? (variant ? LEGACY[variant] : "neutral");
   return (
-    <span className={cn("inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-caption whitespace-nowrap", TONE_BADGE[resolved], className)} {...props}>
-      {icon && <Icon icon={icon} size={16} />}
+    <span className={cn("inline-flex max-w-full min-w-0 items-center gap-1.5 h-6 px-2.5 rounded-full text-caption whitespace-nowrap", TONE_BADGE[resolved], className)} {...props}>
+      {/* A badge never grows wider than its cell: the icon keeps its size and a long label truncates (owner review
+          2026-10-06, 320 px phones). */}
+      {icon && <Icon icon={icon} size={16} className="shrink-0" />}
       {children}
     </span>
   );
