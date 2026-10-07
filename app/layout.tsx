@@ -62,7 +62,8 @@ export default async function RootLayout({
     <ClerkProvider afterSignOutUrl="/sign-in" dynamic>
       <html lang="en" className={`dark ${display.variable} ${sans.variable}`} data-theme="dark" suppressHydrationWarning>
         <head>
-          <script id="theme-boot" nonce={nonce}>
+          {/* Browsers hide a script's nonce from the DOM once it has run (nonce=""), so React would report a mismatch. */}
+          <script id="theme-boot" nonce={nonce} suppressHydrationWarning>
             {THEME_BOOT_SCRIPT}
           </script>
         </head>

@@ -26,6 +26,7 @@ import {
 import { BrandMark } from "@/components/layout/brand";
 import { FoodBackdrop } from "@/components/layout/food-backdrop";
 import { BookDemoButton } from "@/components/landing/demo-booking";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { HeroBackdrop, Metrics, Showcase } from "@/components/landing/landing-interactive";
 import { IconTile } from "@/components/ui/icon-tile";
 import { FEATURE_KEYS } from "@/lib/auth/features";
@@ -127,6 +128,7 @@ export default function Home() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
+            <ThemeToggle saveToAccount={false} />
             <Link href="/sign-in" className="hidden h-11 items-center rounded-xl border border-border-strong px-4 text-label text-fg-primary hover:bg-raised sm:inline-flex">
               Sign in
             </Link>

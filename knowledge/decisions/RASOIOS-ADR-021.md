@@ -98,12 +98,37 @@ the restaurant from the host/slug as every public page does, then requires the c
 of that restaurant; anything else is the same 404. `table:manage` = owner/administrator and manager. QR images are
 generated with `qrcode-generator` (MIT, no dependencies), always black on white.
 
+**Amended 2026-10-07 (owner brief "QR customer menu"): the table page is a section-wise menu, not the ring.**
+[fact] `app/r/[slug]/t/[code]/page.tsx` + `lib/ui/table-menu.ts` + `components/public/category-rail.tsx`:
+
+- Header: restaurant name and logo, the table's label; "Restaurant is currently closed." only when opening hours are
+  set and it is outside them (no hours = unknown, not closed).
+- Sticky section links generated from the data: Today, then each category in the restaurant's `sort_order`.
+- Category rail: one card per category with available dishes, any number, scrolling sideways (no page overflow from
+  320 to 1920 px). Hover/focus opens a card by widening its frame (15% → 40% of the rail; 26% → 68% on phones,
+  container query units, 0.6 s `cubic-bezier(.22,1,.36,1)`); the photo is an `<img>` with `object-fit: cover` at a
+  fixed height, so it re-crops and keeps the same scale (measured: identical open and closed) — never stretched or
+  enlarged. The caption is laid out at the open width, rises in after 0.14 s over a dark scrim, and wraps to two
+  lines. The card's photo is the first dish photo in that category, else the category's icon. No auto-advance;
+  touch: first tap opens, second follows; arrow keys move between cards. The rail is only a way in: the dishes are in
+  ordinary headed sections below.
+- "Today's published menu": the PUBLISHED daily menu whose business date is today in the restaurant's time zone
+  (server-side, `loadPublishedDailyMenu`), its dishes grouped under their real categories (a daily menu has no sections
+  of its own). None published: "Today's menu hasn't been published yet." Nothing is substituted.
+- "Our menu": every category with its available dishes (photo, description, price or variants, add-ons, dietary
+  mark). Sold-out dishes stay off the table menu (owner request 2026-10-07). Empty states: "Menu is being prepared."
+  (no categories) and "No menu items are currently available."
+- Browse only (Q-001): no cart or ordering from the QR — guests order with their server.
+- Tests: TC-TBL-006 (`tests/integration/tables/table-qr.test.ts`), TC-QRM-001…003 (`tests/unit/table-menu.test.ts`),
+  TC-QRM-010 (`tests/e2e/table-menu.spec.ts`: nine widths, re-crop scale, keyboard, WCAG 2.1 AA).
+
 ### 6. 3D menu ring
 
 A reusable client component on every public menu (`components/public/menu-ring.tsx`) using the owner's formulas exactly
 (22 positions, R = 0.62·min(w,h), depth sorting every frame, momentum easing to an idle spin, one rAF loop). Real dishes
 only: categories of more than 22 are paged; fewer are spread evenly; one or two are shown as plain cards.
-`prefers-reduced-motion` removes the spin and the throw.
+`prefers-reduced-motion` removes the spin and the throw. **Since 2026-10-07 the ring is on restaurant websites only**;
+the table QR page uses the category rail (§5).
 
 ### 7. Brand Kit
 

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { BrandMark } from "@/components/layout/brand";
 import { FoodBackdrop } from "@/components/layout/food-backdrop";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { COMPANY_ADDRESS, COMPANY_EMAILS, COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_TEL, COPYRIGHT } from "@/lib/brand";
 
 /** Frame for the platform's legal pages (/privacy, /terms): readable prose on an opaque card, the company's contact. */
@@ -11,9 +12,12 @@ export function LegalPage({ title, updated, children }: { title: string; updated
       <header className="glass-1 sticky top-0 z-header border-b">
         <div className="mx-auto flex h-header w-full max-w-public items-center justify-between gap-3 px-4 sm:px-6 lg:px-10">
           <BrandMark href="/" />
-          <Link href="/" className="inline-flex h-11 items-center rounded-xl border border-border-strong px-4 text-label text-fg-primary hover:bg-raised">
-            Home
-          </Link>
+          <div className="flex items-center gap-2">
+            <ThemeToggle saveToAccount={false} />
+            <Link href="/" className="inline-flex h-11 items-center rounded-xl border border-border-strong px-4 text-label text-fg-primary hover:bg-raised">
+              Home
+            </Link>
+          </div>
         </div>
       </header>
       <main id="main-content" className="mx-auto w-full max-w-3xl flex-1 px-4 py-10 sm:px-6">

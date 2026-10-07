@@ -52,4 +52,19 @@ light restaurant websites, so the console needed plumbing, not a second design s
 - Tests: TC-THEME-001 (WCAG AA for every text/background pair in both token sets, and identical token names),
   TC-THEME-002 (boot script, tamper-safe default), TC-THEME-004 (persistence, own row only, website themes untouched).
 - Not audited: a display preference of one's own row, like `last_sign_in_at`.
-- When a CSP is added (S1-P24-T001) the boot script needs a nonce or hash.
+- When a CSP is added (S1-P24-T001) the boot script needs a nonce or hash. **Done 2026-10-07:** the middleware's
+  per-request nonce is on the script (`app/layout.tsx`); `suppressHydrationWarning` on that script because browsers
+  hide a nonce from the DOM once it has run.
+
+## Amendment 2026-10-07 — public marketing pages (owner brief "QR customer menu + landing page theme")
+
+- [fact] `/`, `/book-demo`, `/privacy` and `/terms` (`MARKETING_PATHS`, `lib/ui/theme.ts`) default to **`SYSTEM`** for a
+  visitor with no saved choice; the boot script applies it before paint. Every other page keeps decision 1's `DARK`.
+- [fact] The landing and legal page headers carry `ThemeToggle saveToAccount={false}`: signed-out visitors' choice is
+  kept in the `rasoios-theme` cookie only (Secure on https) and no server action is called. Decision 5's "one control"
+  still holds per page.
+- [fact] Switching adds `.theme-switching` to `<html>` for 300 ms: a 0.25 s colour cross-fade, none under
+  `prefers-reduced-motion`.
+- Tests: TC-THEME-010 (`tests/unit/table-menu.test.ts`), TC-THEME-011 (`tests/e2e/landing-theme.spec.ts`: system
+  light/dark on first visit, toggle persists across reload, WCAG 2.1 AA in both themes). `tests/e2e/landing.spec.ts`
+  checks the dark palette, so it runs with a dark system setting.

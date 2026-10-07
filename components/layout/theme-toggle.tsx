@@ -8,6 +8,7 @@ import { Menu } from "@/components/ui/menu";
 import { cn } from "@/lib/ui/cn";
 import {
   DEFAULT_THEME_PREFERENCE,
+  defaultPreferenceFor,
   isThemePreference,
   resolveThemePreference,
   THEME_COOKIE,
@@ -31,9 +32,14 @@ function systemPrefersDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
 }
 
-export function applyTheme(preference: ThemePreferenceValue): void {
+export function applyTheme(preference: ThemePreferenceValue, { animate = false }: { animate?: boolean } = {}): void {
   const dark = resolveThemePreference(preference, systemPrefersDark()) === "dark";
   const root = document.documentElement;
+  // A brief colour cross-fade when the person switches (CSS `.theme-switching`, off under reduced motion).
+  if (animate) {
+    root.classList.add("theme-switching");
+    window.setTimeout(() => root.classList.remove("theme-switching"), 300);
+  }
   root.setAttribute("data-theme", dark ? "dark" : "light");
   root.setAttribute("data-theme-preference", preference);
   root.classList.toggle("dark", dark);
@@ -45,13 +51,23 @@ function cookiePreference(): ThemePreferenceValue | null {
   return match && isThemePreference(match[1]) ? match[1] : null;
 }
 
-export function ThemeToggle({ className, showLabel = false }: { className?: string; showLabel?: boolean } = {}) {
+/**
+ * `saveToAccount={false}` for signed-out pages (the landing page, legal pages): the choice is kept in this browser's
+ * cookie only, and nothing is asked of the server.
+ */
+export function ThemeToggle({ className, showLabel = false, saveToAccount = true }: { className?: string; showLabel?: boolean; saveToAccount?: boolean } = {}) {
   const [preference, setPreference] = React.useState<ThemePreferenceValue>(DEFAULT_THEME_PREFERENCE);
 
   React.useEffect(() => {
     const fromCookie = cookiePreference();
     if (fromCookie) {
       setPreference(fromCookie);
+      return;
+    }
+    if (!saveToAccount) {
+      // What the pre-paint script chose for this page (SYSTEM on marketing pages for a first visit).
+      const booted = document.documentElement.getAttribute("data-theme-preference");
+      setPreference(isThemePreference(booted) ? booted : defaultPreferenceFor(window.location.pathname));
       return;
     }
     // A browser that has never stored a choice (new device): load the one saved on the account.
@@ -64,7 +80,7 @@ export function ThemeToggle({ className, showLabel = false }: { className?: stri
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [saveToAccount]);
 
   // SYSTEM follows the operating system live.
   React.useEffect(() => {
@@ -77,10 +93,10 @@ export function ThemeToggle({ className, showLabel = false }: { className?: stri
 
   function choose(next: ThemePreferenceValue) {
     setPreference(next);
-    applyTheme(next);
+    applyTheme(next, { animate: true });
     // Written locally first so a reload keeps the choice even if saving to the account fails.
-    document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=${THEME_COOKIE_MAX_AGE}; samesite=lax`;
-    void setThemePreferenceAction({ preference: next });
+    document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=${THEME_COOKIE_MAX_AGE}; samesite=lax${window.location.protocol === "https:" ? "; secure" : ""}`;
+    if (saveToAccount) void setThemePreferenceAction({ preference: next });
   }
 
   const current = OPTIONS.find((option) => option.value === preference) ?? OPTIONS[1];

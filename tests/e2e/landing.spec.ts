@@ -5,6 +5,10 @@ import { axeCheck, expect, test } from "./fixtures/axe";
 const asRendered = (hex: string) => `rgb(${[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(", ")})`;
 
 // TC-DS-015 (landing page) and TC-DS-007 (self-hosted fonts), now on Brand v2 (RASOIOS-ADR-013).
+// The landing page follows the visitor's system theme on a first visit (owner brief 2026-10-07); these checks are of
+// the dark palette, so they run with a dark system setting. Light is covered by TC-THEME-011 (landing-theme.spec.ts).
+test.use({ colorScheme: "dark" });
+
 test.describe("landing page", () => {
   test("TC-DS-015 every link resolves without a 404", async ({ page, request }) => {
     await page.goto("/");

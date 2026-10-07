@@ -73,7 +73,7 @@ describe("TC-THEME-001 both token sets meet WCAG AA", () => {
   });
 });
 
-function runBoot(cookie: string, systemDark: boolean) {
+function runBoot(cookie: string, systemDark: boolean, pathname?: string) {
   const attributes: Record<string, string> = {};
   const classes = new Set<string>(["dark"]);
   const root = {
@@ -83,7 +83,7 @@ function runBoot(cookie: string, systemDark: boolean) {
   };
   vm.runInNewContext(THEME_BOOT_SCRIPT, {
     document: { cookie, documentElement: root },
-    window: { matchMedia: () => ({ matches: systemDark }) },
+    window: { matchMedia: () => ({ matches: systemDark }), ...(pathname ? { location: { pathname } } : {}) },
   });
   return { theme: attributes["data-theme"], preference: attributes["data-theme-preference"], dark: classes.has("dark"), colorScheme: root.style.colorScheme };
 }
@@ -103,6 +103,17 @@ describe("TC-THEME-002 pre-paint boot script", () => {
     expect(runBoot("", false).theme).toBe("dark");
     expect(runBoot(`${THEME_COOKIE}=<script>`, false).theme).toBe("dark");
     expect(runBoot(`x${THEME_COOKIE}=LIGHT`, false).theme).toBe("dark");
+  });
+
+  it("public marketing pages follow the system on a first visit; a saved choice and every other page are unchanged (2026-10-07)", () => {
+    for (const path of ["/", "/book-demo", "/privacy", "/terms"]) {
+      expect(runBoot("", false, path)).toMatchObject({ theme: "light", preference: "SYSTEM" });
+      expect(runBoot("", true, path)).toMatchObject({ theme: "dark", preference: "SYSTEM" });
+      expect(runBoot(`${THEME_COOKIE}=DARK`, false, path).theme).toBe("dark");
+    }
+    for (const path of ["/restaurant/orders", "/sign-in", "/admin", "/r/spice-route"]) {
+      expect(runBoot("", false, path)).toMatchObject({ theme: "dark", preference: "DARK" });
+    }
   });
 
   it("contains no markup-breaking characters (inline script safety)", () => {

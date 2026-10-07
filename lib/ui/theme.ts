@@ -13,6 +13,14 @@ export type ResolvedTheme = "light" | "dark";
 /** ADR-013's default: the console is dark unless the person chooses otherwise. */
 export const DEFAULT_THEME_PREFERENCE: ThemePreferenceValue = "DARK";
 export const THEME_COOKIE = "rasoios-theme";
+/**
+ * The platform's public marketing pages (owner brief 2026-10-07): a first-time visitor with no saved choice gets their
+ * operating system's light/dark setting. Consoles keep ADR-013's dark default.
+ */
+export const MARKETING_PATHS = ["/", "/book-demo", "/privacy", "/terms"] as const;
+export function defaultPreferenceFor(pathname: string): ThemePreferenceValue {
+  return (MARKETING_PATHS as readonly string[]).includes(pathname) ? "SYSTEM" : DEFAULT_THEME_PREFERENCE;
+}
 export const THEME_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 export function isThemePreference(value: unknown): value is ThemePreferenceValue {
@@ -32,7 +40,8 @@ export function resolveThemePreference(preference: ThemePreferenceValue, systemP
  */
 export const THEME_BOOT_SCRIPT = `(function(){try{
 var m=document.cookie.match(/(?:^|; )${THEME_COOKIE}=(LIGHT|DARK|SYSTEM)/);
-var p=m?m[1]:"${DEFAULT_THEME_PREFERENCE}";
+var l=(window.location||{}).pathname;
+var p=m?m[1]:(${JSON.stringify(MARKETING_PATHS)}.indexOf(l)+1?"SYSTEM":"${DEFAULT_THEME_PREFERENCE}");
 var d=p==="DARK"||(p==="SYSTEM"?window.matchMedia("(prefers-color-scheme: dark)").matches:false);
 var r=document.documentElement;
 r.setAttribute("data-theme",d?"dark":"light");

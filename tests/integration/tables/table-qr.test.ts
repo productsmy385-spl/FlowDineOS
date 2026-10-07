@@ -10,8 +10,10 @@ import { addTablesAction, archiveTableAction, editTableAction, listTablesAction,
 import { findPublicTable } from "@/lib/data/dining-tables";
 import { qrMatrix } from "@/lib/qr";
 import { testDb } from "../setup/db";
-import { asSeedUser, invokeAction, invokeLoader, seedOnce, tenantIdOf } from "../helpers/actors";
+import { asSeedUser, asUserId, invokeAction, invokeLoader, seedOnce, tenantIdOf } from "../helpers/actors";
 import { RANDOM_UUID } from "../orders/helpers";
+import { createCategory, createFullTenant, createMenuItem } from "../../factories";
+import { businessDateFor } from "@/lib/time";
 
 /**
  * TC-TBL-001…006 — table QR menus (RASOIOS-ADR-021; owner brief 2026-10-06 §11, §30 "QR").
@@ -204,5 +206,75 @@ describe("TC-TBL-005 a seated guest sees the available menu even before the webs
     } finally {
       await db.menuItem.update({ where: { id: soldOut.id }, data: { isAvailable: true } });
     }
+  });
+});
+
+describe("TC-TBL-006 the QR menu is the restaurant's own menu, section by section (owner brief 2026-10-07)", () => {
+  const render = async (slug: string, code: string) => {
+    const element = await invokeLoader(TableMenuPage, { params: Promise.resolve({ slug, code }) });
+    expect(element).not.toEqual({ notFound: true });
+    return renderToStaticMarkup(element as ReactElement);
+  };
+  const sectionText = (html: string, testId: string) => {
+    const start = html.indexOf(`data-testid="${testId}"`);
+    return start < 0 ? "" : html.slice(start, html.indexOf("</section>", start));
+  };
+
+  it("one rail card and one section per category, in the restaurant's order; no ring; today's menu only when published for today", async () => {
+    const full = await createFullTenant(db, "qr-sections");
+    await asUserId(full.user.id);
+    ok(await invokeAction(addTablesAction, { label: "Window 1" }));
+    const table = await tableNamed(full.tenant.id, "Window 1");
+    const slug = full.tenant.slug;
+    await db.menuItem.updateMany({ where: { tenantId: full.tenant.id }, data: { isPublished: true, isAvailable: true } });
+
+    // Three more categories whose names sort differently from their configured order.
+    const configured = ["Zeta drinks", "Alpha starters", "Mid mains"];
+    const dishes: Record<string, string> = {};
+    for (const [index, name] of configured.entries()) {
+      const category = await db.menuCategory.update({ where: { id: (await createCategory(db, full.tenant.id, { name })).id }, data: { sortOrder: 10 + index } });
+      const dish = await createMenuItem(db, full.tenant.id, category.id, { name: `${name} dish` });
+      await db.menuItem.update({ where: { id: dish.id }, data: { isPublished: true } });
+      dishes[name] = dish.name;
+    }
+    const expected = (await db.menuCategory.findMany({ where: { tenantId: full.tenant.id, archivedAt: null, isPublished: true }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] })).map((c) => c.name);
+
+    let html = await render(slug, table.publicCode);
+    expect(html).not.toContain('data-testid="menu-ring"');
+    const rail = sectionText(html, "category-rail");
+    const railNames = [...rail.matchAll(/aria-label="([^"]+), \d+ dish(?:es)?"/g)].map((m) => m[1].replace(/&amp;/g, "&"));
+    expect(railNames).toEqual(expected); // exactly the restaurant's categories, in its order — nothing fixed or padded
+    const positions = configured.map((name) => html.indexOf(`>${name}</h3>`));
+    expect(positions.every((p) => p > 0)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+
+    // Nothing published for today: the honest empty state, never other dishes.
+    expect(sectionText(html, "today-menu")).toContain("Today&#x27;s menu hasn&#x27;t been published yet.");
+
+    // A PUBLISHED menu for today in the restaurant's own time zone appears, grouped under the dish's real category.
+    const today = businessDateFor(new Date(), full.restaurant.timezone);
+    const menu = await db.dailyMenu.create({ data: { tenantId: full.tenant.id, businessDate: today, status: "PUBLISHED", createdByUserId: full.user.id } });
+    const todaysDish = await db.menuItem.findFirstOrThrow({ where: { tenantId: full.tenant.id, name: dishes["Mid mains"] } });
+    await db.dailyMenuItem.create({ data: { tenantId: full.tenant.id, dailyMenuId: menu.id, menuItemId: todaysDish.id } });
+    html = await render(slug, table.publicCode);
+    const todaySection = sectionText(html, "today-menu");
+    expect(todaySection).toContain(">Mid mains</h3>");
+    expect(todaySection).toContain(todaysDish.name);
+    expect(todaySection).not.toContain(dishes["Alpha starters"]);
+
+    // A draft for today is not a published menu.
+    await db.dailyMenu.update({ where: { id: menu.id }, data: { status: "DRAFT" } });
+    expect(sectionText(await render(slug, table.publicCode), "today-menu")).toContain("hasn&#x27;t been published yet");
+  });
+
+  it("a restaurant with no menu yet says so instead of showing anything invented", async () => {
+    const full = await createFullTenant(db, "qr-empty");
+    await asUserId(full.user.id);
+    ok(await invokeAction(addTablesAction, { label: "Bar 1" }));
+    const table = await tableNamed(full.tenant.id, "Bar 1");
+    await db.menuItem.updateMany({ where: { tenantId: full.tenant.id }, data: { isAvailable: false } });
+    const html = await render(full.tenant.slug, table.publicCode);
+    expect(html).toContain("No menu items are currently available.");
+    expect(html).not.toContain('data-testid="category-rail"');
   });
 });

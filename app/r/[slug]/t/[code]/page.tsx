@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { UtensilsCrossed } from "lucide-react";
-import { CategoryBlock } from "@/components/public/menu";
-import { DailyStrip } from "@/components/public/daily-strip";
-import { MenuRing } from "@/components/public/menu-ring";
-import { SectionEmpty } from "@/components/public/primitives";
+import { CalendarDays, Clock, UtensilsCrossed } from "lucide-react";
+import { CategoryRail, type RailCategory } from "@/components/public/category-rail";
+import { CategoryBlock, MenuItemGrid } from "@/components/public/menu";
+import { SectionEmpty, SiteImage } from "@/components/public/primitives";
 import { PublicSiteFrame } from "@/components/public/site-shell";
 import { siteHomeHref, siteView } from "@/components/public/site-view";
 import { findPublicTable } from "@/lib/data/dining-tables";
 import { canonicalPublicUrl, resolvedTenantSlug } from "@/lib/tenancy/request";
+import { tableMenuModel } from "@/lib/ui/table-menu";
 import { loadPublicSite } from "../../load-site";
 
 interface TableMenuPageProps {
@@ -22,9 +22,13 @@ export const metadata: Metadata = { title: "Menu", robots: { index: false, follo
 
 /**
  * `/t/{code}` on a restaurant's site (`/r/{slug}/t/{code}` on the apex) — what a table's QR opens (RASOIOS-ADR-021,
- * owner brief 2026-10-06 §11–13). The restaurant comes from the host/slug exactly as on every public page; the code
- * must belong to an active table of *that* restaurant. An unknown, rotated or switched-off code, or a code of another
- * restaurant, is the same 404 as an unknown restaurant. Nothing here needs an account or an app.
+ * owner briefs 2026-10-06 §11–13 and 2026-10-07). The restaurant comes from the host/slug exactly as on every public
+ * page; the code must belong to an active table of *that* restaurant. An unknown, rotated or switched-off code, or a
+ * code of another restaurant, is the same 404 as an unknown restaurant. Nothing here needs an account or an app.
+ *
+ * Browse only (Q-001): guests read the menu; the server takes the order at the table. Everything shown is the
+ * restaurant's own data — its categories in its own order, today's PUBLISHED daily menu for today in the restaurant's
+ * time zone (decided on the server), and nothing invented when any of it is missing (`lib/ui/table-menu.ts`).
  */
 export default async function TableMenuPage({ params }: TableMenuPageProps) {
   const { slug, code } = await params;
@@ -36,64 +40,102 @@ export default async function TableMenuPage({ params }: TableMenuPageProps) {
 
   const onTenantHost = (await resolvedTenantSlug()) !== null;
   const view = siteView(site, { canonicalUrl: canonicalPublicUrl(site.slug), homeHref: siteHomeHref(site.slug, onTenantHost) });
-  // Only what can be ordered right now (owner request 2026-10-07): sold-out dishes are left off the table menu.
-  const withItems = site.categories
-    .map((category) => ({ ...category, items: category.items.filter((item) => item.isAvailable) }))
-    .filter((category) => category.items.length > 0);
-  const today = (site.dailyMenu?.items ?? []).filter((item) => item.isAvailable);
+  const model = tableMenuModel(site);
+  const rail: RailCategory[] = model.categories.map((category) => ({
+    id: category.id,
+    name: category.name,
+    itemCount: category.items.length,
+    imageUrl: category.items.find((item) => item.imageUrl)?.imageUrl ?? null,
+    iconKey: category.iconKey,
+  }));
+  const sections = [{ id: "today", name: "Today", href: "#today" }, ...model.categories.map((c) => ({ id: c.id, name: c.name, href: `#menu-${c.id}` }))];
 
   return (
     <PublicSiteFrame view={view}>
-      <section aria-labelledby="table-menu-title" className="mx-auto flex w-full max-w-public flex-col gap-8 px-4 py-8 md:px-6 md:py-12">
-        <header className="flex flex-col gap-2">
-          <p className="inline-flex w-fit items-center rounded-full border border-border-strong bg-card px-3 py-1 text-label text-fg-primary" data-testid="table-label">
-            {table.label}
-          </p>
-          <h1 id="table-menu-title" className="break-words text-display-l">
-            {site.restaurant.name}
-          </h1>
-          <p className="text-body-public text-fg-secondary">Browse the menu. Your server will take your order at the table.</p>
+      <div className="mx-auto flex w-full max-w-public flex-col gap-8 px-4 pb-12 pt-6 md:px-6 md:pt-10" data-testid="table-menu">
+        <header className="flex items-center gap-4">
+          {site.restaurant.logoUrl ? <SiteImage src={site.restaurant.logoUrl} alt="" displayWidth={64} className="size-14 shrink-0 rounded-2xl border border-border-subtle" /> : null}
+          <div className="flex min-w-0 flex-col gap-1">
+            <h1 id="table-menu-title" className="break-words text-display-l">
+              {site.restaurant.name}
+            </h1>
+            <p className="flex flex-wrap items-center gap-2 text-body text-fg-secondary">
+              <span className="inline-flex items-center rounded-full border border-border-strong bg-card px-3 py-0.5 text-label text-fg-primary" data-testid="table-label">
+                {table.label}
+              </span>
+              <span>Browse the menu. Your server will take your order at the table.</span>
+            </p>
+          </div>
         </header>
 
-        {today.length > 0 && (
-          <section aria-labelledby="table-today-title" className="flex flex-col gap-3">
-            <h2 id="table-today-title" className="text-display-m">
-              {site.dailyMenu?.title ?? "Today's menu"}
-            </h2>
-            {site.dailyMenu?.note ? <p className="text-body-public text-fg-secondary whitespace-pre-line">{site.dailyMenu.note}</p> : null}
-            <DailyStrip items={today} formatting={view.formatting} labelledBy="table-today-title" />
-          </section>
-        )}
+        {model.closed ? (
+          <p role="status" className="flex items-center gap-2 rounded-xl border border-status-warning/40 bg-status-warning/12 px-4 py-3 text-body text-fg-primary">
+            <Clock className="size-5 shrink-0 text-status-warning" aria-hidden /> Restaurant is currently closed.
+          </p>
+        ) : null}
 
-        {withItems.length > 0 && <h2 className="text-display-m">Full menu</h2>}
-        {withItems.length === 0 ? (
-          <SectionEmpty icon={UtensilsCrossed}>{site.restaurant.name} has not published its menu yet.</SectionEmpty>
-        ) : site.presentation.menuStyle === "RING" ? (
-          // The ring is the menu, with a pill per section (Starters, Main course, ...); no grid repeats it.
-          <MenuRing categories={withItems} formatting={view.formatting} title={site.restaurant.name} accents={site.presentation.brandColors.map((c) => c.hex)} share={{ restaurantName: site.restaurant.name, url: view.canonicalUrl }} />
-        ) : (
-          <>
-            {withItems.length > 1 && (
-              <nav aria-label="Menu sections" className="sticky top-0 z-10 -mx-4 overflow-x-auto bg-canvas/95 px-4 py-2 [scrollbar-width:none]">
-                <ul className="flex list-none gap-2 p-0">
-                  {withItems.map((category) => (
-                    <li key={category.id} className="shrink-0">
-                      <a href={`#menu-${category.id}`} className="inline-flex h-10 items-center rounded-full border border-border-strong bg-card px-4 text-label text-fg-primary hover:bg-raised">
-                        {category.name}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </nav>
-            )}
+        <nav aria-label="Menu sections" className="sticky top-0 z-10 -mx-4 overflow-x-auto bg-canvas/95 px-4 py-2 [scrollbar-width:none] md:-mx-6 md:px-6">
+          <ul className="flex list-none gap-2 p-0">
+            {sections.map((entry) => (
+              <li key={entry.id} className="shrink-0">
+                <a href={entry.href} className="inline-flex h-11 items-center rounded-full border border-border-strong bg-card px-4 text-label text-fg-primary hover:bg-raised">
+                  {entry.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        {rail.length > 0 ? (
+          <section aria-labelledby="rail-title" className="flex flex-col gap-3">
+            <h2 id="rail-title" className="sr-only">
+              Menu sections
+            </h2>
+            <CategoryRail categories={rail} labelledBy="rail-title" />
+          </section>
+        ) : null}
+
+        <section id="today" aria-labelledby="today-title" className="flex scroll-mt-24 flex-col gap-4 rounded-3xl border border-border-subtle bg-card p-4 md:p-6" data-testid="today-menu">
+          <div className="flex flex-col gap-1">
+            <h2 id="today-title" className="flex items-center gap-2 text-display-m">
+              <CalendarDays className="size-6 shrink-0 text-fg-accent" aria-hidden />
+              {model.today.state === "published" && model.today.title ? model.today.title : "Today's published menu"}
+            </h2>
+            {model.today.state === "published" && model.today.note ? <p className="whitespace-pre-line text-body-public text-fg-secondary">{model.today.note}</p> : null}
+          </div>
+          {model.today.state === "none" ? (
+            <SectionEmpty icon={CalendarDays}>Today&apos;s menu hasn&apos;t been published yet.</SectionEmpty>
+          ) : model.today.groups.length === 0 ? (
+            <SectionEmpty icon={CalendarDays}>Nothing on today&apos;s menu is available right now.</SectionEmpty>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {model.today.groups.map((group) => (
+                <div key={group.id} className="flex flex-col gap-3">
+                  <h3 id={`today-${group.id}`} className="text-heading">
+                    {group.name}
+                  </h3>
+                  <MenuItemGrid items={group.items} formatting={view.formatting} labelledBy={`today-${group.id}`} />
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section aria-labelledby="full-menu-title" className="flex flex-col gap-6">
+          <h2 id="full-menu-title" className="text-display-m">
+            Our menu
+          </h2>
+          {model.categories.length > 0 ? (
             <div className="flex flex-col gap-10">
-              {withItems.map((category) => (
+              {model.categories.map((category) => (
                 <CategoryBlock key={category.id} category={category} formatting={view.formatting} />
               ))}
             </div>
-          </>
-        )}
-      </section>
+          ) : (
+            <SectionEmpty icon={UtensilsCrossed}>{model.hasCategories ? "No menu items are currently available." : "Menu is being prepared."}</SectionEmpty>
+          )}
+        </section>
+      </div>
     </PublicSiteFrame>
   );
 }
