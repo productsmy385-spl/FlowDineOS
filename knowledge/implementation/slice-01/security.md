@@ -291,8 +291,9 @@ Status for every control: **PLANNED**. "Verified by" names the test(s) that prov
 | SC-CSRF-03 | No permissive CORS; app APIs same-origin only | CORS | headers | TC-SEC-012 |
 | SC-RL-01 | PostgreSQL rate limiter on pairing, agent API, webhook, public order, session mutations | rate limiting | `lib/security/rate-limit.ts` | TC-SEC-013, ADV-027 |
 | SC-RL-02 | 429 + `Retry-After`; security log event | rate limiting | same | TC-SEC-013 |
-| SC-HDR-01 | HSTS, nosniff, Referrer-Policy, Permissions-Policy, X-Frame-Options DENY | secure headers | `next.config.ts` | TC-SEC-014 |
-| SC-HDR-02 | Content-Security-Policy compatible with Clerk and self-hosted fonts | secure headers, XSS | `next.config.ts`/middleware | TC-SEC-015 |
+| SC-RL-03 | Data export/import 30 an hour, permanent deletion (`data.purge`) 5 an hour per user, fail closed (2026-10-07) | rate limiting | `lib/security/rate-limit.ts`, `lib/services/data-management.ts` | TC-DATA-011 |
+| SC-HDR-01 | HSTS (production only), nosniff, Referrer-Policy, Permissions-Policy, X-Frame-Options DENY, COOP; no `X-Powered-By` — **implemented 2026-10-07**, verified on a production build | secure headers | `lib/http/security-headers.ts`, `next.config.ts` | TC-SEC-HDR-001 |
+| SC-HDR-02 | Content-Security-Policy compatible with Clerk and self-hosted fonts — **partial 2026-10-07**: `frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'` (+ `upgrade-insecure-requests` in production). `script-src`/`style-src` still open: needs a per-request nonce in middleware and Clerk's frontend-API host — follow-up | secure headers, XSS | `lib/http/security-headers.ts` | TC-SEC-HDR-001 |
 | SC-HDR-03 | `Cache-Control: no-store` on authenticated pages and APIs | cache | route config | TC-SEC-006 |
 | SC-FILE-01 | Uploads (Q-009): ≤5 MB, magic-byte type check, jpeg/png/webp only, re-encode, strip EXIF, reject SVG | file uploads, malicious file | `lib/media/*` | TC-SEC-016, ADV-020 |
 | SC-FILE-02 | Tenant-prefixed storage keys; short-lived signed URLs; private bucket. **ADR-017 (2026-09-25):** ImageKit folder `/rasoios/restaurants/{tenantId}/…` built server-side; public CDN files (public-site images only); an ImageKit URL can be saved only if it is a READY asset of the caller's tenant | file uploads | `lib/media/*`, `lib/services/media.ts` | TC-SEC-017 |
@@ -318,6 +319,8 @@ Status for every control: **PLANNED**. "Verified by" names the test(s) that prov
 | SC-LOG-04 | No request/response bodies logged by default | logging | logger policy | TC-OBS-002 |
 | SC-SEC-01 | Environment validated at startup; server secrets never `NEXT_PUBLIC_` | secrets | `lib/env.ts` | TC-FOUND-003 |
 | SC-SEC-02 | Secrets only in Railway variables; `.env*` gitignored (already true: `.gitignore` [fact]) | secrets | Railway, `.gitignore` | DEP-CHK-01 |
+| SC-SEC-04 | Secret scan of the tree and the full git history in CI; reports file/commit + category only, never the text; matches under `tests/` are FIXTURE (2026-10-07) | secrets | `scripts/secret-scan.mjs`, CI `audit` job | CI |
+| SC-SEC-05 | Browser bundle checked after every CI build: no credential pattern and no value of any server-only variable (compared by name, never printed) | secrets | `npm run security:bundle`, CI `build` job | CI |
 | SC-SEC-03 | Rotation runbook for Clerk keys, webhook secret, DB credentials, agent tokens | secrets | `deployment.md` §9 | DEP-CHK-12 (drill) |
 | SC-DEP-01 | `npm audit --audit-level=high` fails CI; lockfile committed | dependency security | CI workflow | TC-FOUND-004 |
 | SC-DEP-02 | Automated dependency alerts on the GitHub repository | dependency security | repository settings | DEP-CHK-02 |
@@ -334,6 +337,26 @@ Status for every control: **PLANNED**. "Verified by" names the test(s) that prov
 | SC-PII-01 | Customer data minimisation; notes staff-only, never on KOT or public | privacy | schemas, projections | TC-CUST-005 |
 | SC-PII-02 | Irreversible customer anonymisation (retention policy Q-020) | privacy | `lib/services/customers.ts` | TC-CUST-006 |
 | SC-PII-03 | PII masked in logs and audit state | privacy, logging | logger, audit redactor | TC-AUDIT-004, TC-OBS-002 |
+
+### 5.1 Hardening pass 2026-10-07 (owner brief "Railpack build fix + complete security hardening")
+
+Findings only by location and category — no value is recorded anywhere.
+
+- [fact] Secret scan: working tree 0 high (17 FIXTURE matches, all in `tests/`); git history (all refs) 0 high
+  (10 FIXTURE); production client bundle (134 files) 0 findings, compared against every non-`NEXT_PUBLIC_` variable.
+  No fixture equals or contains a real environment value (checked by comparison, booleans only).
+- [fact] `tests/unit/env.test.ts` used the production database's public proxy host and port as a fixture (no
+  credentials). Replaced with a neutral host. Host names are not secrets, but they should not be advertised.
+- [fact] `npm audit --omit=dev`: 0 vulnerabilities.
+- [fact] Page guards: `/restaurant/website` was guarded by `restaurant:read` (every staff role) and the client pages
+  `/restaurant/social`, `/restaurant/billing`, `/restaurant/analytics` had no page guard (their actions were guarded).
+  Now `dashboard:read`, `social:manage`, `transaction:read`, `report:read` via server `layout.tsx`. Found by e2e
+  TC-ROLE-010. Lesson: a `"use client"` page cannot call a guard and the guard-coverage test skipped non-async pages;
+  it now also requires every client page under `/restaurant` and `/admin` to sit below its own guarded layout
+  (`tests/static/guard-coverage.test.ts`).
+- [fact] Already in place and re-checked: request IDs on every response (middleware), same-origin checks on
+  cookie-authenticated non-GET routes, env validation that refuses to boot without TLS to a public database and names
+  the variable without printing it, log redaction tests, rate limits on sign-in/pairing/public order/demo/uploads.
 
 ## 6. Brief §38 coverage check
 
@@ -352,8 +375,8 @@ Status for every control: **PLANNED**. "Verified by" names the test(s) that prov
 | command injection | SC-VAL-06, SC-VAL-07 |
 | file uploads | SC-FILE-01, SC-FILE-02 |
 | webhook verification | SC-WH-01, SC-WH-02 |
-| secrets | SC-SEC-01…03, SC-AUTH-10, SC-PRINT-08 |
-| rate limiting | SC-RL-01, SC-RL-02 |
+| secrets | SC-SEC-01…05, SC-AUTH-10, SC-PRINT-08 |
+| rate limiting | SC-RL-01…03 |
 | secure headers | SC-HDR-01…03 |
 | CORS | SC-CSRF-03 |
 | session security | SC-SESS-01…04, SC-AUTH-08 |

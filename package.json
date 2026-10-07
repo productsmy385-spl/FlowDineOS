@@ -6,6 +6,8 @@
     "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
+    "security:scan": "node scripts/secret-scan.mjs tree",
+    "security:bundle": "node scripts/secret-scan.mjs bundle",
     "start": "next start",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",

@@ -305,6 +305,14 @@ describe("TC-DATA-011 deleting a selected range (owner bug report 2026-10-07)", 
     expect(await invokeAction(previewPurgeAction, { categories: ["orders"], from: "2026-09-20", to: "2026-09-10" })).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
   });
 
+  it("a sixth deletion within the hour is refused (data.purge rate limit)", async () => {
+    await freshRestaurant("purge-limit");
+    const backupId = await fullBackup("orders,transactions");
+    const attempt = () => invokeAction(purgeDataAction, { categories: ["orders"], from: "2025-01-01", to: "2025-01-02", backupId, confirmation: CONFIRM });
+    for (let i = 0; i < 5; i++) expect(await attempt()).toMatchObject({ ok: true });
+    expect(await attempt()).toMatchObject({ ok: false, error: { code: "RATE_LIMITED" } });
+  });
+
   it("only the owner/administrator can even preview a deletion", async () => {
     await asSeedUser("A", "MANAGER");
     expect(await invokeAction(previewPurgeAction, { categories: ["orders"], to: "2026-09-30" })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });

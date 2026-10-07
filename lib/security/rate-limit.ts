@@ -32,6 +32,8 @@ export const RATE_LIMITS = {
   // Backups (RASOIOS-ADR-021): an export reads the whole restaurant, so it is metered; restore preview + commit per file.
   "data.export": { limit: 30, windowSec: 60 * 60, failOpen: false },
   "data.import": { limit: 30, windowSec: 60 * 60, failOpen: false },
+  // Permanent deletion (security brief 2026-10-07): a handful an hour per user is plenty for a real owner; fail closed.
+  "data.purge": { limit: 5, windowSec: 60 * 60, failOpen: false },
   // Staff daily-password sign-in (ADR-019 §5). Two buckets: one per email so a colleague's typos cannot lock a
   // person out, one per address so a spray across many emails from one machine is still stopped. Fail closed —
   // a guessable eight-character password must never fall back to unlimited attempts because the database blinked.

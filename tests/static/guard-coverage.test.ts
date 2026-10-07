@@ -146,6 +146,23 @@ describe("TC-AUTH-013 guard coverage", () => {
     expect(missing).toEqual([]);
   });
 
+  it('every "use client" page under /restaurant and /admin sits below its own guarded layout', () => {
+    // A client page cannot call a guard, and the console root layouts only prove membership — so a client page needs a
+    // layout of its own (or a nearer ancestor's) that does (security pass 2026-10-07: social, billing, analytics).
+    const consoleRoots = new Set(["app/restaurant", "app/admin"]);
+    const guardedLayouts = new Set(entries.filter((e) => e.kind === "layout" && firstStatementCallsGuard(e.body)).map((e) => path.posix.dirname(e.file)));
+    const clientPages = appFiles.filter(
+      (f) => /^app\/(restaurant|admin)\/.+\/page\.tsx$/.test(f) && /^\s*["']use client["']/.test(readFileSync(path.join(root, f), "utf8")),
+    );
+    const missing = clientPages.filter((file) => {
+      for (let dir = path.posix.dirname(file); !consoleRoots.has(dir) && dir !== "app"; dir = path.posix.dirname(dir)) {
+        if (guardedLayouts.has(dir)) return false;
+      }
+      return true;
+    });
+    expect(missing).toEqual([]);
+  });
+
   it("allow-list entries still exist and each carries a justification", () => {
     for (const [key, reason] of Object.entries(ALLOW_LIST)) {
       expect(reason.length, key).toBeGreaterThan(20);

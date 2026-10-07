@@ -145,6 +145,9 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run build
+      # Security brief 2026-10-07: no server-only value (compared by name, never printed) and no credential pattern in the
+      # browser bundle.
+      - run: npm run security:bundle
 
   # S1-P17-T002: the local print agent builds into one runnable file, on both target OSes (Q-010).
   print-agent:
@@ -165,6 +168,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v4
         with: { node-version: "${{ env.NODE_VERSION }}" }
       # SC-DEP-01: any high or critical advisory fails the build, except one on the reviewed, dated exception list in
@@ -172,3 +176,6 @@ jobs:
       # by the script, which fails closed on missing or errored output.
       - run: npm audit --audit-level=high --json > npm-audit.json || true
       - run: node scripts/check-audit.mjs npm-audit.json
+      # Credential-shaped strings in the tree and in every commit; reports file/commit and category only, never the text.
+      - run: npm run security:scan
+      - run: git log --all -p --no-color --unified=0 --format="@@commit %h" | node scripts/secret-scan.mjs history

@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { securityHeaders } from "./lib/http/security-headers";
 import { normalizeRootDomain } from "./lib/tenancy/hostnames";
 import { allowedImageHosts as configuredImageHosts, imageRemotePatterns } from "./lib/validation/url";
 
@@ -15,7 +16,11 @@ const allowedDevOrigins = ["*.localhost", ...(publicRootDomain === null ? [] : [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
   allowedDevOrigins,
+  async headers() {
+    return [{ source: "/:path*", headers: securityHeaders(process.env.NODE_ENV === "production") }];
+  },
   images: {
     remotePatterns: [
       ...imageRemotePatterns(allowedImageHosts),

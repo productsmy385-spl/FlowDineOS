@@ -67,6 +67,20 @@ The Railway CLI on the development machine (v5.43.1) is signed in, but no `rasoi
 5. Generate a Railway domain for `web` and add it to the Clerk development instance's allowed origins.
 6. Merge to `main` and verify TC-OPS-001: the staging URL serves the new build over HTTPS. Record the URL and deployment id in the table above.
 
+## Build check (2026-10-07)
+
+- [fact] `npm run build` passes locally on Node 24.18 (`.nvmrc` = 24, which Railpack reads). The build needs no
+  database. `next start` reads `PORT`; the app does not use `output: "standalone"`, and Railpack runs `npm run start`.
+- [fact] `next start` with the local `.env` refuses to boot: `DATABASE_URL: must set sslmode=require in production`.
+  That is `lib/env.ts` working as designed — on Railway `applyPlatformDefaults` adds `sslmode=require` to a
+  `*.proxy.rlwy.net` URL because `RAILWAY_*` variables are present. With `RAILWAY_PUBLIC_DOMAIN` set the build serves
+  and sends every security header (SC-HDR-01).
+- [observed] The Railway CLI on the development machine is linked to a different project, so `railway logs --build`
+  for this service could not be read from here. To diagnose a failed Railway build: Railway → service → Deployments →
+  the failed deployment → Build Logs; compare with `npm ci && npm run prisma:gen && npm run agent:build && npm run build`.
+- [observed] Railway warns that `railway.json` config-as-code is deprecated after 2026-12-01 — move the settings to
+  `railway.toml` or the dashboard before then.
+
 ## Known issue — migrations not applied on deploy (seen 2026-10-02 and 2026-10-07)
 
 [observed] Twice a deploy went live with migrations pending (`/api/ready` →

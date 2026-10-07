@@ -133,12 +133,12 @@ describe("TC-FOUND-003 environment validation", () => {
       ...valid,
       NODE_ENV: "production",
       NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-      DATABASE_URL: "postgresql://postgres:pw@iriguchi.proxy.rlwy.net:40123/railway",
+      DATABASE_URL: "postgresql://postgres:pw@shuttle.proxy.rlwy.net:40123/railway",
       RAILWAY_PUBLIC_DOMAIN: "rasoios-production.up.railway.app",
     };
     applyPlatformDefaults(railway);
     expect(railway.NEXT_PUBLIC_APP_URL).toBe("https://rasoios-production.up.railway.app");
-    expect(railway.DATABASE_URL).toBe("postgresql://postgres:pw@iriguchi.proxy.rlwy.net:40123/railway?sslmode=require");
+    expect(railway.DATABASE_URL).toBe("postgresql://postgres:pw@shuttle.proxy.rlwy.net:40123/railway?sslmode=require");
     expect(problemsOf(railway)).toEqual([]);
 
     // Internal hosts, an explicit sslmode and a real app URL are left exactly as configured.

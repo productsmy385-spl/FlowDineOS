@@ -35,7 +35,8 @@ import {
 import { withTx } from "@/lib/data/tx";
 import { parseCsv, toCsv, toXlsx, type Cell, type Sheet } from "@/lib/data-portability/tabular";
 import { unzip, zip, ZipError, type ZipEntry } from "@/lib/data-portability/zip";
-import { ValidationError } from "@/lib/errors";
+import { RateLimitedError, ValidationError } from "@/lib/errors";
+import { consumeScope } from "@/lib/security/rate-limit";
 import { logger } from "@/lib/logger";
 import { businessDateFor, now, parseIsoDate, toIsoDate, utcRangeForBusinessDates } from "@/lib/time";
 
@@ -490,6 +491,8 @@ async function assertBackupCovers(ctx: TenantContext, request: PurgeRequest): Pr
 export async function purgeData(ctx: TenantContext, request: PurgeRequest): Promise<PurgeResult> {
   if (request.confirmation !== DELETE_CONFIRMATION) throw new ValidationError(`Type ${DELETE_CONFIRMATION} to confirm.`, { confirmation: [`Type ${DELETE_CONFIRMATION} exactly.`] }, "CONFIRMATION_REQUIRED");
   const range = purgeRange(ctx, request);
+  const limit = await consumeScope("data.purge", ctx.userId);
+  if (!limit.allowed) throw new RateLimitedError(limit.retryAfterSec, "Too many deletions in the last hour. Try again later.");
   await assertBackupCovers(ctx, request);
   const categories = orderedCategories(request.categories);
 
