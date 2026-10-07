@@ -49,7 +49,7 @@ describe("TC-RBAC-002 platform and tenant permissions never mix", () => {
 
   it("SUPER_ADMIN has only platform:* permissions and no tenant permission", () => {
     const sa = [...permissionsForPlatformRole("SUPER_ADMIN")];
-    expect(sa.length).toBe(7);
+    expect(sa.length).toBe(9); // + platform:demo_request:read and :update (ADR-024)
     expect(sa.every((p) => p.startsWith("platform:"))).toBe(true);
     expect(hasPermission(holder(sa), "order:read")).toBe(false);
   });

@@ -284,7 +284,7 @@ describe("platform console", () => {
     expect(activeAdminItem("/admin/tenants")?.href).toBe("/admin/tenants");
     expect(activeAdminItem("/admin/tenants/123")?.href).toBe("/admin/tenants");
     expect(activeAdminItem("/admin/audit")?.href).toBe("/admin/audit");
-    expect(ADMIN_NAV_ITEMS.map((i) => i.label)).toEqual(["Overview", "Restaurants", "Audit"]);
+    expect(ADMIN_NAV_ITEMS.map((i) => i.label)).toEqual(["Overview", "Restaurants", "Demo requests", "Audit"]);
   });
 
   it("every platform item carries an icon and a domain hue", () => {
