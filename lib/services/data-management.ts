@@ -5,14 +5,14 @@ import { audit } from "@/lib/audit/write";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { columnsOf, coerceRow, flattenValue, tenantReferences, userReferences } from "@/lib/data/backup-validate";
 import {
-  countOpenOrdersBefore,
+  countPurge,
   dataCounts,
-  deleteAttendanceBefore,
-  deleteAuditBefore,
-  deleteCustomersBefore,
-  deleteOrdersBefore,
-  deletePrintHistoryBefore,
-  deleteSocialPostsBefore,
+  deleteAttendanceInRange,
+  deleteAuditInRange,
+  deleteCustomersInRange,
+  deleteOrdersInRange,
+  deletePrintHistoryInRange,
+  deleteSocialPostsInRange,
   existingIds,
   findExportRecord,
   insertRows,
@@ -26,6 +26,8 @@ import {
   TABLES,
   updateBackupReminder,
   type DataRange,
+  type PurgeCount,
+  type PurgeRange,
   type RestoreKey,
   type Row,
   type TableKey,
@@ -35,7 +37,7 @@ import { parseCsv, toCsv, toXlsx, type Cell, type Sheet } from "@/lib/data-porta
 import { unzip, zip, ZipError, type ZipEntry } from "@/lib/data-portability/zip";
 import { ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { addDays, businessDateFor, now, parseIsoDate, toIsoDate, utcRangeForBusinessDates } from "@/lib/time";
+import { businessDateFor, now, parseIsoDate, toIsoDate, utcRangeForBusinessDates } from "@/lib/time";
 
 /**
  * Backups, restore and date-range deletion (RASOIOS-ADR-021; owner brief 2026-10-06 §3–8).
@@ -420,64 +422,103 @@ export async function commitImport(ctx: TenantContext, file: { name: string; byt
 // ───────────────────────── deletion ─────────────────────────
 
 export const PURGE_CATEGORIES = {
-  orders: { label: "Orders, bills and payments", needs: ["orders", "transactions"], detail: "Finished orders with their items, kitchen tickets, payments, refunds, receipts and day closes. Open orders are always kept." },
-  customers: { label: "Customers without orders", needs: ["customers"], detail: "Customers added before the date who have no orders left. Anyone with an order is kept." },
+  orders: { label: "Orders, bills and payments", needs: ["orders", "transactions"], detail: "Finished orders in the range with their items, kitchen tickets, payments, refunds, receipts and day closes. Open orders are always kept." },
+  customers: { label: "Customers", needs: ["customers"], detail: "Customers added in the range who have no orders left. A customer with an order outside this deletion is kept." },
   printing: { label: "Print history", needs: ["printing"], detail: "Printed and failed print jobs and printer scans. Jobs still waiting to print are kept." },
-  attendance: { label: "Staff attendance", needs: ["staff"], detail: "Finished staff sign-ins and their expired daily passwords. Staff accounts are kept." },
+  attendance: { label: "Staff attendance", needs: ["staff"], detail: "Finished staff sign-ins and expired daily passwords. Staff accounts are kept." },
   social: { label: "Social posts", needs: ["social"], detail: "Social post drafts and history." },
-  audit: { label: "Audit log", needs: ["audit"], detail: "Activity entries older than the date. The record of every backup, restore and deletion is always kept." },
+  audit: { label: "Audit log", needs: ["audit"], detail: "Activity entries in the range. The record of every backup, restore and deletion is always kept." },
 } as const satisfies Record<string, { label: string; needs: readonly DatasetKey[]; detail: string }>;
 
 export type PurgeCategory = keyof typeof PURGE_CATEGORIES;
-export type PurgeRequest = { categories: PurgeCategory[]; before: string; backupId: string; confirmation: string };
-export type PurgeResult = { deleted: Record<string, number>; keptOpenOrders: number; before: string };
+/** `from` absent = from the beginning; both ends are restaurant business dates and both are included. */
+export type PurgeRangeInput = { from?: string; to: string };
+export type PurgeRequest = PurgeRangeInput & { categories: PurgeCategory[]; backupId: string; confirmation: string };
+export type PurgePreview = { from: string | null; to: string; counts: Record<string, PurgeCount>; total: number };
+export type PurgeResult = PurgePreview & {
+  /** What was actually removed, per table. */
+  deleted: Record<string, number>;
+  deletedTotal: number;
+  /** Deletable records still found in the range afterwards: 0 unless something was added during the deletion. */
+  remaining: number;
+};
 
-/** The backup a deletion relies on must be this restaurant's, recent, from the start of history, and cover the data. */
+const sumDelete = (counts: Record<string, PurgeCount>) => Object.values(counts).reduce((n, c) => n + Object.values(c.delete).reduce((a, b) => a + b, 0), 0);
+
+/** Validates the range and turns it into the restaurant's local-midnight boundaries. */
+function purgeRange(ctx: TenantContext, input: PurgeRangeInput): PurgeRange {
+  const today = toIsoDate(businessDateFor(now(), ctx.restaurant.timezone));
+  if (input.to > today) throw new ValidationError("Choose today or an earlier date.", { to: ["The end date cannot be in the future."] });
+  if (input.from && input.from > input.to) throw new ValidationError("The start date is after the end date.", { from: ["Choose a start on or before the end."] });
+  const tz = ctx.restaurant.timezone;
+  return {
+    fromDate: input.from ? parseIsoDate(input.from) : undefined,
+    toDate: parseIsoDate(input.to),
+    startAt: input.from ? utcRangeForBusinessDates(input.from, input.from, tz).start : undefined,
+    endAt: utcRangeForBusinessDates(input.to, input.to, tz).end,
+  };
+}
+
+const orderedCategories = (requested: readonly PurgeCategory[]) => (Object.keys(PURGE_CATEGORIES) as PurgeCategory[]).filter((c) => requested.includes(c));
+
+/** SA-DATA-05 — exactly what a deletion of this range would remove and keep, before anything is touched. */
+export async function previewPurge(ctx: TenantContext, input: PurgeRangeInput & { categories: PurgeCategory[] }): Promise<PurgePreview> {
+  const range = purgeRange(ctx, input);
+  const counts = await withTx(ctx, (tx) => countPurge(tx, ctx, orderedCategories(input.categories), range));
+  return { from: input.from ?? null, to: input.to, counts, total: sumDelete(counts) };
+}
+
+/** The backup a deletion relies on must be this restaurant's, recent, and cover the range and the data. */
 async function assertBackupCovers(ctx: TenantContext, request: PurgeRequest): Promise<void> {
   const record = await withTx(ctx, (tx) => findExportRecord(tx, ctx, request.backupId));
   const after = (record?.afterState ?? {}) as { datasets?: string[]; from?: string | null; to?: string | null };
-  const lastDay = toIsoDate(addDays(parseIsoDate(request.before), -1));
   const needs = request.categories.flatMap((c) => PURGE_CATEGORIES[c].needs);
   const fresh = record !== null && now().getTime() - record.createdAt.getTime() <= BACKUP_FRESH_MS;
-  const covers = after.from === null && (after.to === null || (typeof after.to === "string" && after.to >= lastDay)) && needs.every((d) => after.datasets?.includes(d));
+  const startsEarlyEnough = after.from === null || after.from === undefined || (request.from !== undefined && after.from <= request.from);
+  const endsLateEnough = after.to === null || after.to === undefined || after.to >= request.to;
+  const covers = startsEarlyEnough && endsLateEnough && needs.every((d) => after.datasets?.includes(d));
   if (!fresh || !covers) {
     throw new ValidationError("Download a backup of this data first. Deleting is only possible within 24 hours of downloading a backup that covers everything being deleted.", { backupId: ["Download the backup first."] }, "BACKUP_REQUIRED");
   }
 }
 
+/**
+ * SA-DATA-03 — deletes the range in one transaction, then counts the same range again and reports both. The result
+ * carries the real numbers, so the screen never says "deleted" when nothing matched (owner bug report 2026-10-07: a
+ * deletion with the default cutoff matched no records and still reported success).
+ */
 export async function purgeData(ctx: TenantContext, request: PurgeRequest): Promise<PurgeResult> {
   if (request.confirmation !== DELETE_CONFIRMATION) throw new ValidationError(`Type ${DELETE_CONFIRMATION} to confirm.`, { confirmation: [`Type ${DELETE_CONFIRMATION} exactly.`] }, "CONFIRMATION_REQUIRED");
-  const today = toIsoDate(businessDateFor(now(), ctx.restaurant.timezone));
-  if (request.before > today) throw new ValidationError("Choose today or an earlier date.", { before: ["The date cannot be in the future."] });
+  const range = purgeRange(ctx, request);
   await assertBackupCovers(ctx, request);
-
-  const before = parseIsoDate(request.before);
-  const beforeAt = utcRangeForBusinessDates(request.before, request.before, ctx.restaurant.timezone).start;
-  const categories = (Object.keys(PURGE_CATEGORIES) as PurgeCategory[]).filter((c) => request.categories.includes(c));
+  const categories = orderedCategories(request.categories);
 
   const result = await withTx(
     ctx,
     async (tx) => {
+      const counts = await countPurge(tx, ctx, categories, range);
       const deleted: Record<string, number> = {};
-      const keptOpenOrders = categories.includes("orders") ? await countOpenOrdersBefore(tx, ctx, before) : 0;
       // Orders first: customers become deletable only once their orders are gone.
-      if (categories.includes("orders")) Object.assign(deleted, await deleteOrdersBefore(tx, ctx, before));
-      if (categories.includes("customers")) Object.assign(deleted, await deleteCustomersBefore(tx, ctx, beforeAt));
-      if (categories.includes("printing")) Object.assign(deleted, await deletePrintHistoryBefore(tx, ctx, beforeAt));
-      if (categories.includes("attendance")) Object.assign(deleted, await deleteAttendanceBefore(tx, ctx, before));
-      if (categories.includes("social")) Object.assign(deleted, await deleteSocialPostsBefore(tx, ctx, beforeAt));
-      if (categories.includes("audit")) Object.assign(deleted, await deleteAuditBefore(tx, ctx, beforeAt));
+      if (categories.includes("orders")) Object.assign(deleted, await deleteOrdersInRange(tx, ctx, range));
+      if (categories.includes("customers")) Object.assign(deleted, await deleteCustomersInRange(tx, ctx, range));
+      if (categories.includes("printing")) Object.assign(deleted, await deletePrintHistoryInRange(tx, ctx, range));
+      if (categories.includes("attendance")) Object.assign(deleted, await deleteAttendanceInRange(tx, ctx, range));
+      if (categories.includes("social")) Object.assign(deleted, await deleteSocialPostsInRange(tx, ctx, range));
+      if (categories.includes("audit")) Object.assign(deleted, await deleteAuditInRange(tx, ctx, range));
+      // Verify inside the same transaction: what is still deletable in the range must now be nothing.
+      const remaining = sumDelete(await countPurge(tx, ctx, categories, range));
+      const deletedTotal = Object.values(deleted).reduce((a, b) => a + b, 0);
       await audit(tx, ctx, {
         action: "data.deleted",
         resourceType: "tenant_data",
-        after: { categories, before: request.before, backupId: request.backupId, deleted, keptOpenOrders },
-        reason: "Owner-requested deletion of history after a verified backup",
+        after: { categories, from: request.from ?? null, to: request.to, backupId: request.backupId, deleted, deletedTotal, remaining },
+        reason: "Owner-requested deletion of a date range after a verified backup",
       });
-      return { deleted, keptOpenOrders, before: request.before };
+      return { from: request.from ?? null, to: request.to, counts, total: sumDelete(counts), deleted, deletedTotal, remaining };
     },
     { timeoutMs: 300_000 },
   );
-  logger.info("data.deleted", { requestId: ctx.requestId, tenantId: ctx.tenantId, categories, before: request.before });
+  logger.info("data.deleted", { requestId: ctx.requestId, tenantId: ctx.tenantId, categories, deletedTotal: result.deletedTotal, remaining: result.remaining });
   return result;
 }
 

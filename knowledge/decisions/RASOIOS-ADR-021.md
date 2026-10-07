@@ -57,12 +57,31 @@ restorable (export only).
 
 ### 3. Deletion is by date range, only after a matching backup
 
-`purgeDataAction` (`data:purge`, owner/administrator only) deletes history *before a date* in chosen categories —
+`purgeDataAction` (`data:purge`, owner/administrator only) deletes history in chosen categories —
 finished orders with their items, KOTs, payments/refunds, receipts and day closes; customers with no orders left;
 printed/failed print jobs and printer scans; ended staff sessions and expired daily passwords; social posts; audit
 entries. It requires (a) the typed confirmation `DELETE MY RESTAURANT DATA`, (b) a `data.exported` record of **this**
-restaurant from the last 24 hours whose datasets cover every category and whose range starts at the beginning of history
-and reaches the day before the cutoff. Open orders are never deleted. The deletion writes `data.deleted` with counts.
+restaurant from the last 24 hours whose datasets cover every category and whose range covers the deletion range. Open
+orders are never deleted. The deletion writes `data.deleted` with the range and the real counts.
+
+**Amended 2026-10-07 (owner bug report: "selected range deleted, records still visible").** [fact] The first version took
+a single "before" date that defaulted to today − 365 days; deletions with that default matched nothing and the screen
+still said "Old data deleted" (production audit: `data.deleted … deleted: {auditEntries: 0}`). Now:
+
+- The range is **From (optional = from the beginning) → To**, both days included, in the restaurant's time zone.
+  Business-dated rows use `businessDate` between them; timestamped rows use `createdAt` from the restaurant's local
+  midnight of From (inclusive) to the local midnight after To (exclusive) — `utcRangeForBusinessDates`. To may not be in
+  the future; From may not be after To. No default range.
+- `previewPurgeAction` (`data:purge`) counts what would be deleted and what would be kept, and why (open orders,
+  customers who still have orders, waiting print jobs, signed-in staff, `data.*` records). It changes nothing.
+- The delete runs in one transaction and then counts the same range again in that transaction; the result carries
+  `deleted`, `deletedTotal` and `remaining`, and the audit row records them. The screen reports only those numbers —
+  "Nothing matched — no data was deleted" when the total is 0. `lib/services/data-management.ts` `purgeData`.
+- The order and kitchen boards request a full list every 60 s (`resyncEveryMs` in `lib/ui/poller.ts`), because a
+  `since` delta never carries a deleted row; a deleted card leaves the screen within a minute without a reload.
+- Tests: TC-DATA-011 (`tests/integration/data/data-management.test.ts`) — inclusive ends, month crossing, Asia/Kolkata and
+  America/New_York midnight/23:59 boundaries, another tenant untouched, injected `tenantId` rejected, zero matches,
+  future/reversed ranges, preview refused to a manager.
 
 ### 4. The audit log stays append-only, with one scoped exception
 

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Archive, CheckCircle2, Download, FileSpreadsheet, FileText, FileUp, History, ShieldAlert, Trash2 } from "lucide-react";
-import { purgeDataAction, setBackupReminderAction } from "@/app/restaurant/settings/data/actions";
+import { previewPurgeAction, purgeDataAction, setBackupReminderAction } from "@/app/restaurant/settings/data/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -48,12 +48,12 @@ const DATASET_LABELS: Record<DatasetKey, string> = {
 };
 
 const PURGE: Record<PurgeKey, { label: string; detail: string; needs: DatasetKey[] }> = {
-  orders: { label: "Orders, bills and payments", needs: ["orders", "transactions"], detail: "Finished orders with their items, kitchen tickets, payments, refunds, receipts and day closes. Open orders are always kept." },
-  customers: { label: "Customers without orders", needs: ["customers"], detail: "Customers added before the date who have no orders left." },
+  orders: { label: "Orders, bills and payments", needs: ["orders", "transactions"], detail: "Finished orders in the range with their items, kitchen tickets, payments, refunds, receipts and day closes. Open orders are always kept." },
+  customers: { label: "Customers without orders", needs: ["customers"], detail: "Customers added in the range who have no orders left." },
   printing: { label: "Print history", needs: ["printing"], detail: "Printed and failed print jobs and printer scans. Jobs still waiting are kept." },
   attendance: { label: "Staff attendance", needs: ["staff"], detail: "Finished staff sign-ins and expired daily passwords. Staff accounts are kept." },
   social: { label: "Social posts", needs: ["social"], detail: "Social post drafts and history." },
-  audit: { label: "Audit log", needs: ["audit"], detail: "Activity older than the date. The record of backups, restores and deletions is always kept." },
+  audit: { label: "Audit log", needs: ["audit"], detail: "Activity in the range. The record of backups, restores and deletions is always kept." },
 };
 
 const COUNT_LABELS: Record<string, string> = {
@@ -71,12 +71,6 @@ const CONFIRMATION = "DELETE MY RESTAURANT DATA";
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 const formatDateTime = (iso: string) => new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
-const shiftDate = (iso: string, days: number) => {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
-
 const download = (params: { datasets: DatasetKey[]; format: string; from?: string; to?: string; backupId?: string }) => downloadExport(params);
 
 export function DataManagement({ overview, canImport, canDelete }: { overview: Overview; canImport: boolean; canDelete: boolean }) {
@@ -408,6 +402,24 @@ function ImportCard() {
   );
 }
 
+type PurgeCounts = Record<string, { delete: Record<string, number>; keep: Record<string, number> }>;
+
+const KEEP_LABELS: Record<string, string> = {
+  openOrders: "orders still open",
+  customersWithOrders: "customers who still have orders",
+  waitingPrintJobs: "print jobs still waiting",
+  activeSessions: "staff still signed in",
+  backupAndDeletionRecords: "backup and deletion records",
+};
+
+const words = (k: string) => k.replace(/([A-Z])/g, " $1").toLowerCase();
+const rangeText = (from: string, to: string) => (from ? `${formatDate(`${from}T00:00:00`)} to ${formatDate(`${to}T00:00:00`)}` : `the beginning to ${formatDate(`${to}T00:00:00`)}`);
+
+/**
+ * Deletes a chosen date range (owner bug report 2026-10-07). Both dates are included, in the restaurant's time zone.
+ * The numbers shown — before and after — come from the server counting the range; the screen never reports a deletion
+ * the server did not confirm.
+ */
 function DeleteCard({ today }: { today: string }) {
   const router = useRouter();
   const toast = useToast();
@@ -418,45 +430,71 @@ function DeleteCard({ today }: { today: string }) {
     const wanted = new URLSearchParams(window.location.search).get("delete");
     if (wanted && (PURGE_CATEGORY_LIST as readonly string[]).includes(wanted)) setCategories([wanted as PurgeKey]);
   }, []);
-  const [before, setBefore] = React.useState(shiftDate(today, -365));
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
+  const [preview, setPreview] = React.useState<{ key: string; counts: PurgeCounts; total: number } | null>(null);
   const [backup, setBackup] = React.useState<{ backupId: string; filename: string; key: string } | null>(null);
-  const [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = React.useState<"preview" | "backup" | null>(null);
   const [confirming, setConfirming] = React.useState(false);
-  const [result, setResult] = React.useState<{ deleted: Record<string, number>; keptOpenOrders: number } | null>(null);
+  const [result, setResult] = React.useState<{ range: string; deleted: Record<string, number>; deletedTotal: number; remaining: number; counts: PurgeCounts } | null>(null);
 
   const needs = [...new Set(categories.flatMap((c) => PURGE[c].needs))];
-  const key = `${needs.sort().join(",")}|${before}`;
+  const key = `${[...categories].sort().join(",")}|${from}|${to}`;
+  const rangeError = !to ? "Choose the last day to delete." : to > today ? "The end date cannot be in the future." : from && from > to ? "The start date is after the end date." : null;
+  const previewReady = preview !== null && preview.key === key;
   const backupReady = backup !== null && backup.key === key;
   const toggle = (c: PurgeKey) => setCategories((s) => (s.includes(c) ? s.filter((k) => k !== c) : [...s, c]));
 
+  async function check() {
+    setBusy("preview");
+    const outcome = await previewPurgeAction({ categories, from: from || undefined, to });
+    setBusy(null);
+    if (!outcome.ok) {
+      toast.error(outcome.error.message);
+      return;
+    }
+    setPreview({ key, counts: outcome.data.counts, total: outcome.data.total });
+  }
+
   async function takeBackup() {
-    setBusy(true);
+    setBusy("backup");
     try {
       const backupId = crypto.randomUUID();
-      const { filename } = await download({ datasets: needs, format: "zip", to: shiftDate(before, -1), backupId });
+      const { filename } = await download({ datasets: needs, format: "zip", from: from || undefined, to, backupId });
       setBackup({ backupId, filename, key });
       toast.success(`Backup saved as ${filename}. Keep it safe before deleting.`);
     } catch (error) {
       toast.error((error as Error).message);
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
   async function purge() {
     if (!backup) return;
-    const outcome = await purgeDataAction({ categories, before, backupId: backup.backupId, confirmation: CONFIRMATION });
+    const outcome = await purgeDataAction({ categories, from: from || undefined, to, backupId: backup.backupId, confirmation: CONFIRMATION });
     setConfirming(false);
     if (!outcome.ok) {
       toast.error(outcome.error.message);
       return;
     }
-    setResult(outcome.data);
+    const data = outcome.data;
+    setResult({ range: rangeText(from, to), deleted: data.deleted, deletedTotal: data.deletedTotal, remaining: data.remaining, counts: data.counts });
     setBackup(null);
-    setCategories([]);
-    toast.success("Old data deleted. The deletion is recorded in the history below.");
+    setPreview(null);
+    if (data.deletedTotal === 0) toast.error("Nothing matched this range — no data was deleted.");
+    else if (data.remaining > 0) toast.error(`Deleted ${data.deletedTotal.toLocaleString()} records, but ${data.remaining.toLocaleString()} in the range are still there. Check again and repeat.`);
+    else {
+      setCategories([]);
+      toast.success(`Deleted ${data.deletedTotal.toLocaleString()} records from ${rangeText(from, to)}. Checked: none are left in that range.`);
+    }
     router.refresh();
   }
+
+  const kept = (counts: PurgeCounts) =>
+    Object.values(counts)
+      .flatMap((c) => Object.entries(c.keep))
+      .filter(([, v]) => v > 0);
 
   return (
     <Card id="delete-old-data" className="scroll-mt-24 border-status-danger/40">
@@ -465,14 +503,14 @@ function DeleteCard({ today }: { today: string }) {
           <ShieldAlert className="size-5" aria-hidden /> Delete old data
         </CardTitle>
         <CardDescription>
-          Free up space by permanently removing history before a date. You must download a backup of exactly that data first; deleted records can only come back by
-          importing that backup.
+          Permanently remove history between two dates — both days included, in your restaurant&apos;s time zone. You must download a backup of exactly that data first;
+          deleted records can only come back by importing that backup.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
         <ol className="flex flex-col gap-5">
           <li className="flex flex-col gap-3">
-            <p className="text-label text-fg-primary">1. Choose what to delete</p>
+            <p className="text-label text-fg-primary">1. Choose what and which dates</p>
             <div className="grid gap-2 md:grid-cols-2">
               {PURGE_CATEGORY_LIST.map((c) => (
                 <label key={c} className="flex cursor-pointer items-start gap-3 rounded-xl border border-border-subtle bg-raised p-3">
@@ -484,46 +522,101 @@ function DeleteCard({ today }: { today: string }) {
                 </label>
               ))}
             </div>
-            <label className="flex max-w-xs flex-col gap-1.5 text-label text-fg-primary">
-              Delete everything before
-              <input type="date" value={before} max={today} onChange={(e) => setBefore(e.target.value)} className="h-10 rounded-xl border border-border-strong bg-canvas px-3 text-body" />
-            </label>
+            <div className="flex flex-wrap gap-3">
+              <label className="flex flex-col gap-1.5 text-label text-fg-primary">
+                From (leave empty for the beginning)
+                <input type="date" value={from} max={to || today} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-xl border border-border-strong bg-canvas px-3 text-body" data-testid="purge-from" />
+              </label>
+              <label className="flex flex-col gap-1.5 text-label text-fg-primary">
+                To (included)
+                <input type="date" value={to} min={from || undefined} max={today} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-xl border border-border-strong bg-canvas px-3 text-body" data-testid="purge-to" />
+              </label>
+            </div>
+            {to && rangeError && <p className="text-caption text-status-danger">{rangeError}</p>}
           </li>
           <li className="flex flex-col gap-2">
-            <p className="text-label text-fg-primary">2. Download the backup of this data</p>
+            <p className="text-label text-fg-primary">2. Check what will be deleted</p>
+            <div>
+              <Button variant="secondary" onClick={check} loading={busy === "preview"} loadingLabel="Counting…" disabled={categories.length === 0 || rangeError !== null}>
+                Check what will be deleted
+              </Button>
+            </div>
+            {previewReady && (
+              <div className="rounded-xl border border-border-subtle bg-raised p-3 text-body text-fg-primary" data-testid="purge-preview">
+                {preview.total === 0 ? (
+                  <p>Nothing in {rangeText(from, to)} matches. There is nothing to delete.</p>
+                ) : (
+                  <>
+                    <p className="text-label">{preview.total.toLocaleString()} records in {rangeText(from, to)} will be deleted:</p>
+                    <ul className="mt-1 grid grid-cols-2 gap-1 text-caption sm:grid-cols-3">
+                      {Object.values(preview.counts)
+                        .flatMap((c) => Object.entries(c.delete))
+                        .map(([k, v]) => (
+                          <li key={k}>
+                            {words(k)}: <span className="tabular-nums">{v.toLocaleString()}</span>
+                          </li>
+                        ))}
+                    </ul>
+                  </>
+                )}
+                {kept(preview.counts).length > 0 && (
+                  <p className="mt-2 text-caption text-fg-secondary">
+                    Kept: {kept(preview.counts).map(([k, v]) => `${v.toLocaleString()} ${KEEP_LABELS[k] ?? words(k)}`).join(", ")}.
+                  </p>
+                )}
+              </div>
+            )}
+          </li>
+          <li className="flex flex-col gap-2">
+            <p className="text-label text-fg-primary">3. Download the backup of this data</p>
             {backupReady ? (
               <p className="flex items-center gap-2 text-body text-status-success">
                 <CheckCircle2 className="size-4" aria-hidden /> Saved {backup.filename}
               </p>
             ) : (
               <div>
-                <Button variant="secondary" icon={Download} onClick={takeBackup} loading={busy} loadingLabel="Preparing…" disabled={categories.length === 0 || !before}>
+                <Button variant="secondary" icon={Download} onClick={takeBackup} loading={busy === "backup"} loadingLabel="Preparing…" disabled={!previewReady || preview.total === 0}>
                   Download backup
                 </Button>
               </div>
             )}
           </li>
           <li className="flex flex-col gap-2">
-            <p className="text-label text-fg-primary">3. Delete</p>
+            <p className="text-label text-fg-primary">4. Delete</p>
             <div>
-              <Button variant="destructive" icon={Trash2} onClick={() => setConfirming(true)} disabled={!backupReady}>
-                Delete data before {before ? formatDate(`${before}T00:00:00`) : "…"}
+              <Button variant="destructive" icon={Trash2} onClick={() => setConfirming(true)} disabled={!backupReady || !previewReady || preview.total === 0}>
+                Delete {previewReady ? preview.total.toLocaleString() : ""} records
               </Button>
             </div>
           </li>
         </ol>
 
         {result && (
-          <div className="rounded-xl border border-border-subtle bg-raised p-3 text-body text-fg-primary" data-testid="purge-result">
-            <p className="text-label">Deleted</p>
-            <ul className="mt-1 grid grid-cols-2 gap-1 text-caption sm:grid-cols-3">
-              {Object.entries(result.deleted).map(([k, v]) => (
-                <li key={k}>
-                  {k.replace(/([A-Z])/g, " $1").toLowerCase()}: <span className="tabular-nums">{v.toLocaleString()}</span>
-                </li>
-              ))}
-            </ul>
-            {result.keptOpenOrders > 0 && <p className="mt-2 text-caption text-fg-secondary">{result.keptOpenOrders} older orders are still open and were kept.</p>}
+          <div className="rounded-xl border border-border-subtle bg-raised p-3 text-body text-fg-primary" data-testid="purge-result" role="status">
+            {result.deletedTotal === 0 ? (
+              <p className="text-label">Nothing matched {result.range} — no data was deleted.</p>
+            ) : (
+              <>
+                <p className="text-label">
+                  Deleted {result.deletedTotal.toLocaleString()} records from {result.range}.{" "}
+                  {result.remaining === 0 ? "Checked again: none are left in that range." : `${result.remaining.toLocaleString()} are still there — check again and repeat.`}
+                </p>
+                <ul className="mt-1 grid grid-cols-2 gap-1 text-caption sm:grid-cols-3">
+                  {Object.entries(result.deleted)
+                    .filter(([, v]) => v > 0)
+                    .map(([k, v]) => (
+                      <li key={k}>
+                        {words(k)}: <span className="tabular-nums">{v.toLocaleString()}</span>
+                      </li>
+                    ))}
+                </ul>
+              </>
+            )}
+            {kept(result.counts).length > 0 && (
+              <p className="mt-2 text-caption text-fg-secondary">
+                Kept: {kept(result.counts).map(([k, v]) => `${v.toLocaleString()} ${KEEP_LABELS[k] ?? words(k)}`).join(", ")}.
+              </p>
+            )}
           </div>
         )}
 
@@ -539,7 +632,9 @@ function DeleteCard({ today }: { today: string }) {
           <div className="flex gap-3 rounded-xl border border-status-danger/30 bg-status-danger/12 p-3 text-body text-fg-primary">
             <AlertTriangle className="mt-0.5 size-5 shrink-0 text-status-danger" aria-hidden />
             <div className="min-w-0">
-              <p>Everything below dated before {before ? formatDate(`${before}T00:00:00`) : ""} will be removed for good:</p>
+              <p>
+                {previewReady ? preview.total.toLocaleString() : "These"} records from {to ? rangeText(from, to) : ""} will be removed for good:
+              </p>
               <ul className="mt-1 list-disc pl-5">
                 {categories.map((c) => (
                   <li key={c}>{PURGE[c].label}</li>
@@ -719,6 +814,7 @@ function HistoryCard({ history }: { history: Overview["history"] }) {
                 <span className="text-body text-fg-primary">
                   {HISTORY_LABEL[event.action] ?? event.action}
                   {event.action === "data.exported" && typeof event.summary.format === "string" ? ` · ${event.summary.format.toUpperCase()}` : ""}
+                  {event.action === "data.deleted" && typeof event.summary.to === "string" ? ` · ${typeof event.summary.from === "string" ? formatDate(`${event.summary.from}T00:00:00`) : "beginning"} to ${formatDate(`${event.summary.to}T00:00:00`)}` : ""}
                   {event.action === "data.deleted" && typeof event.summary.before === "string" ? ` · before ${formatDate(`${event.summary.before}T00:00:00`)}` : ""}
                   {event.action === "data.imported" && typeof event.summary.total === "number" ? ` · ${event.summary.total} records` : ""}
                 </span>

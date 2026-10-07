@@ -390,17 +390,95 @@ export async function insertRows(tx: Tx, ctx: TenantContext, table: RestoreKey, 
 
 // ───────────────────────── date-range deletion ─────────────────────────
 
+/**
+ * A deletion range (owner bug report 2026-10-07: "selected range deleted, records still visible"). Both ends are
+ * restaurant business dates and both are included; `fromDate` absent means "from the beginning". Business-dated rows
+ * (orders, payments, day closes, attendance) use `businessDate`; others use `createdAt` between the restaurant's local
+ * midnights `startAt` (inclusive) and `endAt` (exclusive, the midnight after `toDate`).
+ */
+export type PurgeRange = { fromDate?: Date; toDate: Date; startAt?: Date; endAt: Date };
+
+const inBusinessDays = (r: PurgeRange) => ({ businessDate: { ...(r.fromDate ? { gte: r.fromDate } : {}), lte: r.toDate } });
+const inCreatedRange = (r: PurgeRange) => ({ createdAt: { ...(r.startAt ? { gte: r.startAt } : {}), lt: r.endAt } });
+
 /** Only finished orders are ever deleted; anything still open stays, whatever its date. */
 const FINISHED_ORDERS = [OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.REFUNDED];
+const FINISHED_JOBS = [PrintJobStatus.PRINTED, PrintJobStatus.FAILED];
+const FINISHED_SCANS = [PrinterDiscoveryStatus.COMPLETED, PrinterDiscoveryStatus.FAILED];
 const CHUNK = 500;
 
-export async function countOpenOrdersBefore(tx: Tx, ctx: TenantContext, before: Date): Promise<number> {
-  return tx.order.count({ where: tenantScope(ctx, { businessDate: { lt: before }, status: { notIn: FINISHED_ORDERS } }) });
+const deletableOrders = (r: PurgeRange) => ({ ...inBusinessDays(r), status: { in: FINISHED_ORDERS } });
+
+export type PurgeCategoryKey = "orders" | "customers" | "printing" | "attendance" | "social" | "audit";
+/** What a deletion would remove (`delete`) and what in the same range it keeps, and why (`keep`). */
+export type PurgeCount = { delete: Record<string, number>; keep: Record<string, number> };
+
+/**
+ * Counts exactly what `deleteInRange` would remove for each category, and what it would keep. Used for the preview
+ * before deleting and again afterwards to verify nothing deletable is left.
+ */
+export async function countPurge(tx: Tx, ctx: TenantContext, categories: readonly PurgeCategoryKey[], r: PurgeRange): Promise<Record<string, PurgeCount>> {
+  const out: Record<string, PurgeCount> = {};
+  const withOrders = categories.includes("orders");
+  for (const category of categories) {
+    switch (category) {
+      case "orders": {
+        const [orders, payments, openOrders, dayCloses] = await Promise.all([
+          tx.order.count({ where: tenantScope(ctx, deletableOrders(r)) }),
+          tx.transaction.count({ where: tenantScope(ctx, { order: deletableOrders(r) }) }),
+          tx.order.count({ where: tenantScope(ctx, { ...inBusinessDays(r), status: { notIn: FINISHED_ORDERS } }) }),
+          tx.businessDayClose.count({ where: tenantScope(ctx, inBusinessDays(r)) }),
+        ]);
+        out.orders = { delete: { orders, payments, dayCloses }, keep: { openOrders } };
+        break;
+      }
+      case "customers": {
+        // With orders also being deleted, a customer whose every order is in that deletion becomes deletable too.
+        const deletable = withOrders ? { orders: { every: deletableOrders(r) } } : { orders: { none: {} } };
+        const [customers, withOtherOrders] = await Promise.all([
+          tx.customer.count({ where: tenantScope(ctx, { ...inCreatedRange(r), ...deletable }) }),
+          tx.customer.count({ where: tenantScope(ctx, { ...inCreatedRange(r), NOT: deletable }) }),
+        ]);
+        out.customers = { delete: { customers }, keep: { customersWithOrders: withOtherOrders } };
+        break;
+      }
+      case "printing": {
+        const [printJobs, printerScans, waitingJobs] = await Promise.all([
+          tx.printJob.count({ where: tenantScope(ctx, { ...inCreatedRange(r), status: { in: FINISHED_JOBS } }) }),
+          tx.printerDiscovery.count({ where: tenantScope(ctx, { ...inCreatedRange(r), status: { in: FINISHED_SCANS } }) }),
+          tx.printJob.count({ where: tenantScope(ctx, { ...inCreatedRange(r), status: { notIn: FINISHED_JOBS } }) }),
+        ]);
+        out.printing = { delete: { printJobs, printerScans }, keep: { waitingPrintJobs: waitingJobs } };
+        break;
+      }
+      case "attendance": {
+        const [attendance, activeSessions] = await Promise.all([
+          tx.staffSession.count({ where: tenantScope(ctx, { ...inBusinessDays(r), status: StaffSessionStatus.ENDED }) }),
+          tx.staffSession.count({ where: tenantScope(ctx, { ...inBusinessDays(r), status: { not: StaffSessionStatus.ENDED } }) }),
+        ]);
+        out.attendance = { delete: { attendance }, keep: { activeSessions } };
+        break;
+      }
+      case "social": {
+        out.social = { delete: { socialPosts: await tx.socialPost.count({ where: tenantScope(ctx, inCreatedRange(r)) }) }, keep: {} };
+        break;
+      }
+      case "audit": {
+        const [auditEntries, dataRecords] = await Promise.all([
+          tx.auditLog.count({ where: tenantScope(ctx, { ...inCreatedRange(r), NOT: { action: { startsWith: "data." } } }) }),
+          tx.auditLog.count({ where: tenantScope(ctx, { ...inCreatedRange(r), action: { startsWith: "data." } }) }),
+        ]);
+        out.audit = { delete: { auditEntries }, keep: { backupAndDeletionRecords: dataRecords } };
+        break;
+      }
+    }
+  }
+  return out;
 }
 
-/** Finished orders with a business date before `before`, with everything that hangs off them, plus old day closes. */
-export async function deleteOrdersBefore(tx: Tx, ctx: TenantContext, before: Date): Promise<Record<string, number>> {
-  const ids = (await tx.order.findMany({ where: tenantScope(ctx, { businessDate: { lt: before }, status: { in: FINISHED_ORDERS } }), select: { id: true } })).map((o) => o.id);
+/** Finished orders in the range with everything that hangs off them, plus the range's day closes. */
+export async function deleteOrdersInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  const ids = (await tx.order.findMany({ where: tenantScope(ctx, deletableOrders(r)), select: { id: true } })).map((o) => o.id);
   const counts = { orders: 0, orderItems: 0, kitchenTickets: 0, payments: 0, printJobs: 0, dayCloses: 0 };
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);
@@ -414,45 +492,43 @@ export async function deleteOrdersBefore(tx: Tx, ctx: TenantContext, before: Dat
     counts.payments += (await tx.transaction.deleteMany({ where: tenantScope(ctx, { orderId: { in: chunk } }) })).count;
     counts.orders += (await tx.order.deleteMany({ where: tenantScope(ctx, { id: { in: chunk } }) })).count;
   }
-  counts.dayCloses = (await tx.businessDayClose.deleteMany({ where: tenantScope(ctx, { businessDate: { lt: before } }) })).count;
+  counts.dayCloses = (await tx.businessDayClose.deleteMany({ where: tenantScope(ctx, inBusinessDays(r)) })).count;
   return counts;
 }
 
-/** Customers added before the cutoff who have no orders left. A customer with any order is kept. */
-export async function deleteCustomersBefore(tx: Tx, ctx: TenantContext, beforeAt: Date): Promise<Record<string, number>> {
-  const { count } = await tx.customer.deleteMany({ where: tenantScope(ctx, { createdAt: { lt: beforeAt }, orders: { none: {} } }) });
+/** Customers added in the range who have no orders left. A customer with any remaining order is kept. */
+export async function deleteCustomersInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  const { count } = await tx.customer.deleteMany({ where: tenantScope(ctx, { ...inCreatedRange(r), orders: { none: {} } }) });
   return { customers: count };
 }
 
-/** Finished print jobs and printer scans. A job still waiting for the printer is never removed. */
-export async function deletePrintHistoryBefore(tx: Tx, ctx: TenantContext, beforeAt: Date): Promise<Record<string, number>> {
-  const jobs = await tx.printJob.deleteMany({ where: tenantScope(ctx, { createdAt: { lt: beforeAt }, status: { in: [PrintJobStatus.PRINTED, PrintJobStatus.FAILED] } }) });
-  const scans = await tx.printerDiscovery.deleteMany({
-    where: tenantScope(ctx, { createdAt: { lt: beforeAt }, status: { in: [PrinterDiscoveryStatus.COMPLETED, PrinterDiscoveryStatus.FAILED] } }),
-  });
+/** Finished print jobs and printer scans in the range. A job still waiting for the printer is never removed. */
+export async function deletePrintHistoryInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  const jobs = await tx.printJob.deleteMany({ where: tenantScope(ctx, { ...inCreatedRange(r), status: { in: FINISHED_JOBS } }) });
+  const scans = await tx.printerDiscovery.deleteMany({ where: tenantScope(ctx, { ...inCreatedRange(r), status: { in: FINISHED_SCANS } }) });
   return { printJobs: jobs.count, printerScans: scans.count };
 }
 
-/** Ended staff sessions (attendance) and the expired daily passwords they used. Live sessions are untouched. */
-export async function deleteAttendanceBefore(tx: Tx, ctx: TenantContext, before: Date): Promise<Record<string, number>> {
-  const sessions = await tx.staffSession.deleteMany({ where: tenantScope(ctx, { businessDate: { lt: before }, status: StaffSessionStatus.ENDED }) });
-  const credentials = await tx.staffCredential.deleteMany({ where: tenantScope(ctx, { businessDate: { lt: before }, sessions: { none: {} } }) });
+/** Ended staff sessions (attendance) in the range and expired daily passwords with no sessions left. */
+export async function deleteAttendanceInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  const sessions = await tx.staffSession.deleteMany({ where: tenantScope(ctx, { ...inBusinessDays(r), status: StaffSessionStatus.ENDED }) });
+  const credentials = await tx.staffCredential.deleteMany({ where: tenantScope(ctx, { ...inBusinessDays(r), expiresAt: { lt: new Date() }, sessions: { none: {} } }) });
   return { attendance: sessions.count, expiredPasswords: credentials.count };
 }
 
-export async function deleteSocialPostsBefore(tx: Tx, ctx: TenantContext, beforeAt: Date): Promise<Record<string, number>> {
-  const { count } = await tx.socialPost.deleteMany({ where: tenantScope(ctx, { createdAt: { lt: beforeAt } }) });
+export async function deleteSocialPostsInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  const { count } = await tx.socialPost.deleteMany({ where: tenantScope(ctx, inCreatedRange(r)) });
   return { socialPosts: count };
 }
 
 /**
- * Audit entries older than the cutoff. The table's trigger refuses every DELETE unless this transaction has scoped
- * itself to this tenant and cutoff (migration 0006), and it never deletes a `data.*` entry — the record of backups,
- * restores and deletions, including the one this deletion writes, is permanent.
+ * Audit entries in the range. The table's trigger refuses every DELETE unless this transaction has scoped itself to
+ * this tenant and a cutoff (migration 0006) — here the end of the range — and it never deletes a `data.*` entry: the
+ * record of backups, restores and deletions, including the one this deletion writes, is permanent.
  */
-export async function deleteAuditBefore(tx: Tx, ctx: TenantContext, beforeAt: Date): Promise<Record<string, number>> {
-  await tx.$queryRaw`SELECT set_config('rasoi.audit_purge_tenant', ${ctx.tenantId}, true), set_config('rasoi.audit_purge_before', ${beforeAt.toISOString()}, true)`;
-  const { count } = await tx.auditLog.deleteMany({ where: tenantScope(ctx, { createdAt: { lt: beforeAt }, NOT: { action: { startsWith: "data." } } }) });
+export async function deleteAuditInRange(tx: Tx, ctx: TenantContext, r: PurgeRange): Promise<Record<string, number>> {
+  await tx.$queryRaw`SELECT set_config('rasoi.audit_purge_tenant', ${ctx.tenantId}, true), set_config('rasoi.audit_purge_before', ${r.endAt.toISOString()}, true)`;
+  const { count } = await tx.auditLog.deleteMany({ where: tenantScope(ctx, { ...inCreatedRange(r), NOT: { action: { startsWith: "data." } } }) });
   await tx.$queryRaw`SELECT set_config('rasoi.audit_purge_tenant', '', true), set_config('rasoi.audit_purge_before', '', true)`;
   return { auditEntries: count };
 }

@@ -98,13 +98,15 @@ export function KitchenBoard({
     return () => clearInterval(timer);
   }, []);
 
-  const onDelta = React.useCallback((page: BoardPage) => {
-    setTickets((current) => merge(current, page.tickets));
+  const onDelta = React.useCallback((page: BoardPage, meta: { full: boolean }) => {
+    // A complete full page replaces the board, so a ticket deleted elsewhere disappears without a reload.
+    setTickets((current) => merge(meta.full && !page.hasMore ? [] : current, page.tickets));
   }, []);
 
   const { stale, lastSuccessAt, refetch } = usePolling<BoardPage>({
     url: "/api/v1/kitchen/tickets",
     intervalMs: POLL_INTERVAL_MS,
+    resyncEveryMs: 60_000,
     onData: onDelta,
     select: (body) => {
       const page = body as BoardPage;

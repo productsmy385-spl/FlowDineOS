@@ -218,7 +218,7 @@ export const ENDPOINT_REGISTRY: Readonly<Record<Permission, RegistryEntry>> = {
   },
   "data:purge": {
     endpoint: "purgeDataAction (SA-DATA-03)",
-    invoke: () => invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-01-01", backupId: RANDOM_UUID, confirmation: "probe", rbacProbe: true } as never),
+    invoke: () => invokeAction(purgeDataAction, { categories: ["orders"], to: "2026-01-01", backupId: RANDOM_UUID, confirmation: "probe", rbacProbe: true } as never),
   },
   "table:manage": { endpoint: "editTableAction (SA-TBL-02)", invoke: () => invokeAction(editTableAction, { id: RANDOM_UUID, label: "Probe" }) },
   "platform:demo_request:read": { endpoint: "listDemoRequestsAction (LD-ADM-10)", invoke: () => invokeAction(listDemoRequestsAction, {}) },

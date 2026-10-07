@@ -24,11 +24,20 @@ export const exportQuerySchema = strictObject({
 
 export const purgeDataSchema = strictObject({
   categories: z.array(z.enum(PURGE_CATEGORY_LIST)).min(1, "Choose what to delete").max(PURGE_CATEGORY_LIST.length),
-  before: businessDateParam,
+  /** Both included, restaurant business dates; no `from` = from the beginning. */
+  from: businessDateParam.optional(),
+  to: businessDateParam,
   backupId: z.string().uuid("Download the backup first"),
   confirmation: z.string().max(60),
 });
 export type PurgeDataInput = z.input<typeof purgeDataSchema>;
+
+export const previewPurgeSchema = strictObject({
+  categories: z.array(z.enum(PURGE_CATEGORY_LIST)).min(1, "Choose what to delete").max(PURGE_CATEGORY_LIST.length),
+  from: businessDateParam.optional(),
+  to: businessDateParam,
+});
+export type PreviewPurgeInput = z.input<typeof previewPurgeSchema>;
 
 export const backupReminderSchema = strictObject({ reminder: z.enum(["MANUAL", "MONTHLY", "SIX_MONTHS"]) });
 export type BackupReminderInput = z.input<typeof backupReminderSchema>;

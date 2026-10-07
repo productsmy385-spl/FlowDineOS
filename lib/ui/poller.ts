@@ -6,13 +6,17 @@
  * - Pauses while the page is hidden; fetches immediately when it becomes visible again.
  * - On failure backs off (interval × 2^misses, capped at 30 s) and reports stale after 3 consecutive misses.
  * - `refetch()` polls now (after a mutation) and never overlaps an in-flight request.
+ * - With `resyncEveryMs`, a poll that long after the last full one asks for everything (no `since`) and is passed to
+ *   `onData` with `full: true`. A delta only carries rows that changed, never rows that were deleted, so a board needs
+ *   this to drop a card whose record is gone (owner bug report 2026-10-07: deleted orders stayed on screen).
  */
 export type PollResult<T> = { data: T; cursor: string | null };
 
 export type PollerOptions<T> = {
   fetchPage: (since: string | null) => Promise<PollResult<T>>;
   intervalMs: number;
-  onData: (data: T) => void;
+  onData: (data: T, meta: { full: boolean }) => void;
+  resyncEveryMs?: number;
   onStale?: (stale: boolean, lastSuccessAt: Date | null) => void;
   maxBackoffMs?: number;
   staleAfterMisses?: number;
@@ -40,6 +44,7 @@ export function createPoller<T>(options: PollerOptions<T>): Poller {
   let visible = true;
   let timer: unknown = null;
   let inFlight: Promise<void> | null = null;
+  let lastFullAt: number | null = null;
 
   const cancel = () => {
     if (timer !== null) clearTimer(timer);
@@ -68,12 +73,15 @@ export function createPoller<T>(options: PollerOptions<T>): Poller {
     if (inFlight) return inFlight;
     inFlight = (async () => {
       try {
-        const page = await options.fetchPage(state.since);
+        const at = now().getTime();
+        const full = state.since === null || (options.resyncEveryMs !== undefined && (lastFullAt === null || at - lastFullAt >= options.resyncEveryMs));
+        const page = await options.fetchPage(full ? null : state.since);
+        if (full) lastFullAt = at;
         state.since = page.cursor ?? state.since;
         state.misses = 0;
         state.lastSuccessAt = now();
         setStale(false);
-        options.onData(page.data);
+        options.onData(page.data, { full });
         schedule(options.intervalMs);
       } catch {
         state.misses += 1;

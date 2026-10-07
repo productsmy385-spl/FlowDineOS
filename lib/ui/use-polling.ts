@@ -17,10 +17,13 @@ export function usePolling<T>({
   onData,
   enabled = true,
   select,
+  resyncEveryMs,
 }: {
   url: string;
   intervalMs: number;
-  onData: (data: T) => void;
+  onData: (data: T, meta: { full: boolean }) => void;
+  /** Ask for the whole list this often, so records deleted elsewhere leave the screen too. */
+  resyncEveryMs?: number;
   enabled?: boolean;
   select?: (body: unknown) => PollResult<T>;
 }) {
@@ -36,6 +39,7 @@ export function usePolling<T>({
     if (!enabled) return;
     const poller = createPoller<T>({
       intervalMs,
+      resyncEveryMs,
       fetchPage: async (since) => {
         const target = new URL(url, window.location.origin);
         if (since) target.searchParams.set("since", since);
@@ -44,9 +48,9 @@ export function usePolling<T>({
         const body: unknown = await response.json();
         return selectRef.current ? selectRef.current(body) : (body as PollResult<T>);
       },
-      onData: (data) => {
+      onData: (data, meta) => {
         setLastSuccessAt(new Date());
-        onDataRef.current(data);
+        onDataRef.current(data, meta);
       },
       onStale: (isStale) => setStale(isStale),
     });
@@ -62,7 +66,7 @@ export function usePolling<T>({
       poller.stop();
       pollerRef.current = null;
     };
-  }, [url, intervalMs, enabled]);
+  }, [url, intervalMs, enabled, resyncEveryMs]);
 
   return { stale, lastSuccessAt, refetch: () => pollerRef.current?.refetch() ?? Promise.resolve() };
 }

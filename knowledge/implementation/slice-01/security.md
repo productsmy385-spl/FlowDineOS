@@ -184,7 +184,7 @@ Legend: ✅ allowed · ◐ allowed with the business-rule restriction in the Not
 | 50 | `audit:read` | AUDIT_LOG | read tenant audit | — | ✅ | — | — | — | — | own | `/restaurant/audit` | LD-AUD-01 | TC-RBAC-150 |
 | 51 | `data:export` | TENANT DATA | download a backup (CSV / Excel / JSON / ZIP) | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | RH-DATA-01 (ADR-021) | TC-RBAC-151 |
 | 52 | `data:import` | TENANT DATA | restore missing records from a backup, menu/customer CSV | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | RH-DATA-02 (ADR-021) | TC-RBAC-152 |
-| 53 | `data:purge` | TENANT DATA | delete history before a date, after a matching backup | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | SA-DATA-03 (ADR-021) | TC-RBAC-153 |
+| 53 | `data:purge` | TENANT DATA | preview and delete a date range (both days included), after a matching backup | — | ✅ | — | — | — | — | own | `/restaurant/settings/data` | SA-DATA-03 (ADR-021) | TC-RBAC-153 |
 | 54 | `table:manage` | DINING_TABLE | add/rename/archive tables, rotate QR codes | — | ✅ | ✅ | — | — | — | own | `/restaurant/tables` | SA-TBL-01 (ADR-021) | TC-RBAC-154 |
 | 55 | `platform:demo_request:read` | DEMO_REQUEST | read visitors' demo requests | ✅ | — | — | — | — | — | platform | `/admin/demo-requests` | LD-ADM-10 (ADR-024) | TC-RBAC-155 |
 | 56 | `platform:demo_request:update` | DEMO_REQUEST | change a request's status and notes | ✅ | — | — | — | — | — | platform | `/admin/demo-requests` | SA-ADM-11 (ADR-024) | TC-RBAC-156 |

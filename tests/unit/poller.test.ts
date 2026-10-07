@@ -110,4 +110,34 @@ describe("TC-DS-014 polling controller", () => {
     await h.poller.refetch();
     expect(h.calls()).toBe(2);
   });
+
+  it("with resyncEveryMs, asks for everything again once that long has passed and says the page is full", async () => {
+    let clock = 0;
+    const sinces: Array<string | null> = [];
+    const metas: boolean[] = [];
+    const timers: Array<() => void> = [];
+    let call = 0;
+    const poller = createPoller<number>({
+      intervalMs: 10_000,
+      resyncEveryMs: 60_000,
+      now: () => new Date(clock),
+      fetchPage: async (since) => {
+        sinces.push(since);
+        call++;
+        return { data: call, cursor: `c${call}` };
+      },
+      onData: (_d, meta) => metas.push(meta.full),
+      setTimer: (fn) => timers.push(fn),
+      clearTimer: () => {},
+    });
+    poller.start();
+    await flush();
+    for (const at of [10_000, 20_000, 60_000, 70_000]) {
+      clock = at;
+      timers.shift()!();
+      await flush();
+    }
+    expect(sinces).toEqual([null, "c1", "c2", null, "c4"]);
+    expect(metas).toEqual([true, false, false, true, false]);
+  });
 });

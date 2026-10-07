@@ -95,7 +95,7 @@ export function OrderBoard({
     return () => clearInterval(timer);
   }, []);
 
-  const onDelta = React.useCallback((page: OrderBoardPage) => {
+  const onDelta = React.useCallback((page: OrderBoardPage, meta: { full: boolean }) => {
     const arrivals = page.items.filter((order) => !knownIds.current.has(order.id));
     for (const order of page.items) knownIds.current.add(order.id);
     if (arrivals.length > 0) {
@@ -106,12 +106,14 @@ export function OrderBoard({
           : `${arrivals.length} new orders`,
       );
     }
-    setOrders((current) => sortForBoard(mergeDelta(current, page.items)));
+    // A complete full page replaces the board, so an order deleted elsewhere disappears without a reload.
+    setOrders((current) => sortForBoard(meta.full && !page.hasMore ? page.items : mergeDelta(current, page.items)));
   }, []);
 
   const { stale, lastSuccessAt, refetch } = usePolling<OrderBoardPage>({
     url: "/api/v1/orders",
     intervalMs: POLL_INTERVAL_MS,
+    resyncEveryMs: 60_000,
     onData: onDelta,
     select: (body) => {
       const page = body as OrderBoardPage;

@@ -3,9 +3,9 @@ import { NextRequest } from "next/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import { GET as exportRoute } from "@/app/api/v1/data/export/route";
 import { POST as importRoute } from "@/app/api/v1/data/import/route";
-import { purgeDataAction } from "@/app/restaurant/settings/data/actions";
+import { previewPurgeAction, purgeDataAction } from "@/app/restaurant/settings/data/actions";
 import { unzip } from "@/lib/data-portability/zip";
-import { createCustomer, createFullTenant, createMembership, createUser } from "../../factories";
+import { createCustomer, createFullTenant, createMembership, createOrder, createUser } from "../../factories";
 import { testDb } from "../setup/db";
 import { actorState } from "../helpers/actor-state";
 import { asSeedUser, asUserId, invokeAction, seedOnce, tenantIdOf } from "../helpers/actors";
@@ -118,18 +118,21 @@ describe("TC-DATA-003 only the owner/administrator exports, and only from this a
 describe("TC-DATA-004 deleting needs a matching backup and the typed confirmation", () => {
   it("is refused without a backup, with a backup that does not cover the data, and without the exact words", async () => {
     const full = await freshRestaurant("guard");
-    const input = { categories: ["orders" as const], before: "2026-10-01", backupId: randomUUID(), confirmation: CONFIRM };
+    const input = { categories: ["orders" as const], from: "2026-09-01", to: "2026-09-30", backupId: randomUUID(), confirmation: CONFIRM };
     expect(await invokeAction(purgeDataAction, input)).toMatchObject({ ok: false, error: { code: "BACKUP_REQUIRED" } });
 
     // A backup of the menu does not cover orders.
     const menuOnly = await exportAs({ datasets: "menu", format: "json", backupId: randomUUID() });
     expect(await invokeAction(purgeDataAction, { ...input, backupId: menuOnly.headers.get("x-backup-id")! })).toMatchObject({ ok: false, error: { code: "BACKUP_REQUIRED" } });
 
-    // A backup that stops before the cutoff does not cover it either.
-    const short = await exportAs({ datasets: "orders,transactions", format: "json", to: "2026-09-01" });
+    // A backup that stops before the end of the range does not cover it either, nor one that starts after its start.
+    const short = await exportAs({ datasets: "orders,transactions", format: "json", to: "2026-09-29" });
     expect(await invokeAction(purgeDataAction, { ...input, backupId: short.headers.get("x-backup-id")! })).toMatchObject({ ok: false, error: { code: "BACKUP_REQUIRED" } });
 
-    const good = await exportAs({ datasets: "orders,transactions", format: "zip", to: "2026-09-30" });
+    const late = await exportAs({ datasets: "orders,transactions", format: "json", from: "2026-09-02", to: "2026-09-30" });
+    expect(await invokeAction(purgeDataAction, { ...input, backupId: late.headers.get("x-backup-id")! })).toMatchObject({ ok: false, error: { code: "BACKUP_REQUIRED" } });
+
+    const good = await exportAs({ datasets: "orders,transactions", format: "zip", from: "2026-09-01", to: "2026-09-30" });
     expect(await invokeAction(purgeDataAction, { ...input, backupId: good.headers.get("x-backup-id")!, confirmation: "delete" })).toMatchObject({
       ok: false,
       error: { code: "CONFIRMATION_REQUIRED" },
@@ -141,20 +144,20 @@ describe("TC-DATA-004 deleting needs a matching backup and the typed confirmatio
     await asSeedUser("B", "TENANT_ADMIN");
     const other = await exportAs({ datasets: "orders,transactions", format: "json" });
     const full = await freshRestaurant("borrowed");
-    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-10-01", backupId: other.headers.get("x-backup-id")!, confirmation: CONFIRM });
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], to: "2026-09-30", backupId: other.headers.get("x-backup-id")!, confirmation: CONFIRM });
     expect(outcome).toMatchObject({ ok: false, error: { code: "BACKUP_REQUIRED" } });
     expect(await db.order.count({ where: { tenantId: full.tenant.id } })).toBe(1);
   });
 
   it.each(["MANAGER", "CASHIER"] as const)("%s cannot delete at all", async (role) => {
     await asSeedUser("A", role);
-    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-10-01", backupId: randomUUID(), confirmation: CONFIRM });
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], to: "2026-09-30", backupId: randomUUID(), confirmation: CONFIRM });
     expect(outcome).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
   });
 });
 
 describe("TC-DATA-005 delete, then restore from the backup", () => {
-  it("removes finished history before the date, keeps open orders, records the deletion — and the backup brings it all back", async () => {
+  it("removes finished history in the range, keeps open orders, records the deletion — and the backup brings it all back", async () => {
     const full = await freshRestaurant("roundtrip");
     // An open order from the same period must survive.
     const open = await db.order.create({
@@ -164,13 +167,15 @@ describe("TC-DATA-005 delete, then restore from the backup", () => {
 
     const backup = await exportAs({ datasets: "orders,transactions,customers", format: "zip", to: "2026-09-30" });
     expect(backup.status).toBe(200);
-    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-10-01", backupId: backup.headers.get("x-backup-id")!, confirmation: CONFIRM });
-    expect(outcome).toMatchObject({ ok: true, data: { deleted: { orders: 1, payments: 2 }, keptOpenOrders: 1 } });
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], to: "2026-09-30", backupId: backup.headers.get("x-backup-id")!, confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deleted: { orders: 1, payments: 2 }, remaining: 0, counts: { orders: { keep: { openOrders: 1 } } } } });
 
     expect(await db.order.findMany({ where: { tenantId: full.tenant.id }, select: { id: true } })).toEqual([{ id: open.id }]);
     expect(await db.transaction.count({ where: { tenantId: full.tenant.id } })).toBe(0);
     const record = await db.auditLog.findFirstOrThrow({ where: { tenantId: full.tenant.id, action: "data.deleted" } });
-    expect(record.afterState).toMatchObject({ categories: ["orders"], before: "2026-10-01" });
+    const recorded = record.afterState as { deleted: Record<string, number>; deletedTotal: number };
+    expect(record.afterState).toMatchObject({ categories: ["orders"], from: null, to: "2026-09-30", remaining: 0 });
+    expect(recorded.deletedTotal).toBe(Object.values(recorded.deleted).reduce((a, b) => a + b, 0));
 
     // Restore: the preview counts what comes back; the commit puts it back exactly.
     const file = { name: "backup.zip", bytes: backup.bytes };
@@ -205,7 +210,7 @@ describe("TC-DATA-006 the audit log loses only this restaurant's old entries, an
     const otherOld = await db.auditLog.create({ data: { tenantId: tenantIdOf("B"), actorType: "SYSTEM", action: "menu_item.updated", resourceType: "menu_item", createdAt: old } });
 
     const backup = await exportAs({ datasets: "audit", format: "json" });
-    const outcome = await invokeAction(purgeDataAction, { categories: ["audit"], before: "2026-06-01", backupId: backup.headers.get("x-backup-id")!, confirmation: CONFIRM });
+    const outcome = await invokeAction(purgeDataAction, { categories: ["audit"], to: "2026-05-31", backupId: backup.headers.get("x-backup-id")!, confirmation: CONFIRM });
     expect(outcome).toMatchObject({ ok: true, data: { deleted: { auditEntries: 1 } } });
 
     expect(await db.auditLog.count({ where: { tenantId: full.tenant.id, createdAt: old } })).toBe(1); // the data.exported one
@@ -216,6 +221,93 @@ describe("TC-DATA-006 the audit log loses only this restaurant's old entries, an
     const row = await db.auditLog.create({ data: { tenantId: tenantIdOf("A"), actorType: "SYSTEM", action: "menu_item.updated", resourceType: "menu_item", createdAt: new Date("2025-01-01T00:00:00Z") } });
     await expect(db.auditLog.delete({ where: { id: row.id } })).rejects.toThrow(/append-only/);
     await expect(db.auditLog.update({ where: { id: row.id }, data: { reason: "x" } })).rejects.toThrow(/append-only/);
+  });
+});
+
+describe("TC-DATA-011 deleting a selected range (owner bug report 2026-10-07)", () => {
+  const day = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+  const fullBackup = async (datasets: string) => (await exportAs({ datasets, format: "json" })).headers.get("x-backup-id")!;
+  const ordersOn = async (tenantId: string, menuItem: Parameters<typeof createOrder>[2][number]["menuItem"], dates: string[]) => {
+    for (const d of dates) await createOrder(db, tenantId, [{ menuItem, quantity: 1 }], { status: "COMPLETED", businessDate: day(d) });
+  };
+  const datesLeft = async (tenantId: string) =>
+    (await db.order.findMany({ where: { tenantId }, select: { businessDate: true }, orderBy: { businessDate: "asc" } })).map((o) => o.businessDate.toISOString().slice(0, 10));
+
+  it("deletes both end days and nothing either side; the preview matches what is deleted; it is gone afterwards", async () => {
+    const full = await freshRestaurant("range");
+    await ordersOn(full.tenant.id, full.menuItem, ["2026-09-13", "2026-09-14", "2026-09-16", "2026-09-17"]);
+    const range = { categories: ["orders" as const], from: "2026-09-14", to: "2026-09-16" };
+
+    const preview = await invokeAction(previewPurgeAction, range);
+    expect(preview).toMatchObject({ ok: true, data: { counts: { orders: { delete: { orders: 3 } } } } });
+
+    const outcome = await invokeAction(purgeDataAction, { ...range, backupId: await fullBackup("orders,transactions"), confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deleted: { orders: 3 }, remaining: 0 } });
+    expect(await datesLeft(full.tenant.id)).toEqual(["2026-09-13", "2026-09-17"]);
+    // The same range previewed again is empty: the server confirms it, not the screen.
+    expect(await invokeAction(previewPurgeAction, range)).toMatchObject({ ok: true, data: { total: 0 } });
+  });
+
+  it("a range across a month end", async () => {
+    const full = await freshRestaurant("month");
+    await ordersOn(full.tenant.id, full.menuItem, ["2026-09-29", "2026-09-30", "2026-10-01", "2026-10-02"]);
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], from: "2026-09-30", to: "2026-10-01", backupId: await fullBackup("orders,transactions"), confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deleted: { orders: 2 } } });
+    expect(await datesLeft(full.tenant.id)).toEqual(["2026-09-15", "2026-09-29", "2026-10-02"]);
+  });
+
+  it.each([
+    // 2026-09-15 in India runs 2026-09-14T18:30Z → 2026-09-15T18:30Z; in New York (EDT) 04:00Z → 04:00Z next day.
+    ["Asia/Kolkata", ["2026-09-14T18:30:00.000Z", "2026-09-15T18:29:59.000Z"], ["2026-09-14T18:29:59.000Z", "2026-09-15T18:30:00.000Z"]],
+    ["America/New_York", ["2026-09-15T04:00:00.000Z", "2026-09-16T03:59:59.000Z"], ["2026-09-15T03:59:59.000Z", "2026-09-16T04:00:00.000Z"]],
+  ])("%s: a timestamped record counts by the restaurant's own midnight and 23:59", async (timezone, inside, outside) => {
+    const full = await freshRestaurant(`tz-${timezone.slice(0, 4)}`);
+    await db.restaurant.update({ where: { id: full.restaurant.id }, data: { timezone } });
+    const rows = await Promise.all(
+      [...inside, ...outside].map((at) => db.auditLog.create({ data: { tenantId: full.tenant.id, actorType: "SYSTEM", action: "menu_item.updated", resourceType: "menu_item", createdAt: new Date(at) } })),
+    );
+    const outcome = await invokeAction(purgeDataAction, { categories: ["audit"], from: "2026-09-15", to: "2026-09-15", backupId: await fullBackup("audit"), confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deleted: { auditEntries: 2 }, remaining: 0 } });
+    const left = await db.auditLog.findMany({ where: { id: { in: rows.map((r) => r.id) } }, select: { createdAt: true } });
+    expect(left.map((r) => r.createdAt.toISOString()).sort()).toEqual([...outside].sort());
+  });
+
+  it("leaves another restaurant's records on the same dates alone", async () => {
+    const other = await freshRestaurant("range-other");
+    const full = await freshRestaurant("range-mine");
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], from: "2026-09-15", to: "2026-09-15", backupId: await fullBackup("orders,transactions"), confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deleted: { orders: 1 } } });
+    expect(await db.order.count({ where: { tenantId: full.tenant.id } })).toBe(0);
+    expect(await db.order.count({ where: { tenantId: other.tenant.id } })).toBe(1);
+  });
+
+  it("a tenant id sent from the browser is rejected, not used", async () => {
+    const other = await freshRestaurant("inject-target");
+    await freshRestaurant("inject-actor");
+    const backupId = await fullBackup("orders,transactions");
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], to: "2026-09-30", backupId, confirmation: CONFIRM, tenantId: other.tenant.id } as never);
+    expect(outcome).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+    expect(await db.order.count({ where: { tenantId: other.tenant.id } })).toBe(1);
+  });
+
+  it("when nothing matches it says so: zero deleted, recorded as zero", async () => {
+    const full = await freshRestaurant("empty-range");
+    const outcome = await invokeAction(purgeDataAction, { categories: ["orders"], from: "2025-01-01", to: "2025-01-31", backupId: await fullBackup("orders,transactions"), confirmation: CONFIRM });
+    expect(outcome).toMatchObject({ ok: true, data: { deletedTotal: 0, total: 0 } });
+    expect(await db.order.count({ where: { tenantId: full.tenant.id } })).toBe(1);
+    const record = await db.auditLog.findFirstOrThrow({ where: { tenantId: full.tenant.id, action: "data.deleted" } });
+    expect(record.afterState).toMatchObject({ from: "2025-01-01", to: "2025-01-31", deletedTotal: 0 });
+  });
+
+  it("refuses a range in the future or back to front, before touching anything", async () => {
+    await freshRestaurant("bad-range");
+    expect(await invokeAction(previewPurgeAction, { categories: ["orders"], to: "2099-01-01" })).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+    expect(await invokeAction(previewPurgeAction, { categories: ["orders"], from: "2026-09-20", to: "2026-09-10" })).toMatchObject({ ok: false, error: { code: "VALIDATION_ERROR" } });
+  });
+
+  it("only the owner/administrator can even preview a deletion", async () => {
+    await asSeedUser("A", "MANAGER");
+    expect(await invokeAction(previewPurgeAction, { categories: ["orders"], to: "2026-09-30" })).toMatchObject({ ok: false, error: { code: "FORBIDDEN" } });
   });
 });
 
