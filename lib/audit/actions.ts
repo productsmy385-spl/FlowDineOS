@@ -14,6 +14,8 @@ export const AUDIT_ACTIONS = [
   "platform.role_changed",
   "tenant.handed_over",
   "tenant.features_updated",
+  "demo_request.created",
+  "demo_request.updated",
   // Identity
   "user.linked",
   "user.status_changed",

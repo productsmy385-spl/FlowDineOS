@@ -239,6 +239,7 @@ export type AdminNavItem = { href: string; label: string; icon: LucideIcon; hue:
 export const ADMIN_NAV_ITEMS: readonly AdminNavItem[] = [
   { href: "/admin", label: "Overview", icon: DOMAIN_ICONS.dashboard, hue: DOMAIN_HUES.dashboard },
   { href: "/admin/tenants", label: "Restaurants", icon: DOMAIN_ICONS.restaurant, hue: DOMAIN_HUES.restaurant },
+  { href: "/admin/demo-requests", label: "Demo requests", icon: DOMAIN_ICONS.customers, hue: DOMAIN_HUES.customers },
   { href: "/admin/audit", label: "Audit", icon: DOMAIN_ICONS.audit, hue: DOMAIN_HUES.audit },
 ];
 

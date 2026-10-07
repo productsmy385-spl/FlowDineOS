@@ -16,6 +16,9 @@ export const PLATFORM_PERMISSIONS = [
   "platform:tenant:reactivate",
   "platform:tenant_admin:invite",
   "platform:audit:read",
+  // RASOIOS-ADR-024: visitors' demo requests are the platform owner's alone.
+  "platform:demo_request:read",
+  "platform:demo_request:update",
 ] as const;
 
 export const TENANT_PERMISSIONS = [

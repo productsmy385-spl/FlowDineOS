@@ -129,7 +129,8 @@ async function buildFixture() {
   });
   const diningTable = await db.diningTable.create({ data: { tenantId: tenant.id, label: "T1", publicCode: `c${randomUUID().replace(/-/g, "").slice(0, 11)}` } });
   await db.tenantFeature.create({ data: { tenantId: tenant.id, featureKey: "SOCIAL", enabled: false } });
-  return { diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
+  const demoRequest = await db.demoRequest.create({ data: { name: "N", businessName: "B", phone: "+919390038335", email: "d@example.test", city: "C", preferredDate: new Date("2030-01-01T00:00:00Z"), preferredTime: "10:00" } });
+  return { demoRequest, diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
 }
 
 beforeAll(async () => {
@@ -249,6 +250,10 @@ const CHECK_CASES: CheckCase[] = [
   { constraint: "staff_sessions_ended_after_login_check", table: "staff_sessions", set: "status = 'ENDED', end_reason = 'SIGNED_OUT', ended_at = login_at - interval '1 hour'", where: byId(() => f.staffSession.id) },
   // The database itself refuses a daily-password session for an administrator or manager (ADR-019 §1, C7).
   { constraint: "staff_sessions_role_is_staff_check", table: "staff_sessions", set: "role = 'TENANT_ADMIN'", where: byId(() => f.staffSession.id) },
+  // RASOIOS-ADR-024: demo requests keep the shapes the public form validates.
+  { constraint: "demo_requests_phone_check", table: "demo_requests", set: "phone = '12345'", where: byId(() => f.demoRequest.id) },
+  { constraint: "demo_requests_time_check", table: "demo_requests", set: "preferred_time = '25:00'", where: byId(() => f.demoRequest.id) },
+  { constraint: "demo_requests_outlet_count_check", table: "demo_requests", set: "outlet_count = 0", where: byId(() => f.demoRequest.id) },
   // RASOIOS-ADR-023: only features the platform knows can be switched.
   { constraint: "tenant_features_feature_key_check", table: "tenant_features", set: "feature_key = 'TELEPORT'", where: () => `tenant_id = '${f.tenant.id}'` },
   // RASOIOS-ADR-022: a job still in the queue cannot be archived out of sight.

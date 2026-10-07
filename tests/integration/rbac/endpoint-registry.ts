@@ -28,6 +28,7 @@ import { NextRequest } from "next/server";
 import { POST as importRoute } from "@/app/api/v1/data/import/route";
 import { getDataOverviewAction, purgeDataAction } from "@/app/restaurant/settings/data/actions";
 import { editTableAction } from "@/app/restaurant/tables/actions";
+import { listDemoRequestsAction, updateDemoRequestAction } from "@/app/admin/demo-requests/actions";
 import type { Permission } from "@/lib/auth/permissions";
 import { invokeAction, invokeLoader } from "../helpers/actors";
 
@@ -220,4 +221,6 @@ export const ENDPOINT_REGISTRY: Readonly<Record<Permission, RegistryEntry>> = {
     invoke: () => invokeAction(purgeDataAction, { categories: ["orders"], before: "2026-01-01", backupId: RANDOM_UUID, confirmation: "probe", rbacProbe: true } as never),
   },
   "table:manage": { endpoint: "editTableAction (SA-TBL-02)", invoke: () => invokeAction(editTableAction, { id: RANDOM_UUID, label: "Probe" }) },
+  "platform:demo_request:read": { endpoint: "listDemoRequestsAction (LD-ADM-10)", invoke: () => invokeAction(listDemoRequestsAction, {}) },
+  "platform:demo_request:update": { endpoint: "updateDemoRequestAction (SA-ADM-11)", invoke: () => invokeAction(updateDemoRequestAction, { id: RANDOM_UUID, status: "CONTACTED" }) },
 };

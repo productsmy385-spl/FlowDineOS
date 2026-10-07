@@ -700,5 +700,31 @@
       "WAITER": "deny"
     },
     "test": "TC-RBAC-154"
+  },
+  {
+    "row": 55,
+    "permission": "platform:demo_request:read",
+    "allow": {
+      "SUPER_ADMIN": "allow",
+      "TENANT_ADMIN": "deny",
+      "MANAGER": "deny",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-155"
+  },
+  {
+    "row": 56,
+    "permission": "platform:demo_request:update",
+    "allow": {
+      "SUPER_ADMIN": "allow",
+      "TENANT_ADMIN": "deny",
+      "MANAGER": "deny",
+      "CASHIER": "deny",
+      "KITCHEN": "deny",
+      "WAITER": "deny"
+    },
+    "test": "TC-RBAC-156"
   }
 ]

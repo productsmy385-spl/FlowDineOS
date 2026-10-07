@@ -11,8 +11,8 @@ import {
   LayoutDashboard,
   Lock,
   Mail,
-  MapPin,
   Palette,
+  Phone,
   Printer,
   QrCode,
   Receipt,
@@ -25,10 +25,11 @@ import {
 } from "lucide-react";
 import { BrandMark } from "@/components/layout/brand";
 import { FoodBackdrop } from "@/components/layout/food-backdrop";
+import { BookDemoButton } from "@/components/landing/demo-booking";
 import { HeroBackdrop, Metrics, Showcase } from "@/components/landing/landing-interactive";
 import { IconTile } from "@/components/ui/icon-tile";
 import { FEATURE_KEYS } from "@/lib/auth/features";
-import { COMPANY_ADDRESS, COMPANY_EMAILS, COMPANY_NAME, COPYRIGHT, PLATFORM_DOMAIN, PLATFORM_NAME, PLATFORM_TAGLINE } from "@/lib/brand";
+import { COMPANY_ADDRESS, COMPANY_EMAILS, COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_TEL, COPYRIGHT, PLATFORM_DOMAIN, PLATFORM_NAME, PLATFORM_TAGLINE } from "@/lib/brand";
 import type { DomainHue } from "@/lib/ui/icons";
 
 const DESCRIPTION =
@@ -71,6 +72,27 @@ const FEATURES: Feature[] = [
   { icon: Smartphone, hue: "accent-soft", title: "Phone and tablet ready", body: "Installs to the home screen and works from a 320 px phone to a wide desktop." },
 ];
 
+const SOLUTIONS = [
+  { title: "Restaurants", body: "Dine-in, takeaway and delivery with tables, kitchen stations and bills." },
+  { title: "Cafés", body: "Quick counter orders, a daily menu and receipts on a small printer." },
+  { title: "Bakeries", body: "Counter sales, daily specials and a menu guests can browse from a QR code." },
+  { title: "Cloud kitchens", body: "Orders to kitchen tickets by station, with timers and urgency." },
+  { title: "Food businesses", body: "Any food business that takes orders, cooks them and bills for them." },
+];
+
+const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+const PRODUCT_LINKS: ReadonlyArray<readonly [string, string]> = [
+  [`#feature-${slug("Restaurant dashboard")}`, "Dashboard"],
+  [`#feature-${slug("Orders")}`, "Orders"],
+  [`#feature-${slug("Kitchen operations")}`, "Kitchen"],
+  [`#feature-${slug("KOT printing")}`, "KOT printing"],
+  [`#feature-${slug("Billing and payments")}`, "Billing"],
+  [`#feature-${slug("Table QR menus")}`, "QR menus"],
+  [`#feature-${slug("Menu management")}`, "Menu"],
+  [`#feature-${slug("Reports")}`, "Reports"],
+];
+const SOLUTION_LINKS: ReadonlyArray<readonly [string, string]> = SOLUTIONS.map((item) => [`#solution-${slug(item.title)}`, item.title] as const);
+
 const STEPS = [
   { title: "We set up your restaurant", body: "Your restaurant, its address and the features it uses are created for you, and you are invited by email." },
   { title: "Add your menu and team", body: "Enter or import your menu, invite managers, and give counter and kitchen staff their daily passwords." },
@@ -96,6 +118,7 @@ export default function Home() {
               ["#features", "Features"],
               ["#how-it-works", "How it works"],
               ["#security", "Security"],
+              ["#solutions", "Who it's for"],
               ["#contact", "Contact"],
             ].map(([href, label]) => (
               <a key={href} href={href} className="inline-flex h-10 items-center rounded-xl px-3 text-nav text-fg-secondary hover:text-fg-primary">
@@ -103,12 +126,12 @@ export default function Home() {
               </a>
             ))}
           </nav>
-          <Link
-            href="/sign-in"
-            className="inline-flex h-11 items-center rounded-xl bg-action-primary px-4 text-label text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover motion-safe:hover:shadow-glow"
-          >
-            Sign in
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/sign-in" className="hidden h-11 items-center rounded-xl border border-border-strong px-4 text-label text-fg-primary hover:bg-raised sm:inline-flex">
+              Sign in
+            </Link>
+            <BookDemoButton className="h-11 px-4" />
+          </div>
         </div>
       </header>
 
@@ -124,16 +147,17 @@ export default function Home() {
               </h1>
               <p className="max-w-2xl text-body-public text-fg-primary">{DESCRIPTION}</p>
               <div className="flex flex-wrap items-center gap-3">
-                <Link
-                  href="/sign-in"
-                  className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-label text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover motion-safe:hover:shadow-glow"
-                >
-                  Sign in to your restaurant
-                </Link>
+                <BookDemoButton />
                 <a href="#features" className="inline-flex h-12 items-center rounded-xl border border-border-strong bg-card/70 px-5 text-label text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised">
-                  Explore features
+                  Explore {PLATFORM_NAME}
                 </a>
               </div>
+              <p className="text-body text-fg-secondary">
+                Already using {PLATFORM_NAME}?{" "}
+                <Link href="/sign-in" className="text-fg-accent underline-offset-4 hover:underline">
+                  Sign in to your restaurant
+                </Link>
+              </p>
             </div>
             <div className="lg:col-span-5 lg:self-end">
               <Metrics
@@ -165,12 +189,26 @@ export default function Home() {
           </h2>
           <ul className="mt-8 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,17rem),1fr))] gap-4 p-0">
             {FEATURES.map(({ icon, hue, title, body }) => (
-              <li key={title} className="flex">
+              <li key={title} id={`feature-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="flex scroll-mt-24">
                 <article className="flex w-full flex-col gap-3 rounded-2xl border border-border-subtle bg-card p-5 shadow-e1 transition-transform duration-fast motion-safe:hover:-translate-y-1">
                   <IconTile icon={icon} size="md" tone={hue} />
                   <h3 className="font-sans text-heading">{title}</h3>
                   <p className="text-body text-fg-secondary">{body}</p>
                 </article>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section id="solutions" aria-labelledby="solutions-title" className="mx-auto max-w-public scroll-mt-24 px-4 py-16 sm:px-6 lg:px-10">
+          <h2 id="solutions-title" className="text-display-l">
+            Who it&apos;s for
+          </h2>
+          <ul className="mt-8 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,13rem),1fr))] gap-4 p-0">
+            {SOLUTIONS.map((item) => (
+              <li key={item.title} id={`solution-${item.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`} className="glass-2 flex scroll-mt-24 flex-col gap-2 rounded-2xl p-5">
+                <h3 className="font-sans text-heading">{item.title}</h3>
+                <p className="text-body text-fg-secondary">{item.body}</p>
               </li>
             ))}
           </ul>
@@ -212,7 +250,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section aria-labelledby="why-title" className="mx-auto max-w-public px-4 py-16 sm:px-6 lg:px-10">
+        <section id="about" aria-labelledby="why-title" className="mx-auto max-w-public scroll-mt-24 px-4 py-16 sm:px-6 lg:px-10">
           <h2 id="why-title" className="text-display-l">
             Why {PLATFORM_NAME}
           </h2>
@@ -226,76 +264,58 @@ export default function Home() {
           </div>
           <div className="mt-10 flex flex-col items-start gap-4 rounded-3xl border border-border-subtle bg-card p-6 md:flex-row md:items-center md:justify-between md:p-8">
             <p className="text-heading">Ready to run your restaurant in one flow?</p>
-            <a href="#contact" className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-label text-action-primary-fg hover:bg-action-primary-hover">
-              Talk to us
-            </a>
+            <BookDemoButton />
           </div>
         </section>
 
-        <section id="contact" aria-labelledby="contact-title" className="mx-auto max-w-public scroll-mt-24 px-4 pb-20 pt-4 sm:px-6 lg:px-10">
-          <h2 id="contact-title" className="text-display-l">
-            Contact {PLATFORM_NAME}
-          </h2>
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {COMPANY_EMAILS.map((email) => (
-              <a key={email} href={`mailto:${email}`} className="glass-2 flex min-w-0 items-center gap-3 rounded-2xl p-5 hover:bg-raised">
-                <IconTile icon={Mail} size="sm" tone="primary" />
-                <span className="min-w-0 break-all text-body text-fg-primary">{email}</span>
-              </a>
-            ))}
-            <address className="glass-2 flex items-start gap-3 rounded-2xl p-5 not-italic">
-              <IconTile icon={MapPin} size="sm" tone="accent" />
-              <span className="text-body text-fg-primary">
-                <span className="block text-label">{COMPANY_NAME}</span>
-                {COMPANY_ADDRESS.map((line) => (
-                  <span key={line} className="block text-fg-secondary">
-                    {line}
-                  </span>
-                ))}
-              </span>
-            </address>
-          </div>
-        </section>
       </main>
 
       <footer className="border-t border-border-subtle bg-card/70">
-        <div className="mx-auto grid max-w-public gap-8 px-4 py-10 sm:px-6 md:grid-cols-4 lg:px-10">
-          <div className="flex flex-col gap-2">
+        <div className="mx-auto grid max-w-public gap-8 px-4 py-10 sm:grid-cols-2 sm:px-6 lg:grid-cols-[1.2fr_1fr_1fr_1fr_1.6fr] lg:px-10">
+          <div className="flex flex-col gap-3">
             <BrandMark href="/" />
             <p className="text-body text-fg-secondary">{PLATFORM_TAGLINE}</p>
+            <BookDemoButton className="h-11 w-fit px-4" />
           </div>
-          <nav aria-label="Product" className="flex flex-col gap-2 text-body">
-            <p className="text-label text-fg-primary">Product</p>
-            <a href="#features" className="text-fg-secondary hover:text-fg-primary">
-              Features
-            </a>
-            <a href="#how-it-works" className="text-fg-secondary hover:text-fg-primary">
-              How it works
-            </a>
-            <a href="#security" className="text-fg-secondary hover:text-fg-primary">
-              Data and security
-            </a>
-          </nav>
-          <nav aria-label="Company" className="flex flex-col gap-2 text-body">
-            <p className="text-label text-fg-primary">Company</p>
-            <a href="#contact" className="text-fg-secondary hover:text-fg-primary">
-              Contact
-            </a>
-            <Link href="/sign-in" className="text-fg-secondary hover:text-fg-primary">
-              Sign in
-            </Link>
-            <Link href="/staff-login" className="text-fg-secondary hover:text-fg-primary">
-              Staff sign in
-            </Link>
-          </nav>
-          <div className="flex flex-col gap-2 text-body">
+          <FooterLinks title="Product" links={PRODUCT_LINKS} />
+          <FooterLinks title="Solutions" links={SOLUTION_LINKS} />
+          <div className="flex flex-col gap-6">
+            <FooterLinks
+              title="Company"
+              links={[
+                ["#about", "About"],
+                ["#contact", "Contact"],
+                ["/book-demo", "Book a Demo"],
+              ]}
+            />
+            <div className="flex flex-col gap-2 text-body">
+              <p className="text-label text-fg-primary">Legal</p>
+              {/* No policy text has been written yet; the links appear when the pages do (nothing invented here). */}
+              <p className="text-fg-secondary">Privacy Policy and Terms — being prepared</p>
+            </div>
+          </div>
+          {/* The one place the company's contact details appear (owner brief 2026-10-07 §29–32). */}
+          <address id="contact" className="flex min-w-0 scroll-mt-24 flex-col gap-2 text-body not-italic">
             <p className="text-label text-fg-primary">Contact</p>
+            <p className="text-fg-primary">{COMPANY_NAME}</p>
+            <p className="text-fg-secondary">
+              {COMPANY_ADDRESS.map((line) => (
+                <span key={line} className="block">
+                  {line}
+                </span>
+              ))}
+            </p>
+            <a href={`tel:${COMPANY_PHONE_TEL}`} className="inline-flex min-h-11 w-fit items-center gap-2 text-fg-primary hover:text-fg-accent" data-testid="footer-phone">
+              <Phone aria-hidden className="size-4 shrink-0" />
+              {COMPANY_PHONE}
+            </a>
             {COMPANY_EMAILS.map((email) => (
-              <a key={email} href={`mailto:${email}`} className="break-all text-fg-secondary hover:text-fg-primary">
-                {email}
+              <a key={email} href={`mailto:${email}`} className="inline-flex min-h-11 min-w-0 items-center gap-2 break-all text-fg-secondary hover:text-fg-primary">
+                <Mail aria-hidden className="size-4 shrink-0" />
+                <span className="min-w-0 break-all">{email}</span>
               </a>
             ))}
-          </div>
+          </address>
         </div>
         <div className="border-t border-border-subtle">
           <p className="mx-auto max-w-public px-4 py-5 text-caption text-fg-secondary sm:px-6 lg:px-10">
@@ -304,5 +324,24 @@ export default function Home() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function FooterLinks({ title, links }: { title: string; links: ReadonlyArray<readonly [string, string]> }) {
+  return (
+    <nav aria-label={title} className="flex flex-col gap-1 text-body">
+      <p className="mb-1 text-label text-fg-primary">{title}</p>
+      {links.map(([href, label]) =>
+        href.startsWith("/") ? (
+          <Link key={href} href={href} className="inline-flex min-h-9 items-center text-fg-secondary hover:text-fg-primary">
+            {label}
+          </Link>
+        ) : (
+          <a key={href} href={href} className="inline-flex min-h-9 items-center text-fg-secondary hover:text-fg-primary">
+            {label}
+          </a>
+        ),
+      )}
+    </nav>
   );
 }

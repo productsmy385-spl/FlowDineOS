@@ -302,6 +302,16 @@ enum DailyStyle {
   @@map("daily_style")
 }
 
+enum DemoRequestStatus {
+  NEW
+  CONTACTED
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+
+  @@map("demo_request_status")
+}
+
 enum BackupReminder {
   MANUAL
   MONTHLY
@@ -461,6 +471,33 @@ model WebsiteSection {
   @@map("website_sections")
 }
 
+// ───────────────────────── E32 DEMO_REQUEST (platform data, RASOIOS-ADR-024) ─────────────────────────
+
+/// A visitor asking the platform owner for a FlowDineOS demonstration. Platform data, not tenant data: only the
+/// Super Admin reads it. Stores only what is needed to get in touch.
+model DemoRequest {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name              String            @db.VarChar(120)
+  businessName      String            @map("business_name") @db.VarChar(160)
+  phone             String            @db.VarChar(16)
+  email             String            @db.VarChar(254)
+  city              String            @db.VarChar(80)
+  preferredDate     DateTime          @map("preferred_date") @db.Date
+  preferredTime     String            @map("preferred_time") @db.VarChar(5)
+  outletCount       Int?              @map("outlet_count") @db.SmallInt
+  message           String?           @db.VarChar(1000)
+  status            DemoRequestStatus @default(NEW)
+  notes             String?           @db.VarChar(2000)
+  updatedByUserId   String?           @map("updated_by_user_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  updatedBy User? @relation("DemoRequestUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@map("demo_requests")
+}
+
 // ───────────────────────── E31 TENANT_FEATURE (RASOIOS-ADR-023) ─────────────────────────
 
 /// A platform-owner switch for one feature of one restaurant. No row means the feature is on; `enabled = false` turns
@@ -584,6 +621,7 @@ model User {
   requestedPrintJobs     PrintJob[]         @relation("PrintJobRequestedBy")
   archivedPrintJobs      PrintJob[]         @relation("PrintJobArchivedBy")
   tenantFeatureChanges   TenantFeature[]    @relation("TenantFeatureUpdatedBy")
+  demoRequestChanges     DemoRequest[]      @relation("DemoRequestUpdatedBy")
   printerDiscoveries     PrinterDiscovery[] @relation("PrinterDiscoveryRequestedBy")
   auditLogs              AuditLog[]         @relation("AuditActor")
   uploadedMediaAssets    MediaAsset[]       @relation("MediaAssetUploadedBy")

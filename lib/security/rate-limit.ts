@@ -22,6 +22,10 @@ export const RATE_LIMITS = {
   "agent.api": { limit: 120, windowSec: 60, failOpen: false },
   "webhook.clerk": { limit: 60, windowSec: 60, failOpen: false },
   "public.order.submit": { limit: 5, windowSec: 10 * 60, failOpen: false },
+  // Book a demo (ADR-024): five an hour per email, twenty per known address (offices share one), fail closed so an
+  // outage never opens the form to floods.
+  "public.demo_request.email": { limit: 5, windowSec: 60 * 60, failOpen: false },
+  "public.demo_request.ip": { limit: 20, windowSec: 60 * 60, failOpen: false },
   "session.mutation": { limit: 120, windowSec: 60, failOpen: true },
   // Image uploads (ADR-017 §8, api.md RH-MEDIA-01): per user; each one costs re-encoding CPU and ImageKit storage.
   "media.upload": { limit: 30, windowSec: 60 * 60, failOpen: false },

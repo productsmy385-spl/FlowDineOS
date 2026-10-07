@@ -7,9 +7,12 @@
  * installed and backups already downloaded keep working.
  */
 export const PLATFORM_NAME = "FlowDineOS";
-export const PLATFORM_TAGLINE = "Restaurant operations, simplified.";
+export const PLATFORM_TAGLINE = "Restaurant operations, connected.";
 export const PLATFORM_DOMAIN = "flowdine.in";
 export const COMPANY_NAME = "KJS TECH INNOVATIONS";
 export const COMPANY_ADDRESS = ["4-177/1, Duddukuru", "Devarapalli Mandal", "East Godavari District", "Andhra Pradesh 534313", "India"] as const;
 export const COMPANY_EMAILS = ["gopalakrishnaeerothu@gmail.com", "jayendrasimhadri@gmail.com", "productsmy385@gmail.com"] as const;
+/** Shown as written; dialled in international form. */
+export const COMPANY_PHONE = "9390038335";
+export const COMPANY_PHONE_TEL = "+919390038335";
 export const COPYRIGHT = `© 2026 ${COMPANY_NAME}`;
