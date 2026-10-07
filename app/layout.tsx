@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { headers } from "next/headers";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { PwaRegister } from "@/components/pwa-register";
@@ -49,16 +50,21 @@ export const metadata: Metadata = {
 // root element to the person's saved light/dark/system choice before the first paint (ADR-016). A restaurant's public
 // page sets its own theme on its page wrapper and is unaffected (ADR-013 §6). The script changes the root element's
 // attributes before React hydrates, hence suppressHydrationWarning on that one element.
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The per-request script nonce set by the middleware (Content-Security-Policy). `dynamic` makes Clerk read it too;
+  // every page is rendered per request so each one carries its own nonce.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
-    <ClerkProvider afterSignOutUrl="/sign-in">
+    <ClerkProvider afterSignOutUrl="/sign-in" dynamic>
       <html lang="en" className={`dark ${display.variable} ${sans.variable}`} data-theme="dark" suppressHydrationWarning>
         <head>
-          <script id="theme-boot">{THEME_BOOT_SCRIPT}</script>
+          <script id="theme-boot" nonce={nonce}>
+            {THEME_BOOT_SCRIPT}
+          </script>
         </head>
         <body className="bg-canvas text-fg-primary antialiased selection:bg-action-primary selection:text-action-primary-fg">
           <PwaRegister />

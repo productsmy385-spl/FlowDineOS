@@ -1,5 +1,6 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { clerkFrontendApiFromKey, contentSecurityPolicy, newNonce } from "@/lib/http/content-security-policy";
 import { STAFF_SESSION_COOKIE_NAME, ensureRequestId, gate, mustNotBeStored, presentsStaffSession } from "@/lib/auth/route-policy";
 import {
   TENANT_SLUG_HEADER,
@@ -34,6 +35,15 @@ import {
 export default clerkMiddleware(async (auth, req) => {
   const requestId = ensureRequestId(req.headers.get("x-request-id"), () => crypto.randomUUID());
   const { pathname, search } = req.nextUrl;
+  // A fresh script nonce per request (lib/http/content-security-policy.ts). The app reads it from the request headers
+  // set below; a client-supplied `x-nonce` or CSP header is always overwritten.
+  const nonce = newNonce();
+  const csp = contentSecurityPolicy({ nonce, production: process.env.NODE_ENV === "production", clerkFrontendApi: clerkFrontendApiFromKey(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) });
+  const withCsp = (headers: Headers) => {
+    headers.set("x-nonce", nonce);
+    headers.set("content-security-policy", csp);
+    return headers;
+  };
 
   const rootDomain = normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN);
   const host = resolveHost(req.headers.get("host"), rootDomain);
@@ -54,8 +64,9 @@ export default clerkMiddleware(async (auth, req) => {
       if (host.kind === "tenant") headers.set(TENANT_SLUG_HEADER, host.slug);
       else headers.delete(TENANT_SLUG_HEADER);
       const destination = host.kind === "tenant" ? publicRewritePath(host.slug, pathname) : UNRESOLVABLE_PUBLIC_PATH;
-      const response = NextResponse.rewrite(new URL(`${destination}${search}`, req.url), { request: { headers } });
+      const response = NextResponse.rewrite(new URL(`${destination}${search}`, req.url), { request: { headers: withCsp(headers) } });
       response.headers.set("x-request-id", requestId);
+      response.headers.set("content-security-policy", csp);
       return response;
     }
   }
@@ -85,8 +96,9 @@ export default clerkMiddleware(async (auth, req) => {
   headers.set("x-request-id", requestId);
   // Apex host and host-neutral paths never carry a tenant slug: a client-supplied header is dropped here.
   headers.delete(TENANT_SLUG_HEADER);
-  const response = NextResponse.next({ request: { headers } });
+  const response = NextResponse.next({ request: { headers: withCsp(headers) } });
   response.headers.set("x-request-id", requestId);
+  response.headers.set("content-security-policy", csp);
   // Session- and token-authenticated responses are one user's data; a shared cache must never hand them to the next
   // person (SC-PUB-02, TC-SEC-006). Public pages keep their ISR caching.
   if (mustNotBeStored(pathname)) response.headers.set("cache-control", "no-store");

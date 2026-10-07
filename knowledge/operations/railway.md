@@ -78,8 +78,40 @@ The Railway CLI on the development machine (v5.43.1) is signed in, but no `rasoi
 - [observed] The Railway CLI on the development machine is linked to a different project, so `railway logs --build`
   for this service could not be read from here. To diagnose a failed Railway build: Railway → service → Deployments →
   the failed deployment → Build Logs; compare with `npm ci && npm run prisma:gen && npm run agent:build && npm run build`.
-- [observed] Railway warns that `railway.json` config-as-code is deprecated after 2026-12-01 — move the settings to
-  `railway.toml` or the dashboard before then.
+- [observed] Railway retires Config as Code (`railway.json` / `railway.toml`) on 2026-12-01. The replacement is
+  Infrastructure as Code in `.railway/railway.ts` (`import { defineRailway, project, service } from "railway/iac"`).
+
+## Migration to `.railway/railway.ts` — paused, not applied (2026-10-07)
+
+[fact] Unlike `railway.json`, Railway does **not** read `.railway/` during deploys: changes take effect only when
+someone runs `railway config plan` then `railway config apply` against the linked project
+(docs.railway.com/infrastructure-as-code). `railway.json` keeps working until 2026-12-01, so nothing is broken today.
+
+[fact] Dry run of Railway's own translator (`railway config migrate --service web`, CLI 5.43.1, no `--apply`):
+
+| `railway.json` | Translator output | Safe? |
+|---|---|---|
+| `buildCommand` | `build: "npm run prisma:gen && npm run agent:build && npm run build"` | yes |
+| `startCommand` | `start: "npm run start"` | yes |
+| `healthcheckPath` / `healthcheckTimeout` | `healthcheck: "/api/ready"`, `healthcheckTimeout: 120` | yes |
+| `builder: RAILPACK` | comment only (Railpack is the default builder) | yes |
+| `preDeployCommand: npm run prisma:deploy` | **comment only**; the reference documents `preDeploy: "<command>"`, which must be added by hand | **no**: migrations would stop running on deploy |
+| `restartPolicyType: ON_FAILURE`, `restartPolicyMaxRetries: 3` | **dropped silently**; no restart option in the IaC reference | **no**: check after `plan` |
+| project / service | placeholders `project("web")`, `service("web")` | **no**: wrong names could create a new project or service |
+
+Why paused: the CLI on the development machine is linked to another Railway project ("comfortable-courage"), so
+the real project and service names cannot be read, and `migrate --apply` also clears the *linked* project's
+Config-File setting. Nothing was written or applied.
+
+To finish (owner, about 10 minutes, before 2026-12-01):
+1. `railway link`, choosing the FlowDineOS project, environment `production`, and the web service.
+2. `railway config pull` imports the live configuration (real names, variables as references) into
+   `.railway/railway.ts`. Never paste secret values into the file; variables stay as Railway references.
+3. Make sure the web service has `preDeploy: "npm run prisma:deploy"`, `healthcheck: "/api/ready"`,
+   `healthcheckTimeout: 120`, and the build/start commands above.
+4. `npm install -D railway` (types for `railway/iac`), then `railway config plan` and read every line: it must
+   change nothing except adopting these settings, with no new service, no new database and no variable removed.
+5. `railway config apply`, deploy, check `/api/ready` reports ready, then retire `railway.json`.
 
 ## Known issue — migrations not applied on deploy (seen 2026-10-02 and 2026-10-07)
 
