@@ -35,7 +35,9 @@ function presetReference(): EditorReference {
 }
 
 export default async function WebsiteSettingsPage() {
-  const ctx = await requireTenantPage("restaurant:read");
+  // Management screen: owners edit, managers read (`canEdit`); cashier, kitchen and waiter staff are refused it like
+  // every other management screen (TC-ROLE-010).
+  const ctx = await requireTenantPage("dashboard:read");
   const [settings, snapshot] = await Promise.all([getWebsiteSettings(ctx), getRestaurantSettingsSnapshot(ctx)]);
 
   return (
