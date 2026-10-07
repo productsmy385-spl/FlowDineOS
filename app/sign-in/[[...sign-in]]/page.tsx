@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { SignIn } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
@@ -27,6 +28,8 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const params = await searchParams;
   const target = safeRedirect(typeof params.redirect_url === "string" ? params.redirect_url : undefined, AFTER_SIGN_IN);
   const [{ userId }, jar] = await Promise.all([auth(), cookies()]);
+  // Already signed in (e.g. the form finished but the next page had not loaded): go on, never show the form again.
+  if (userId) redirect(target);
   const clearStalePreference = !userId && jar.has(ACTIVE_MEMBERSHIP_COOKIE);
 
   return (

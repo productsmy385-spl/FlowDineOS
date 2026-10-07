@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getPlatformResolution, getTenantResolution } from "@/lib/auth/context";
 import { accountRedirectFor } from "@/lib/auth/guards";
 import { roleHomePath } from "@/lib/ui/navigation";
+import { CompletingSignIn } from "./completing-sign-in";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,10 @@ export const dynamic = "force-dynamic";
 export default async function SignInLanding() {
   const platform = await getPlatformResolution();
   if (platform.outcome === "OK") redirect("/admin");
-  if (platform.outcome === "SIGNED_OUT") redirect("/sign-in");
+  // Straight after Clerk signs someone in, this request can arrive before the session cookie does. Bouncing to
+  // /sign-in then left the form on screen until a manual reload (owner report 2026-10-07); instead the browser asks
+  // again until the server sees the session, and goes back to the form only if Clerk has none.
+  if (platform.outcome === "SIGNED_OUT") return <CompletingSignIn />;
 
   const tenant = await getTenantResolution();
   redirect(tenant.outcome === "OK" ? roleHomePath(tenant.ctx.role) : accountRedirectFor(tenant));

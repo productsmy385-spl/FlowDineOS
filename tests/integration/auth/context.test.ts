@@ -178,8 +178,10 @@ describe("post-sign-in landing", () => {
   });
 
   it("sends a user who cannot open a console to the matching account page", async () => {
+    // No session seen yet: the page waits for the browser's fresh Clerk session instead of bouncing to the form,
+    // which used to leave the form on screen after a successful sign-in (owner report 2026-10-07).
     asAnonymous();
-    expect(await invokeLoader(SignInLanding)).toEqual({ redirect: "/sign-in" });
+    expect(await invokeLoader(SignInLanding)).not.toHaveProperty("redirect");
 
     asUninvited();
     expect(await invokeLoader(SignInLanding)).toEqual({ redirect: "/account/no-access?reason=NO_ACCOUNT" });

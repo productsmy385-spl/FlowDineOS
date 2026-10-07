@@ -47,6 +47,26 @@ const elements = {
   footerActionLink: "text-fg-accent hover:text-fg-primary",
   formResendCodeLink: "text-label text-fg-accent hover:text-fg-primary",
   identityPreviewEditButton: "text-fg-accent",
+  // Everything below is drawn by Clerk from the `variables` above, which are the dark palette (light text). On the
+  // light theme's white card that left the Google button, the "or" divider and the step headings nearly invisible
+  // (owner report 2026-10-07), so each is pinned to the theme tokens, which follow light and dark mode.
+  socialButtonsBlockButton: "h-12 rounded-xl border-2 border-border-strong bg-canvas text-fg-primary shadow-none hover:bg-raised",
+  socialButtonsBlockButtonText: "text-label text-fg-primary",
+  socialButtonsProviderIcon: "size-5",
+  dividerLine: "bg-border-strong",
+  dividerText: "text-caption text-fg-secondary",
+  formFieldAction: "text-label text-fg-accent hover:text-fg-primary",
+  formFieldInputShowPasswordButton: "text-fg-secondary hover:text-fg-primary",
+  formFieldHintText: "text-caption text-fg-secondary",
+  formFieldSuccessText: "text-caption text-status-success",
+  formHeaderTitle: "text-heading text-fg-primary",
+  formHeaderSubtitle: "text-body text-fg-secondary",
+  identityPreview: "rounded-xl border border-border-strong bg-canvas",
+  identityPreviewText: "text-body text-fg-primary",
+  alternativeMethodsBlockButton: "h-12 rounded-xl border-2 border-border-strong bg-canvas text-label text-fg-primary hover:bg-raised",
+  alternativeMethodsBlockButtonText: "text-label text-fg-primary",
+  backLink: "text-fg-accent",
+  footerActionText: "text-fg-secondary",
 };
 
 /** Sign-in: no "Sign up" link — accounts come only from invitations (ADR-006, SC-AUTH-05). */
