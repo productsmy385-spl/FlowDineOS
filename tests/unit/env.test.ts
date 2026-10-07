@@ -109,6 +109,20 @@ describe("TC-FOUND-003 environment validation", () => {
     ).toEqual([]);
   });
 
+  it("on Railway, a renamed *.up.railway.app domain replaces the stale one; a custom domain is kept (2026-10-07)", () => {
+    const renamed: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: "https://rasoios-production.up.railway.app", RAILWAY_PUBLIC_DOMAIN: "flowdineos-production.up.railway.app" };
+    applyPlatformDefaults(renamed);
+    expect(renamed.NEXT_PUBLIC_APP_URL).toBe("https://flowdineos-production.up.railway.app");
+
+    const same: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: "https://flowdineos-production.up.railway.app/", RAILWAY_PUBLIC_DOMAIN: "flowdineos-production.up.railway.app" };
+    applyPlatformDefaults(same);
+    expect(same.NEXT_PUBLIC_APP_URL).toBe("https://flowdineos-production.up.railway.app/");
+
+    const custom: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: "https://app.flowdineos.com", RAILWAY_PUBLIC_DOMAIN: "flowdineos-production.up.railway.app" };
+    applyPlatformDefaults(custom);
+    expect(custom.NEXT_PUBLIC_APP_URL).toBe("https://app.flowdineos.com");
+  });
+
   it("on Railway, derives NEXT_PUBLIC_APP_URL from RAILWAY_PUBLIC_DOMAIN unless it is set explicitly", () => {
     const railway: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: undefined, RAILWAY_PUBLIC_DOMAIN: "rasoios-production.up.railway.app" };
     applyPlatformDefaults(railway);

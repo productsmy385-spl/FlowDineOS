@@ -81,6 +81,21 @@ The Railway CLI on the development machine (v5.43.1) is signed in, but no `rasoi
 - [observed] Railway retires Config as Code (`railway.json` / `railway.toml`) on 2026-12-01. The replacement is
   Infrastructure as Code in `.railway/railway.ts` (`import { defineRailway, project, service } from "railway/iac"`).
 
+## Domain renamed: rasoios-production -> flowdineos-production (2026-10-07)
+
+[observed] After the service's Railway domain was renamed to `flowdineos-production.up.railway.app`, table QR codes,
+invitation emails and share links still used `https://rasoios-production.up.railway.app`, which no longer serves the
+app. Cause [fact]: every absolute link is built on the server from `NEXT_PUBLIC_APP_URL` (`lib/env.ts appUrl()`), which
+was set explicitly on Railway; `applyPlatformDefaults` only replaced a missing or localhost value.
+
+Fix [fact]: on Railway, a `*.up.railway.app` value that differs from `RAILWAY_PUBLIC_DOMAIN` (the domain Railway serves
+the service on) is treated as stale and replaced by it. A custom domain is never overridden. Test: `tests/unit/env.test.ts`.
+
+Still do: set `NEXT_PUBLIC_APP_URL=https://flowdineos-production.up.railway.app` on the web service (or the custom domain
+when one is added); add the new domain to Clerk's allowed origins / redirect URLs. QR codes already printed with the old
+address cannot be fixed in software: reprint them from Tables (ZIP download), or keep the old domain attached to the
+service as a second domain.
+
 ## Migration to `.railway/railway.ts` — paused, not applied (2026-10-07)
 
 [fact] Unlike `railway.json`, Railway does **not** read `.railway/` during deploys: changes take effect only when

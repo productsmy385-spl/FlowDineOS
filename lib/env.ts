@@ -179,7 +179,18 @@ export function applyPlatformDefaults(env: Record<string, string | undefined>): 
   } catch {
     // An unparsable value is reported by validation.
   }
-  if (!current || loopback) env.NEXT_PUBLIC_APP_URL = `https://${railwayDomain}`;
+  // A Railway-generated address (`*.up.railway.app`) that is not the one Railway says this service is served on is
+  // stale — the domain was renamed (owner report 2026-10-07: QR codes kept the old rasoios-production address and
+  // stopped working). Railway's live domain wins. A custom domain is never overridden.
+  let staleRailwayDomain = false;
+  try {
+    const host = current ? new URL(current).hostname.toLowerCase() : "";
+    const live = railwayDomain.toLowerCase();
+    staleRailwayDomain = host.endsWith(".up.railway.app") && live.endsWith(".up.railway.app") && host !== live;
+  } catch {
+    // An unparsable value is reported by validation.
+  }
+  if (!current || loopback || staleRailwayDomain) env.NEXT_PUBLIC_APP_URL = `https://${railwayDomain}`;
 
   // Railway's public Postgres proxy (*.proxy.rlwy.net) speaks TLS: require it instead of refusing to boot (SC-DB-01).
   // This only ever makes the connection stricter.
