@@ -21,6 +21,9 @@ import { AGENT_VERSION } from "./version";
  */
 export const EXIT = { OK: 0, ERROR: 1, NEEDS_PAIRING: 2 } as const;
 
+/** Where `pair` points when neither --server nor a config.json says otherwise. */
+export const DEFAULT_SERVER_URL = "https://flowdineos-production.up.railway.app";
+
 export type CliIo = { out: (line: string) => void; err: (line: string) => void };
 export type CliOptions = { env?: AgentEnv; fetch?: FetchLike; io?: CliIo; signal?: AbortSignal; logger?: Logger };
 
@@ -79,13 +82,21 @@ async function pair(args: string[], paths: AgentPaths, io: CliIo, options: CliOp
     io.err(USAGE);
     return EXIT.ERROR;
   }
+  // --server wins; then an existing config.json; then FLOWDINEOS_SERVER_URL; then the FlowDineOS production address.
   const server = option(args, "--server");
+  const env = options.env ?? process.env;
   let config: AgentConfig;
   if (server) {
     config = parseAgentConfig({ serverUrl: server });
     await saveAgentConfig(paths.config, config);
   } else {
-    config = await loadAgentConfig(paths.config);
+    try {
+      config = await loadAgentConfig(paths.config);
+    } catch (error) {
+      if (!(error instanceof ConfigError)) throw error;
+      config = parseAgentConfig({ serverUrl: env.FLOWDINEOS_SERVER_URL ?? DEFAULT_SERVER_URL });
+      await saveAgentConfig(paths.config, config);
+    }
   }
 
   try {
@@ -147,6 +158,15 @@ async function run(paths: AgentPaths, io: CliIo, options: CliOptions): Promise<n
   options.signal?.addEventListener("abort", stop, { once: true });
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
+  // Under the Windows service host (FLOWDINEOS_SERVICE=1) there are no signals: the host asks the agent to stop by
+  // closing its stdin. The runner finishes the ticket in flight and returns (print-agent-windows.md).
+  const env = options.env ?? process.env;
+  const underService = env.FLOWDINEOS_SERVICE === "1" && !options.signal;
+  if (underService) {
+    process.stdin.once("end", stop);
+    process.stdin.once("close", stop);
+    process.stdin.resume();
+  }
   try {
     await runner.run(controller.signal);
     return EXIT.OK;
@@ -160,6 +180,13 @@ async function run(paths: AgentPaths, io: CliIo, options: CliOptions): Promise<n
   } finally {
     process.off("SIGINT", stop);
     process.off("SIGTERM", stop);
+    if (underService) {
+      // Let the process exit: an open stdin would keep the event loop alive.
+      process.stdin.off("end", stop);
+      process.stdin.off("close", stop);
+      process.stdin.pause();
+      process.stdin.unref?.();
+    }
   }
 }
 

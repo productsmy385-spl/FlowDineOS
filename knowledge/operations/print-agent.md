@@ -53,6 +53,10 @@ replies (Windows Defender may ask once on first scan).
 
 ## 3. Install and pair
 
+**Windows (recommended from agent 0.2.0):** run `FlowDineOS-Print-Agent-Setup.exe` — no Node.js needed; it
+installs the **FlowDineOS Print Agent** Windows service and asks for the pairing code. See
+[print-agent-windows.md](../implementation/print-agent-windows.md). The steps below are the older Node.js install.
+
 In RASOIOS → Printing → Agents → **Pair a print agent**, name the PC and copy the one-time code (10 minutes, single use).
 The dialog shows the exact command.
 

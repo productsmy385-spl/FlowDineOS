@@ -164,6 +164,105 @@ jobs:
       - run: node print-agent/dist/rasoios-print-agent.cjs version
       - run: npx vitest run tests/unit/print-agent tests/static/print-agent.test.ts
 
+  # Self-contained Windows print agent (print-agent-windows.md): builds the SEA executable, the service host and the NSIS
+  # installer, then really installs, upgrades and uninstalls it on this runner and checks the outcome. Nothing is faked:
+  # the service is registered with the Service Control Manager and its state is read back.
+  print-agent-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - run: npm run agent:build
+      - name: Build executable, service host and installer
+        run: npm run agent:build:windows
+        env:
+          MAKENSIS: C:\Program Files (x86)\NSIS\makensis.exe
+      - name: The executable runs with no Node.js on PATH
+        shell: pwsh
+        run: |
+          $exe = "print-agent\dist\windows\FlowDineOS.PrintAgent.exe"
+          $env:PATH = "$env:SystemRoot\System32"
+          if (Get-Command node -ErrorAction SilentlyContinue) { throw "node is still on PATH" }
+          $version = & $exe version
+          if ($LASTEXITCODE -ne 0 -or $version -ne (Get-Content print-agent\package.json | ConvertFrom-Json).version) { throw "version check failed: $version" }
+          & $exe status; if ($LASTEXITCODE -ne 2) { throw "an unpaired agent must exit 2 (needs pairing), got $LASTEXITCODE" }
+          "FlowDineOS.PrintAgent.exe $version OK without Node.js"
+      - name: Install over an older RasoiOS pairing, upgrade, uninstall (keep data), purge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $setup = Resolve-Path "print-agent\dist\windows\FlowDineOS-Print-Agent-Setup.exe"
+          $install = "C:\Program Files\FlowDineOS Print Agent"
+          $data = "C:\ProgramData\FlowDineOS\PrintAgent"
+          $legacy = "C:\ProgramData\RasoiOS\PrintAgent"
+
+          # An existing installation of the older Node-based agent: its pairing (a placeholder token, never real).
+          New-Item -ItemType Directory -Force $legacy | Out-Null
+          '{"serverUrl":"https://example.invalid","logLevel":"info"}' | Set-Content "$legacy\config.json" -Encoding utf8
+          '{"version":1,"agentId":"7b0e8a4c-1f2d-4c3b-9a8e-5d6f7a8b9c0d","token":"rsa_ci_placeholder_token_000000000000","serverOrigin":"https://example.invalid","pairedAt":"2026-10-01T00:00:00.000Z"}' | Set-Content "$legacy\credentials.json" -Encoding utf8
+          $legacyHash = (Get-FileHash "$legacy\credentials.json").Hash
+
+          function Assert-Running {
+            $svc = Get-Service FlowDineOSPrintAgent
+            if ($svc.Status -ne "Running") { throw "service is $($svc.Status)" }
+            $cim = Get-CimInstance Win32_Service -Filter "Name='FlowDineOSPrintAgent'"
+            if (-not $cim.PathName.StartsWith('"')) { throw "service path is not quoted: $($cim.PathName)" }
+            if ($cim.StartName -ne "NT SERVICE\FlowDineOSPrintAgent") { throw "service account is $($cim.StartName)" }
+            if ($cim.StartMode -ne "Auto") { throw "start mode is $($cim.StartMode)" }
+          }
+
+          # Fresh install (silent).
+          $p = Start-Process $setup -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "setup exited $($p.ExitCode)" }
+          Assert-Running
+          if (-not (Test-Path "$install\FlowDineOS.PrintAgent.exe")) { throw "binary not installed" }
+          if ((Get-FileHash "$data\credentials.json").Hash -ne $legacyHash) { throw "the RasoiOS pairing was not carried over" }
+          if ((Get-FileHash "$legacy\credentials.json").Hash -ne $legacyHash) { throw "the RasoiOS folder was modified" }
+          $acl = (Get-Acl $data).Access | ForEach-Object { $_.IdentityReference.Value }
+          if ($acl -notcontains "NT SERVICE\FlowDineOSPrintAgent") { throw "service account has no access to the data folder" }
+          if ($acl -contains "BUILTIN\Users" -or $acl -contains "Everyone") { throw "data folder is readable by ordinary users" }
+          Start-Sleep 15
+          # No reachable server: the service keeps running and the agent keeps retrying (no crash loop).
+          Assert-Running
+          if (-not (Test-Path "$data\logs\agent.log")) { throw "no agent log" }
+          Get-Content "$data\logs\agent.log" -Tail 20
+          if (Select-String -Path "$data\logs\agent.log" -Pattern "rsa_ci_placeholder_token" -Quiet) { throw "the token reached the log" }
+
+          # Upgrade / repair: run setup again; pairing kept, service running.
+          $p = Start-Process $setup -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "upgrade exited $($p.ExitCode)" }
+          Assert-Running
+          if ((Get-FileHash "$data\credentials.json").Hash -ne $legacyHash) { throw "upgrade lost the pairing" }
+
+          # Uninstall keeps the pairing by default.
+          $p = Start-Process "$install\Uninstall.exe" -ArgumentList "/S", "_?=$install" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "uninstall exited $($p.ExitCode)" }
+          if (Get-Service FlowDineOSPrintAgent -ErrorAction SilentlyContinue) { throw "service still registered" }
+          if (Test-Path "$install\FlowDineOS.PrintAgent.exe") { throw "binary still present" }
+          if (-not (Test-Path "$data\credentials.json")) { throw "uninstall removed the pairing without /PURGE" }
+          Remove-Item "$install\Uninstall.exe" -Force -ErrorAction SilentlyContinue
+
+          # Reinstall, then uninstall with /PURGE: the pairing goes too; the old RasoiOS folder is never touched.
+          $p = Start-Process $setup -ArgumentList "/S" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "reinstall exited $($p.ExitCode)" }
+          Assert-Running
+          $p = Start-Process "$install\Uninstall.exe" -ArgumentList "/S", "/PURGE", "_?=$install" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "purge uninstall exited $($p.ExitCode)" }
+          if (Test-Path $data) { throw "/PURGE left the data folder" }
+          if ((Get-FileHash "$legacy\credentials.json").Hash -ne $legacyHash) { throw "the RasoiOS folder was modified" }
+          "install / upgrade / uninstall / purge all verified"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowdineos-print-agent-windows
+          path: |
+            print-agent/dist/windows/FlowDineOS-Print-Agent-Setup.exe
+            print-agent/dist/windows/FlowDineOS.PrintAgent.exe
+            print-agent/dist/windows/FlowDineOS.PrintAgent.Service.exe
+            print-agent/dist/windows/SHA256SUMS
+          if-no-files-found: error
+
   audit:
     runs-on: ubuntu-latest
     steps:

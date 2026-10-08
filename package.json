@@ -26,6 +26,7 @@
     "db:local": "tsx scripts/db-local.ts",
     "platform:grant-super-admin": "tsx scripts/grant-super-admin.ts",
     "agent:build": "node print-agent/build.mjs",
+    "agent:build:windows": "node print-agent/packaging/windows/build-windows.mjs",
     "agent:dev": "tsx --tsconfig tsconfig.json print-agent/src/main.ts",
     "printer:simulator": "tsx tools/printer-simulator/cli.ts"
   },
@@ -62,6 +63,7 @@
     "eslint-config-next": "^15.1.7",
     "jsqr": "^1.4.0",
     "postcss": "^8.5.2",
+    "postject": "1.0.0-alpha.6",
     "prisma": "^6.3.1",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.23.13",

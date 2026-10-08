@@ -96,6 +96,12 @@ const eslintConfig = [
     rules: { "no-restricted-imports": "off" },
   },
   {
+    // Windows packaging of the print agent (print-agent-windows.md): a build tool that runs the C# compiler, postject and
+    // NSIS on the build machine. Never bundled into the app or the agent.
+    files: ["print-agent/packaging/windows/build-windows.mjs"],
+    rules: { "no-restricted-imports": "off" },
+  },
+  {
     // Tests may mock and inspect freely.
     files: ["tests/**"],
     rules: {

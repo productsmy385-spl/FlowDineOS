@@ -109,7 +109,8 @@ Not implemented; non-ASCII script prints as `?`. The seam is in place:
 
 ## Still open
 
-- Self-contained Windows installer (no Node.js prerequisite) and FlowDineOS branding of the agent's paths and service:
-  see ADR-025 §5.
+- Self-contained Windows installer: built (print-agent-windows.md) — `FlowDineOS-Print-Agent-Setup.exe`, Windows
+  service, no Node.js; verified by install/upgrade/uninstall in CI. Pending: hand test on a clean PC, code signing, and
+  pointing the console's download at the released installer.
 - Paper-out and cover-open detection (`DLE EOT`) — needs verification on the RP 3230 first.
 - Hardware acceptance of the RP 3230 (blocked on the network issue in the checklist).
