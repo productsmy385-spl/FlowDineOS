@@ -347,8 +347,14 @@ Section "Install"
   Pop $0
 
   ; 6. Data folder permissions: only SYSTEM, Administrators and the service account (inherited by every file in it).
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "${SERVICE_ACCOUNT}:(OI)(CI)M" /T /Q'
+  ; The folder gets the explicit ACL; files already in it (a carried-over pairing, logs) are then reset to inherit it.
+  ; (Applying the folder ACL with /T would strip the files' inherited entries and leave them unreadable.)
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "${SERVICE_ACCOUNT}:(OI)(CI)M" /Q'
   Pop $0
+  ${If} $0 == 0
+    nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir\*" /reset /T /Q'
+    Pop $0
+  ${EndIf}
   ${If} $0 != 0
     Call Rollback
     MessageBox MB_ICONSTOP "The data folder permissions could not be set (icacls exit $0)." /SD IDOK
