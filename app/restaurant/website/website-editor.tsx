@@ -192,6 +192,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   const latest = React.useRef({ colours, identity, sections, view });
   latest.current = { colours, identity, sections, view };
 
+  const [brandingNote, setBrandingNote] = React.useState<{ ok: boolean; text: string } | null>(null);
   const disabled = !view.canEdit;
   const palette = draftPalette(colours, reference);
   const savedColours = colourDraft(view);
@@ -239,6 +240,28 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     const base = latest.current.view;
     return { ok: true, data: { ...base, identity: { ...base.identity, logoUrl: stored.logoUrl, coverImageUrl: stored.coverImageUrl } } };
   };
+
+  // Owner report 2026-10-07: uploading, replacing or removing the logo seemed to do nothing, because the change waited
+  // for a separate Save button and the console header kept the old logo. A finished upload or a removal is now saved
+  // at once. Only the field that changed is sent with the other field's SAVED value, so nothing half-typed elsewhere is
+  // saved with it; the server still checks the image is this restaurant's own (SC-FILE-02) and refreshes the console
+  // layout, so the header shows the new logo.
+  async function commitBrandingImage(field: "logoUrl" | "coverImageUrl", url: string) {
+    const saved = latest.current.view.identity;
+    const label = field === "logoUrl" ? "Logo" : "Cover photo";
+    const result = await updateBrandingAction({
+      logoUrl: field === "logoUrl" ? url : (saved.logoUrl ?? ""),
+      coverImageUrl: field === "coverImageUrl" ? url : (saved.coverImageUrl ?? ""),
+    });
+    if (!result.ok) {
+      setBrandingNote({ ok: false, text: `${label} not saved. ${result.error.fieldErrors?.[field]?.[0] ?? result.error.message}` });
+      return;
+    }
+    const stored = result.data as { logoUrl: string | null; coverImageUrl: string | null };
+    setView((current) => ({ ...current, identity: { ...current.identity, logoUrl: stored.logoUrl, coverImageUrl: stored.coverImageUrl } }));
+    setIdentity((current) => ({ ...current, [field]: stored[field] }));
+    setBrandingNote({ ok: true, text: url ? `${label} saved.` : `${label} removed.` });
+  }
 
   const sectionsAction = (): Promise<ActionResult<EditorSettings>> =>
     saved(
@@ -412,7 +435,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
             <Card>
               <CardHeader>
                 <CardTitle>Logo and cover</CardTitle>
-                <CardDescription>Your logo appears in the website header; the cover photo is used when no hero image is set.</CardDescription>
+                <CardDescription>Your logo appears in the website header and the console; the cover photo is used when no hero image is set. Uploading or removing an image saves it straight away.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
@@ -424,6 +447,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                     disabled={disabled}
                     value={identity.logoUrl ?? ""}
                     onChange={(url) => setIdentity((current) => ({ ...current, logoUrl: url }))}
+                    onCommit={(url) => commitBrandingImage("logoUrl", url)}
                     help="A square image works best, at least 256 × 256 pixels."
                   />
                   <ImageUploader
@@ -433,12 +457,16 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                     disabled={disabled}
                     value={identity.coverImageUrl ?? ""}
                     onChange={(url) => setIdentity((current) => ({ ...current, coverImageUrl: url }))}
+                    onCommit={(url) => commitBrandingImage("coverImageUrl", url)}
                     help="A wide photo of your food or dining room, at least 1600 pixels across."
                   />
                 </div>
+                <p role="status" aria-live="polite" className={cn("text-body", brandingNote?.ok === false ? "text-status-danger" : "text-status-success")} data-testid="branding-status">
+                  {brandingNote?.text}
+                </p>
                 {!disabled && (
                   <div className="flex justify-end">
-                    <SubmitButton>Save logo and cover</SubmitButton>
+                    <SubmitButton>Save image links</SubmitButton>
                   </div>
                 )}
               </CardContent>

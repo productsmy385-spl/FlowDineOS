@@ -32,6 +32,12 @@ export type ImageUploaderProps = {
   /** The current image URL ("" for none). */
   value: string;
   onChange: (url: string) => void;
+  /**
+   * Called once a new image has finished uploading, or the image was removed — never while a link is being typed.
+   * Give it to save straight away (the logo and cover do, owner report 2026-10-07); without it the form's own Save
+   * button applies the change.
+   */
+  onCommit?: (url: string) => void | Promise<void>;
   /** Field name, used to show the server's error for this field (`fieldErrors[name]`). */
   name?: string;
   help?: React.ReactNode;
@@ -45,7 +51,7 @@ export type ImageUploaderProps = {
 
 type ServerError = { code?: string; message?: string; fieldErrors?: Record<string, string[]> };
 
-export function ImageUploader({ label, purpose, value, onChange, name, help, error, required, disabled = false, shape = "wide", className }: ImageUploaderProps) {
+export function ImageUploader({ label, purpose, value, onChange, onCommit, name, help, error, required, disabled = false, shape = "wide", className }: ImageUploaderProps) {
   const [problem, setProblem] = React.useState<string | null>(null);
   const wiring = useFieldWiring({ name, label, required, help, error: problem ?? error });
   const inputRef = React.useRef<HTMLInputElement>(null);
@@ -126,7 +132,8 @@ export function ImageUploader({ label, purpose, value, onChange, name, help, err
         setPending({ id: payload.asset.id, url: payload.asset.url });
         onChange(payload.asset.url);
         setState("UPLOADED");
-        announce("Image uploaded. Save to publish it.");
+        announce(onCommit ? "Image uploaded." : "Image uploaded. Save to publish it.");
+        void onCommit?.(payload.asset.url);
         return;
       }
       const serverError = payload.error;
@@ -153,7 +160,8 @@ export function ImageUploader({ label, purpose, value, onChange, name, help, err
     onChange("");
     setProblem(null);
     setState("IDLE");
-    announce("Image removed. Save to apply.");
+    announce(onCommit ? "Image removed." : "Image removed. Save to apply.");
+    await onCommit?.("");
   }
 
   const previewSrc = value ? imageKitSized(value, shape === "wide" ? 960 : 480) : null;
@@ -184,7 +192,7 @@ export function ImageUploader({ label, purpose, value, onChange, name, help, err
           <div className="flex flex-wrap items-center justify-between gap-2 p-3">
             <span className="flex items-center gap-1.5 text-caption text-status-success">
               <Icon icon={CircleCheck} size={16} />
-              {pending?.url === value ? "Uploaded — save to publish" : "Current image"}
+              {pending?.url === value && !onCommit ? "Uploaded — save to publish" : "Current image"}
             </span>
             {!disabled && (
               <div className="flex gap-2">

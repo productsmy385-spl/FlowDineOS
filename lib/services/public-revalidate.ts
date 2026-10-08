@@ -12,6 +12,18 @@ import { logger } from "@/lib/logger";
  * is logged and swallowed: it must never turn a successful save into a failed one. The ISR window then bounds the
  * staleness at 60 seconds.
  */
+/**
+ * The console layout shows the restaurant's logo (`session.activeTenant.logoUrl`). After a branding save, re-render it
+ * so the header updates without a reload — Next.js refreshes the calling page when a server action revalidates.
+ */
+export function revalidateConsoleShell(ctx: TenantContext): void {
+  try {
+    revalidatePath("/restaurant", "layout");
+  } catch (error) {
+    logger.warn("console.revalidate_failed", { requestId: ctx.requestId, tenantId: ctx.tenantId, error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
 export async function revalidatePublicSite(ctx: TenantContext): Promise<void> {
   try {
     revalidatePath(`/r/${await tenantSlug(ctx)}`);

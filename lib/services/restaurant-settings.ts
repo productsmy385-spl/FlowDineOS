@@ -19,6 +19,7 @@ import {
 import { ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { assertOwnedImageUrls, imageUrlsBeforeSave, releaseUnusedImages } from "@/lib/services/media";
+import { revalidateConsoleShell } from "@/lib/services/public-revalidate";
 import type {
   ReplaceOpeningHoursData,
   UpdateBrandingData,
@@ -94,6 +95,7 @@ export async function updateBranding(ctx: TenantContext, input: UpdateBrandingDa
   const restaurant = await updateRestaurantBranding(ctx, input);
   await releaseUnusedImages(ctx, previous);
   await revalidatePublicSite(ctx);
+  revalidateConsoleShell(ctx);
   return restaurant;
 }
 

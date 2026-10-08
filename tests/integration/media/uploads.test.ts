@@ -426,3 +426,29 @@ describe("TC-MEDIA-006 abandoned uploads are cleaned up", () => {
     expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: otherTenant.id } })).status).toBe("READY");
   });
 });
+
+describe("TC-MEDIA-007 the editor saves a logo the moment it is uploaded or removed (owner report 2026-10-07)", () => {
+  it("replace then remove, sent as the editor sends them, keeps the saved cover and records each save", async () => {
+    const cover = await uploadAs("A", "COVER");
+    const first = await uploadAs("A");
+    await asSeedUser("A", "TENANT_ADMIN");
+    dataOf(await invokeAction(updateBrandingAction, { logoUrl: first.url, coverImageUrl: cover.url }));
+    const auditsBefore = await db.auditLog.count({ where: { tenantId: tenantIdOf("A"), action: "restaurant.branding_updated" } });
+
+    // Replace: the new logo, with the cover's saved value.
+    const second = await uploadAs("A");
+    await asSeedUser("A", "TENANT_ADMIN");
+    const replaced = dataOf(await invokeAction(updateBrandingAction, { logoUrl: second.url, coverImageUrl: cover.url })) as { logoUrl: string | null; coverImageUrl: string | null };
+    expect(replaced).toMatchObject({ logoUrl: second.url, coverImageUrl: cover.url });
+
+    // Remove: an empty logo clears it; the cover stays.
+    const removed = dataOf(await invokeAction(updateBrandingAction, { logoUrl: "", coverImageUrl: cover.url })) as { logoUrl: string | null; coverImageUrl: string | null };
+    expect(removed).toMatchObject({ logoUrl: null, coverImageUrl: cover.url });
+    const restaurant = await db.restaurant.findUniqueOrThrow({ where: { tenantId: tenantIdOf("A") } });
+    expect(restaurant.logoUrl).toBeNull();
+    expect(restaurant.coverImageUrl).toBe(cover.url);
+    expect(await db.auditLog.count({ where: { tenantId: tenantIdOf("A"), action: "restaurant.branding_updated" } })).toBe(auditsBefore + 2);
+    expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: second.id } })).status).toBe("DELETED"); // released once unused
+    expect((await db.mediaAsset.findUniqueOrThrow({ where: { id: cover.id } })).status).toBe("READY");
+  });
+});
