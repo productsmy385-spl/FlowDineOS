@@ -189,7 +189,9 @@ jobs:
           if (Get-Command node -ErrorAction SilentlyContinue) { throw "node is still on PATH" }
           $version = & $exe version
           if ($LASTEXITCODE -ne 0 -or $version -ne (Get-Content print-agent\package.json | ConvertFrom-Json).version) { throw "version check failed: $version" }
-          & $exe status; if ($LASTEXITCODE -ne 2) { throw "an unpaired agent must exit 2 (needs pairing), got $LASTEXITCODE" }
+          # Never set up on this machine: status must refuse (1 = no configuration, 2 = not paired) and point at pairing.
+          $out = & $exe status 2>&1 | Out-String
+          if ($LASTEXITCODE -notin 1, 2 -or $out -notmatch "pair") { throw "an unconfigured agent must refuse and point at pairing (exit $LASTEXITCODE): $out" }
           "FlowDineOS.PrintAgent.exe $version OK without Node.js"
       - name: Install over an older RasoiOS pairing, upgrade, uninstall (keep data), purge
         shell: pwsh
