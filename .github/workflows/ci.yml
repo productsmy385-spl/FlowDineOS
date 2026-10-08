@@ -193,6 +193,7 @@ jobs:
           $out = & $exe status 2>&1 | Out-String
           if ($LASTEXITCODE -notin 1, 2 -or $out -notmatch "pair") { throw "an unconfigured agent must refuse and point at pairing (exit $LASTEXITCODE): $out" }
           "FlowDineOS.PrintAgent.exe $version OK without Node.js"
+          exit 0
       - name: Install over an older RasoiOS pairing, upgrade, uninstall (keep data), purge
         shell: pwsh
         run: |
@@ -257,6 +258,7 @@ jobs:
           if (Test-Path $data) { throw "/PURGE left the data folder" }
           if ((Get-FileHash "$legacy\credentials.json").Hash -ne $legacyHash) { throw "the RasoiOS folder was modified" }
           "install / upgrade / uninstall / purge all verified"
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
           name: flowdineos-print-agent-windows
