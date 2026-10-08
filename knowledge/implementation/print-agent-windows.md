@@ -119,6 +119,12 @@ Job `print-agent-windows` (`.github/workflows/ci.yml`), on `windows-latest`:
    untouched).
 5. Uploads the binaries as the `flowdineos-print-agent-windows` artifact.
 
+[fact] First green run: CI run 37738341354 (2026-10-08). The service started as `NT SERVICE\FlowDineOSPrintAgent`, read
+the carried-over RasoiOS pairing, and with no reachable server retried 1 s → 2 s → 4 s → 8 s → 16 s without crashing;
+upgrade, uninstall (data kept) and purge were verified. Two real defects were found by this job and fixed before release:
+installer helper functions swapped registers on return, and applying the data-folder ACL with `/T` stripped the
+inherited entries of files already in it (a carried-over token became unreadable to the service).
+
 The GitHub runner has Node.js installed system-wide. Running the exe with a reduced `PATH`, and the fact that the service
 starts only `FlowDineOS.PrintAgent.exe`, show it does not use it. **A clean PC without Node.js is still to be tested by
 hand (below).**
