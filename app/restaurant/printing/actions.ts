@@ -4,6 +4,11 @@ import { requirePermission, requireTenant } from "@/lib/auth/guards";
 import { action } from "@/lib/http/action";
 import {
   archivePrintHistory,
+  cancelPrintJob,
+  closeStalePairings,
+  getPrinterCheck,
+  setPrinterArchive,
+  startPrinterCheck,
   createPrintAgentPairing,
   createPrinter,
   createTestPrintJob,
@@ -24,6 +29,10 @@ import {
 import { parseInput } from "@/lib/validation/core";
 import {
   archivePrintJobsSchema,
+  cancelPrintJobSchema,
+  printerCheckIdSchema,
+  type CancelPrintJobInput,
+  type PrinterCheckIdInput,
   createPrintAgentSchema,
   createPrinterSchema,
   printAgentIdSchema,
@@ -183,4 +192,50 @@ export const getPrinterDiscoveryAction = action(async (input: PrinterDiscoveryId
   const ctx = await requireTenant("printer:manage");
   const { discoveryId } = parseInput(printerDiscoveryIdSchema, input);
   return getPrinterDiscovery(ctx, discoveryId);
+});
+
+// ─── Printing hardening (knowledge/implementation/printing-audit-2026-10-08.md) ───
+
+/** Test connection — the printer's own agent opens and closes a TCP connection; nothing is printed — `printer:manage`. */
+export const startPrinterCheckAction = action(async (input: PrinterIdInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { printerId } = parseInput(printerIdSchema, input);
+  return startPrinterCheck(ctx, printerId);
+});
+
+/** Polled by the console while the agent tests — `printer:manage`. */
+export const getPrinterCheckAction = action(async (input: PrinterCheckIdInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { checkId } = parseInput(printerCheckIdSchema, input);
+  return getPrinterCheck(ctx, checkId);
+});
+
+/**
+ * Cancel a queued, retrying or failed job — `printer:manage` (owner/administrator and manager). Kitchen and counter staff
+ * can retry a ticket but not withdraw one.
+ */
+export const cancelPrintJobAction = action(async (input: CancelPrintJobInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { jobId, reason } = parseInput(cancelPrintJobSchema, input);
+  return cancelPrintJob(ctx, jobId, reason ?? null);
+});
+
+/** Archive a deactivated printer (hidden from the list; row and history kept) — `printer:manage`. */
+export const archivePrinterAction = action(async (input: PrinterIdInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { printerId } = parseInput(printerIdSchema, input);
+  return setPrinterArchive(ctx, printerId, true);
+});
+
+/** Show an archived printer again (still deactivated) — `printer:manage`. */
+export const restorePrinterAction = action(async (input: PrinterIdInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { printerId } = parseInput(printerIdSchema, input);
+  return setPrinterArchive(ctx, printerId, false);
+});
+
+/** Close every pairing attempt whose code has expired (nothing deleted) — `print_agent:manage`. */
+export const closeStalePairingsAction = action(async () => {
+  const ctx = await requireTenant("print_agent:manage");
+  return closeStalePairings(ctx);
 });

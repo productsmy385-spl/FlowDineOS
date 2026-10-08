@@ -32,7 +32,26 @@ export type PrintBlock =
   | { type: "row"; left: string; right: string; bold?: boolean }
   | { type: "divider"; style?: "dashed" | "solid" }
   | { type: "spacer"; lines: number }
-  | { type: "cut" };
+  | { type: "cut" }
+  /**
+   * QR code / CODE128 barcode (2026-10-08). Printed only by agents ≥ {@link AGENT_VERSION_WITH_CODES} on a printer whose
+   * profile supports it; the server never sends them to older agents, which would refuse the whole ticket.
+   */
+  | { type: "qr"; data: string; size?: number; caption?: string }
+  | { type: "barcode"; data: string; caption?: string };
+
+/** The first agent version that prints `qr` and `barcode` blocks. */
+export const AGENT_VERSION_WITH_CODES = "0.2.0";
+
+/** True when `version` (e.g. "0.10.1") is at least `minimum`. Unknown or malformed versions are false. */
+export function agentVersionAtLeast(version: string | null | undefined, minimum: string): boolean {
+  const parse = (value: string) => (/^\d+\.\d+\.\d+$/.test(value) ? value.split(".").map(Number) : null);
+  const have = version ? parse(version) : null;
+  const want = parse(minimum);
+  if (!have || !want) return false;
+  for (let i = 0; i < 3; i++) if (have[i] !== want[i]) return have[i] > want[i];
+  return true;
+}
 
 export type PrintDocument = {
   version: 1;
@@ -56,6 +75,9 @@ export const printBlockSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("divider"), style: z.enum(["dashed", "solid"]).optional() }).strict(),
   z.object({ type: z.literal("spacer"), lines: z.number().int().min(1).max(8) }).strict(),
   z.object({ type: z.literal("cut") }).strict(),
+  // Printable ASCII only: the data is sent to the printer as bytes.
+  z.object({ type: z.literal("qr"), data: z.string().min(1).max(300).regex(/^[ -~]+$/), size: z.number().int().min(2).max(10).optional(), caption: z.string().max(60).optional() }).strict(),
+  z.object({ type: z.literal("barcode"), data: z.string().min(1).max(40).regex(/^[ -~]+$/), caption: z.string().max(60).optional() }).strict(),
 ]);
 
 export const printDocumentSchema = z

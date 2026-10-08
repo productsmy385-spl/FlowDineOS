@@ -62,7 +62,7 @@ describe("TC-AGENT-013 encoder", () => {
   it("encodes the server's real test page", () => {
     const document = renderTestDocument({ widthMm: 80, restaurantName: "Akshaypatra - Devarapalli", printerName: "Kitchen Printer", requestedAt: new Date("2026-09-23T05:12:00Z"), timeZone: "Asia/Kolkata" });
     const text = printedText(decodeEscPos(encodeDocument(document)));
-    expect(text).toContain("TEST PRINT");
+    expect(text).toContain("PRINTER TEST");
     expect(text.join("\n")).toContain("Kitchen Printer");
   });
 });

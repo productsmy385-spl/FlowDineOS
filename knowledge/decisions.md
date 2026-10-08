@@ -42,5 +42,6 @@ Architecture changes during implementation require a new ADR (brief §56).
 | [RASOIOS-ADR-022](decisions/RASOIOS-ADR-022.md) | One main menu (ring), today strip, brand colours, spreadsheet imports, sharing, print-history archive | 2026-10-06 | APPROVED | Refines ADR-021 §6–7 |
 | [RASOIOS-ADR-023](decisions/RASOIOS-ADR-023.md) | Platform renamed FlowDineOS; per-restaurant feature switches (no tiers) | 2026-10-06 | APPROVED | Supersedes ADR-002's "no feature gating" clause only |
 | [RASOIOS-ADR-024](decisions/RASOIOS-ADR-024.md) | Book a Demo, one footer contact section, unlimited order/kitchen card rails | 2026-10-07 | APPROVED | Refines ADR-022/023 |
+| [RASOIOS-ADR-025](decisions/RASOIOS-ADR-025.md) | Printing hardening: error catalogue, Test connection, 30-min KOT retry, one lane per printer, profiles | 2026-10-08 | APPROVED | Refines ADR-007/015 |
 
 ADR-006…011 were approved by the Project Owner on 2026-09-15 in decision gate S1-P01-T010. The same gate answered Q-004, which added GST receipt presentation to ADR-010 §3.

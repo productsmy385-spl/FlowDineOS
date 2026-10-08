@@ -119,6 +119,11 @@ describe("TC-PRINT-013 lease recovery", () => {
       attemptCount: 1,
     });
 
+    // One lane per printer (2026-10-08): while the live lease runs, this printer gets nothing — the live job is untouched.
+    expect(await claimJobs(agentCtx([printerId]), 10, new Date())).toEqual([]);
+
+    // Once the printer is free, the stranded job (expired lease) is taken again with a fresh claim token.
+    await db.printJob.update({ where: { id: live.id }, data: { status: "PRINTED", printedAt: new Date(), leaseExpiresAt: null } });
     const claimed = await claimJobs(agentCtx([printerId]), 10, new Date());
     expect(claimed.map((c) => c.jobId)).toEqual([stranded.id]);
 

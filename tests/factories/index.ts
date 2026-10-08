@@ -387,6 +387,10 @@ export async function createFullTenant(db: Db, label: string) {
   const audit = await db.auditLog.create({
     data: { tenantId: tenant.id, actorType: "USER", actorUserId: user.id, action: "fixture.created", resourceType: "tenant", resourceId: tenant.id },
   });
+  // A finished connection test (printing hardening 2026-10-08), so every composite foreign key has a fixture row.
+  const printerCheck = await db.printerCheck.create({
+    data: { tenantId: tenant.id, printerId: printer.id, printAgentId: agent.id, requestedByUserId: user.id, status: "COMPLETED", ok: true, elapsedMs: 12, completedAt: new Date() },
+  });
   await db.tenantCounter.create({ data: { tenantId: tenant.id, counterType: "ORDER", businessDate: new Date("2026-09-15T00:00:00Z"), lastValue: 1 } });
   const websiteSection = await db.websiteSection.create({
     data: {
@@ -400,5 +404,5 @@ export async function createFullTenant(db: Db, label: string) {
     },
   });
 
-  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, agent, printerDiscovery, staffUser, staffMembership, staffCredential, staffSession, printer, printJob, socialPost, dayClose, websiteSection, audit };
+  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, agent, printerDiscovery, staffUser, staffMembership, staffCredential, staffSession, printer, printJob, printerCheck, socialPost, dayClose, websiteSection, audit };
 }

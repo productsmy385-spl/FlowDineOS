@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Select, TextField } from "@/components/ui/inputs";
 import type { PrinterDto } from "@/lib/services/printing";
+import { DEFAULT_PRINTER_PROFILE, PRINTER_PROFILES, PRINTER_PROFILE_KEYS, isPrinterProfileKey, type PrinterProfileKey } from "@/lib/print/profiles";
 import { createPrinterAction, updatePrinterAction } from "./actions";
 
 /**
@@ -27,6 +28,9 @@ const CONNECTIONS = [
   { value: "USB", label: "USB" },
 ];
 
+/** Capability profiles (lib/print/profiles.ts): the agent encodes by the model's capabilities. */
+const MODELS = PRINTER_PROFILE_KEYS.map((key) => ({ value: key, label: PRINTER_PROFILES[key].label }));
+
 const WIDTHS = [
   { value: "80", label: "80 mm (48 columns)" },
   { value: "58", label: "58 mm (32 columns)" },
@@ -40,6 +44,7 @@ type FormState = {
   paperWidthMm: string;
   kitchenSectionId: string;
   printAgentId: string;
+  profile: string;
 };
 
 /** Values for a new printer found by a LAN scan (ADR-015): its address and the agent that found it. */
@@ -54,6 +59,7 @@ function stateOf(printer: PrinterDto | null, preset?: PrinterPreset): FormState 
     paperWidthMm: String(printer?.paperWidthMm ?? 80),
     kitchenSectionId: printer?.kitchenSectionId ?? "",
     printAgentId: printer?.printAgentId ?? preset?.printAgentId ?? "",
+    profile: printer?.profile ?? DEFAULT_PRINTER_PROFILE,
   };
 }
 
@@ -101,6 +107,7 @@ export function PrinterDialog({
       paperWidthMm: (form.paperWidthMm === "58" ? 58 : 80) as 58 | 80,
       kitchenSectionId: form.kitchenSectionId || null,
       printAgentId: form.printAgentId || null,
+      profile: (isPrinterProfileKey(form.profile) ? form.profile : DEFAULT_PRINTER_PROFILE) as PrinterProfileKey,
     };
     const result = printer ? await updatePrinterAction({ printerId: printer.id, ...shared }) : await createPrinterAction(shared);
     setPending(false);
@@ -170,6 +177,20 @@ export function PrinterDialog({
           help={addressHelp}
           placeholder={form.connectionType === "LAN" ? "192.168.1.50:9100" : "USB001"}
           maxLength={255}
+        />
+        <Select
+          name="profile"
+          label="Model"
+          options={MODELS}
+          value={form.profile}
+          onChange={(event) => {
+            const key = event.target.value;
+            set("profile", key);
+            // A model that takes one paper width sets it (the TVS RP 3230 is 80 mm only).
+            const widths = isPrinterProfileKey(key) ? PRINTER_PROFILES[key].paperWidthsMm : [];
+            if (widths.length === 1) set("paperWidthMm", String(widths[0]));
+          }}
+          error={fieldErrors.profile?.[0]}
         />
         <Select
           name="paperWidthMm"

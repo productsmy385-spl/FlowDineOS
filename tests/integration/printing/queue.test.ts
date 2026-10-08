@@ -143,11 +143,31 @@ describe("TC-PRINT-004 atomic claiming (SC-PRINT-03, BA-22)", () => {
     expect(await claimJobs(await agentContext(orphan), 5, new Date())).toEqual([]);
   });
 
-  it("respects the 1–10 bound on `max`", async () => {
+  it("one lane per printer: at most one job per printer per claim, in order (printing audit 2026-10-08)", async () => {
     await clearJobs("A");
-    for (let i = 0; i < 12; i++) await testJob("A", printerId, { dedupeKey: `TEST:bound-${i}-${randomUUID()}` });
+    const jobs = [];
+    for (let i = 0; i < 3; i++) jobs.push(await testJob("A", printerId, { dedupeKey: `TEST:lane-${i}-${randomUUID()}` }));
     const ctx = await agentContext(agent);
-    expect((await claimJobs(ctx, 100, new Date())).length).toBe(10);
+    const first = await claimJobs(ctx, 10, new Date());
+    expect(first.map((job) => job.jobId)).toEqual([jobs[0].id]);
+    // While that job is in flight under a live lease, the printer gets nothing else.
+    expect(await claimJobs(ctx, 10, new Date())).toEqual([]);
+  });
+
+  it("respects the 1–10 bound on `max` across printers", async () => {
+    await clearJobs("A");
+    const lanes = [];
+    for (let i = 0; i < 12; i++) {
+      const printer = await testPrinter("A", { agentId: agent.agentId, name: `Lane ${i} ${randomUUID().slice(0, 4)}` });
+      lanes.push(printer.id);
+      await testJob("A", printer.id, { dedupeKey: `TEST:bound-${i}-${randomUUID()}` });
+    }
+    const ctx = await agentContext(agent);
+    const claimed = await claimJobs(ctx, 100, new Date());
+    expect(claimed.length).toBe(10);
+    expect(new Set(claimed.map((job) => job.printerId)).size).toBe(10);
+    await db.printJob.deleteMany({ where: { printerId: { in: lanes } } });
+    await db.printer.deleteMany({ where: { id: { in: lanes } } });
   });
 });
 
@@ -207,11 +227,11 @@ describe("TC-PRINT-005 acknowledgement (SC-PRINT-04, ADR-007 §4)", () => {
 
     const requeued = await db.printJob.findUniqueOrThrow({ where: { id: first.jobId } });
     expect(requeued.attemptCount).toBe(1);
-    expect(requeued.lastErrorCode).toBe("PRINTER_OFFLINE");
-    expect(requeued.nextAttemptAt.getTime() - at.getTime()).toBe(10_000);
+    expect(requeued.lastErrorCode).toBe("PRINTER_UNREACHABLE"); // an older agent's code, normalised
+    expect(requeued.nextAttemptAt.getTime() - at.getTime()).toBe(5_000); // test pages: 5 s, then give up
     expect(requeued.leaseExpiresAt).toBeNull();
 
-    const later = new Date(at.getTime() + 11_000);
+    const later = new Date(at.getTime() + 6_000);
     const [second] = await claimJobs(ctx, 1, later);
     expect(second.jobId).toBe(first.jobId);
     const terminal = await ackJob(ctx, second.jobId, second.claimToken, { result: "FAILED", errorCode: "PRINTER_OFFLINE" }, later);

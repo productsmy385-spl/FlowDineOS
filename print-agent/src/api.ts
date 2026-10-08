@@ -34,6 +34,8 @@ export const agentPrinterSchema = z.object({
   connectionType: z.enum(["LAN", "USB"]),
   connectionAddress: z.string().max(255),
   paperWidthMm: z.number().int(),
+  /** Capability profile key (lib/print/profiles.ts); absent from servers older than 2026-10-08. */
+  profile: z.string().max(40).optional(),
 });
 export type AgentPrinter = z.infer<typeof agentPrinterSchema>;
 
@@ -52,10 +54,16 @@ export const claimedJobSchema = z.object({
 });
 export type ClaimedJob = z.infer<typeof claimedJobSchema>;
 /** `discovery` is set when an admin asked this agent to scan its LAN for printers (RASOIOS-ADR-015). */
+/** A console "Test connection" of one printer (2026-10-08): connect and close, never print. */
+export const printerCheckRequestSchema = z.object({ checkId: z.string().uuid(), printerId: z.string().uuid() });
+export type PrinterCheckRequest = z.infer<typeof printerCheckRequestSchema>;
 const claimResponseSchema = z.object({
   jobs: z.array(claimedJobSchema).max(10),
   discovery: z.object({ discoveryId: z.string().uuid() }).nullable().optional(),
+  checks: z.array(printerCheckRequestSchema).max(10).optional(),
 });
+export type PrinterCheckReport = { ok: boolean; errorCode?: string; detail?: string; elapsedMs: number };
+const checkReportResponseSchema = z.object({ checkId: z.string().uuid(), status: z.string() });
 const discoveryReportResponseSchema = z.object({ discoveryId: z.string().uuid(), status: z.enum(["COMPLETED", "FAILED"]) });
 
 export type DiscoveredDevice = {
@@ -79,7 +87,8 @@ export type AckBody = { claimToken: string; result: "PRINTED" | "FAILED"; errorC
 export interface AgentApiLike {
   config(): Promise<ConfigResponse>;
   heartbeat(body: HeartbeatBody): Promise<z.infer<typeof heartbeatResponseSchema>>;
-  claim(max: number): Promise<{ jobs: ClaimedJob[]; discovery?: { discoveryId: string } | null }>;
+  claim(max: number): Promise<{ jobs: ClaimedJob[]; discovery?: { discoveryId: string } | null; checks?: PrinterCheckRequest[] }>;
+  reportCheck?(checkId: string, report: PrinterCheckReport): Promise<{ checkId: string; status: string }>;
   reportDiscovery?(discoveryId: string, report: DiscoveryReport): Promise<{ discoveryId: string; status: string }>;
   ack(jobId: string, body: AckBody): Promise<{ jobId: string; status: string }>;
 }
@@ -96,7 +105,7 @@ export class AgentApi implements AgentApiLike {
   ) {
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? 15_000;
-    this.userAgent = options.userAgent ?? "rasoios-print-agent";
+    this.userAgent = options.userAgent ?? "flowdineos-print-agent";
   }
 
   static async pair(origin: string, body: { pairingCode: string; agentVersion: string; osInfo: string }, options: { fetch?: FetchLike; timeoutMs?: number } = {}): Promise<PairResponse> {
@@ -119,6 +128,11 @@ export class AgentApi implements AgentApiLike {
   reportDiscovery(discoveryId: string, report: DiscoveryReport) {
     if (!z.string().uuid().safeParse(discoveryId).success) throw new AgentApiError("PROTOCOL", "Refusing to report on an id that is not a UUID");
     return this.request("POST", `/api/v1/print-agent/discoveries/${discoveryId}`, report, discoveryReportResponseSchema);
+  }
+
+  reportCheck(checkId: string, report: PrinterCheckReport) {
+    if (!z.string().uuid().safeParse(checkId).success) throw new AgentApiError("PROTOCOL", "Refusing to report on an id that is not a UUID");
+    return this.request("POST", `/api/v1/print-agent/checks/${checkId}`, report, checkReportResponseSchema);
   }
 
   ack(jobId: string, body: AckBody) {

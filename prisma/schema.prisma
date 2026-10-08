@@ -202,6 +202,17 @@ enum PrinterDiscoveryStatus {
   @@map("printer_discovery_status")
 }
 
+/// A console-requested connection test of one printer (printing hardening 2026-10-08): REQUESTED → RUNNING (agent picked
+/// it up) → COMPLETED (with the agent's result) or EXPIRED (the agent never answered). Never creates a print job.
+enum PrinterCheckStatus {
+  REQUESTED
+  RUNNING
+  COMPLETED
+  EXPIRED
+
+  @@map("printer_check_status")
+}
+
 enum PrintJobType {
   KOT
   RECEIPT
@@ -213,8 +224,12 @@ enum PrintJobType {
 enum PrintJobStatus {
   PENDING
   PROCESSING
+  /// Delivered to the printer: the agent handed every byte to the printer connection and it closed cleanly. Not proof of
+  /// paper — raw TCP 9100 printers do not confirm physical output (printing audit 2026-10-08 D3).
   PRINTED
   FAILED
+  /// Withdrawn by staff while still queued or after failing (never while in flight or once delivered).
+  CANCELLED
 
   @@map("print_job_status")
 }
@@ -364,6 +379,7 @@ model Tenant {
   printers          Printer[]
   printAgents       PrintAgent[]
   printerDiscoveries PrinterDiscovery[]
+  printerChecks      PrinterCheck[]
   printJobs         PrintJob[]
   auditLogs         AuditLog[]
   socialPosts       SocialPost[]
@@ -623,6 +639,8 @@ model User {
   tenantFeatureChanges   TenantFeature[]    @relation("TenantFeatureUpdatedBy")
   demoRequestChanges     DemoRequest[]      @relation("DemoRequestUpdatedBy")
   printerDiscoveries     PrinterDiscovery[] @relation("PrinterDiscoveryRequestedBy")
+  printerChecks          PrinterCheck[]     @relation("PrinterCheckRequestedBy")
+  cancelledPrintJobs     PrintJob[]         @relation("PrintJobCancelledBy")
   auditLogs              AuditLog[]         @relation("AuditActor")
   uploadedMediaAssets    MediaAsset[]       @relation("MediaAssetUploadedBy")
   markedSocialPosts      SocialPost[]       @relation("SocialPostMarkedBy")
@@ -1104,6 +1122,13 @@ model Printer {
   isActive          Boolean           @default(true) @map("is_active")
   health            PrinterHealth     @default(UNKNOWN)
   healthReportedAt  DateTime?         @map("health_reported_at") @db.Timestamptz(6)
+  /// Capability profile key (lib/print/profiles.ts), e.g. GENERIC_ESCPOS or TVS_RP3230.
+  profile           String            @default("GENERIC_ESCPOS") @db.VarChar(40)
+  /// Hidden from the printer list; only an inactive printer can be archived. The row and its jobs stay.
+  archivedAt        DateTime?         @map("archived_at") @db.Timestamptz(6)
+  lastDeliveredAt   DateTime?         @map("last_delivered_at") @db.Timestamptz(6)
+  lastFailedAt      DateTime?         @map("last_failed_at") @db.Timestamptz(6)
+  lastErrorCode     String?           @map("last_error_code") @db.VarChar(40)
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1111,6 +1136,7 @@ model Printer {
   printAgent     PrintAgent?     @relation(fields: [tenantId, printAgentId], references: [tenantId, id], onDelete: Restrict)
   kitchenSection KitchenSection? @relation(fields: [tenantId, kitchenSectionId], references: [tenantId, id], onDelete: Restrict)
   printJobs      PrintJob[]
+  checks         PrinterCheck[]
 
   @@unique([tenantId, id])
   @@index([tenantId, printAgentId])
@@ -1145,6 +1171,7 @@ model PrintAgent {
   printers    Printer[]
   printJobs   PrintJob[]
   discoveries PrinterDiscovery[]
+  checks      PrinterCheck[]
 
   @@unique([tenantId, id])
   @@index([tenantId, status])
@@ -1178,6 +1205,37 @@ model PrinterDiscovery {
   @@map("printer_discoveries")
 }
 
+/// One "Test connection" of a printer (printing hardening 2026-10-08). The cloud never connects to the printer: the
+/// printer's own agent picks the request up with its next claim, opens and closes a TCP connection locally, and reports
+/// the outcome here. No print job is created and nothing is printed.
+model PrinterCheck {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  printerId         String             @map("printer_id") @db.Uuid
+  printAgentId      String             @map("print_agent_id") @db.Uuid
+  status            PrinterCheckStatus @default(REQUESTED)
+  ok                Boolean?
+  errorCode         String?            @map("error_code") @db.VarChar(40)
+  detail            String?            @db.VarChar(200)
+  elapsedMs         Int?               @map("elapsed_ms")
+  requestedByUserId String             @map("requested_by_user_id") @db.Uuid
+  requestedAt       DateTime           @default(now()) @map("requested_at") @db.Timestamptz(6)
+  startedAt         DateTime?          @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime?          @map("completed_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  printer     Printer    @relation(fields: [tenantId, printerId], references: [tenantId, id], onDelete: Restrict)
+  printAgent  PrintAgent @relation(fields: [tenantId, printAgentId], references: [tenantId, id], onDelete: Restrict)
+  requestedBy User       @relation("PrinterCheckRequestedBy", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, id])
+  @@index([tenantId, printAgentId, status])
+  @@index([tenantId, printerId, requestedAt])
+  @@map("printer_checks")
+}
+
 // ───────────────────────── E23 PRINT_JOB ─────────────────────────
 
 model PrintJob {
@@ -1195,6 +1253,8 @@ model PrintJob {
   attemptCount      Int            @default(0) @map("attempt_count") @db.SmallInt
   maxAttempts       Int            @default(3) @map("max_attempts") @db.SmallInt
   nextAttemptAt     DateTime       @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  /// Start of the automatic retry window (null = created_at); a manual Retry restarts it (2026-10-08).
+  retryWindowStartedAt DateTime?   @map("retry_window_started_at") @db.Timestamptz(6)
   claimToken        String?        @map("claim_token") @db.Uuid
   claimedAt         DateTime?      @map("claimed_at") @db.Timestamptz(6)
   leaseExpiresAt    DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
@@ -1206,11 +1266,15 @@ model PrintJob {
   // Removed from the history view (RASOIOS-ADR-022): finished jobs only; the row and its audit stay.
   archivedAt        DateTime?      @map("archived_at") @db.Timestamptz(6)
   archivedByUserId  String?        @map("archived_by_user_id") @db.Uuid
+  cancelledAt       DateTime?      @map("cancelled_at") @db.Timestamptz(6)
+  cancelledByUserId String?        @map("cancelled_by_user_id") @db.Uuid
+  cancelReason      String?        @map("cancel_reason") @db.VarChar(200)
   createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   archivedBy  User?       @relation("PrintJobArchivedBy", fields: [archivedByUserId], references: [id], onDelete: Restrict)
+  cancelledBy User?       @relation("PrintJobCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
   printer     Printer     @relation(fields: [tenantId, printerId], references: [tenantId, id], onDelete: Restrict)
   printAgent  PrintAgent? @relation(fields: [tenantId, printAgentId], references: [tenantId, id], onDelete: Restrict)
   order       Order?      @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)

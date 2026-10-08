@@ -240,7 +240,8 @@ describe("TC-PRINT-006 a job stays PROCESSING until the agent acknowledges", () 
     expect(ack.body).toMatchObject({ status: "FAILED" });
 
     const row = await db.printJob.findUniqueOrThrow({ where: { id: job.id } });
-    expect(row).toMatchObject({ status: "FAILED", lastErrorCode: "PRINTER_OFFLINE", lastErrorMessage: "connect ECONNREFUSED" });
+    // Out of attempts: recorded as PRINT_JOB_EXPIRED, with the cause (an older agent's code, normalised) in the message.
+    expect(row).toMatchObject({ status: "FAILED", lastErrorCode: "PRINT_JOB_EXPIRED", lastErrorMessage: "PRINTER_UNREACHABLE: connect ECONNREFUSED" });
 
     const audits = await db.auditLog.findMany({ where: { action: "print_job.failed", resourceId: job.id } });
     expect(audits).toHaveLength(1);

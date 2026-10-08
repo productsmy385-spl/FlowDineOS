@@ -2,8 +2,8 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import type { PrintJobStatus, PrintJobType, PrinterHealth } from "@prisma/client";
-import { CircleDashed, Pencil, Plus, PrinterCheck, Radar, RefreshCw, Trash2, TriangleAlert, WifiOff } from "lucide-react";
+import type { PrintJobType, PrinterHealth } from "@prisma/client";
+import { Archive, ArchiveRestore, Ban, CircleDashed, Pencil, Plus, PrinterCheck, Radar, RefreshCw, Trash2, TriangleAlert, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,12 +17,19 @@ import { useToast } from "@/components/ui/toast";
 import { EmptyState } from "@/components/states/empty-state";
 import { StaleBanner } from "@/components/states/stale-banner";
 import type { PrintJobDto, PrinterDto, PrintingConsole, PrintingConsoleAgent } from "@/lib/services/printing";
+import { describePrintError } from "@/lib/print/error-codes";
+import { profileOf } from "@/lib/print/profiles";
+import type { PrintJobDisplayStatus } from "@/lib/print/state-machine";
 import { formatInZone } from "@/lib/ui/format";
 import { DOMAIN_ICONS, type Tone } from "@/lib/ui/icons";
 import { usePolling } from "@/lib/ui/use-polling";
 import {
+  archivePrinterAction,
+  cancelPrintJobAction,
+  closeStalePairingsAction,
   createTestPrintJobAction,
   deactivatePrinterAction,
+  restorePrinterAction,
   getPrintingConsoleAction,
   retryPrintJobAction,
   archivePrintJobsAction,
@@ -30,6 +37,7 @@ import {
 } from "./actions";
 import { PairAgentDialog } from "./pair-agent-dialog";
 import { DiscoveryDialog } from "./discovery-dialog";
+import { PrinterCheck as PrinterCheckPanel } from "./printer-check";
 import { PrinterDialog, type PrinterPreset } from "./printer-dialog";
 
 /**
@@ -48,13 +56,31 @@ const POLL_INTERVAL_MS = 10_000;
 
 type Capabilities = { managePrinters: boolean; manageAgents: boolean; retryJobs: boolean };
 
-const STATUS_TABS: ReadonlyArray<{ id: string; label: string; jobStatus?: PrintJobStatus }> = [
+// What staff see (lib/print/state-machine.ts displayStatus): "Delivered" — never "Printed" — because a raw TCP printer
+// does not confirm paper (printing audit 2026-10-08).
+const STATUS_TABS: ReadonlyArray<{ id: string; label: string; display?: PrintJobDisplayStatus }> = [
   { id: "ALL", label: "All" },
-  { id: "PENDING", label: "Queued", jobStatus: "PENDING" },
-  { id: "PROCESSING", label: "Sending", jobStatus: "PROCESSING" },
-  { id: "PRINTED", label: "Delivered", jobStatus: "PRINTED" },
-  { id: "FAILED", label: "Failed", jobStatus: "FAILED" },
+  { id: "QUEUED", label: "Queued", display: "QUEUED" },
+  { id: "PRINTING", label: "Sending", display: "PRINTING" },
+  { id: "RETRYING", label: "Retrying", display: "RETRYING" },
+  { id: "DELIVERED", label: "Delivered", display: "DELIVERED" },
+  { id: "FAILED", label: "Failed", display: "FAILED" },
+  { id: "CANCELLED", label: "Cancelled", display: "CANCELLED" },
 ];
+
+/** "in 25 s", "in 3 min" — how long until a retrying job is tried again. */
+function untilText(iso: string, nowMs: number): string {
+  const seconds = Math.max(0, Math.round((Date.parse(iso) - nowMs) / 1000));
+  if (seconds < 5) return "now";
+  return seconds < 90 ? `in ${seconds} s` : `in ${Math.round(seconds / 60)} min`;
+}
+
+/** A LAN address with the default port spelled out, so "192.168.1.5" and "192.168.1.5:9100" compare equal. */
+function addressKey(printer: PrinterDto): string | null {
+  if (printer.connectionType !== "LAN" || !printer.connectionAddress) return null;
+  const [host, port] = printer.connectionAddress.split(":");
+  return `${host}:${port ?? "9100"}`;
+}
 
 const TYPE_TABS: ReadonlyArray<{ id: string; label: string; jobType?: PrintJobType }> = [
   { id: "ALL", label: "All types" },
@@ -118,6 +144,17 @@ export function PrintingConsoleView({
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [archiving, setArchiving] = React.useState<{ jobIds: string[] } | { olderThanDays: number } | null>(null);
   const [olderThanDays, setOlderThanDays] = React.useState(30);
+  const [cancelling, setCancelling] = React.useState<PrintJobDto | null>(null);
+  const [cancelReason, setCancelReason] = React.useState("");
+  const [showArchived, setShowArchived] = React.useState(false);
+  const [showPairings, setShowPairings] = React.useState(false);
+  const [nowMs, setNowMs] = React.useState(() => Date.now());
+
+  // Retry countdowns tick every 5 s; nothing else depends on it.
+  React.useEffect(() => {
+    const id = setInterval(() => setNowMs(Date.now()), 5_000);
+    return () => clearInterval(id);
+  }, []);
 
   const onDelta = React.useCallback((page: { jobs: PrintJobDto[] }) => {
     setJobs((current) => mergeJobs(current, page.jobs));
@@ -154,6 +191,39 @@ export function PrintingConsoleView({
     setJobs((current) => mergeJobs(current, [result.data]));
     toast.success("Back in the queue. The agent picks it up on its next poll.");
     void refetch();
+  }
+
+  async function cancelJob(job: PrintJobDto) {
+    const result = await cancelPrintJobAction({ jobId: job.id, reason: cancelReason.trim() || undefined });
+    setCancelling(null);
+    setCancelReason("");
+    if (!result.ok) {
+      toast.error(result.error.message);
+      void refetch();
+      return;
+    }
+    setJobs((current) => mergeJobs(current, [result.data]));
+    toast.success("Cancelled. It will not be printed.");
+  }
+
+  async function setArchived(printer: PrinterDto, archived: boolean) {
+    const result = archived ? await archivePrinterAction({ printerId: printer.id }) : await restorePrinterAction({ printerId: printer.id });
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success(archived ? `${printer.name} archived. Its history is kept.` : `${printer.name} restored (still deactivated).`);
+    await reloadConsole();
+  }
+
+  async function clearPairings() {
+    const result = await closeStalePairingsAction();
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success(result.data.closed === 0 ? "No expired pairing attempts." : `Closed ${result.data.closed} expired pairing attempt${result.data.closed === 1 ? "" : "s"}.`);
+    await reloadConsole();
   }
 
   async function archive(target: { jobIds: string[] } | { olderThanDays: number }) {
@@ -210,13 +280,14 @@ export function PrintingConsoleView({
     router.refresh();
   }
 
-  const wantedStatus = STATUS_TABS.find((tab) => tab.id === statusTab)?.jobStatus;
+  const wantedStatus = STATUS_TABS.find((tab) => tab.id === statusTab)?.display;
   const wantedType = TYPE_TABS.find((tab) => tab.id === typeTab)?.jobType;
-  const visibleJobs = jobs.filter((job) => (wantedStatus ? job.status === wantedStatus : true) && (wantedType ? job.jobType === wantedType : true));
+  const visibleJobs = jobs.filter((job) => (wantedStatus ? job.displayStatus === wantedStatus : true) && (wantedType ? job.jobType === wantedType : true));
   const failedCount = jobs.filter((job) => job.status === "FAILED").length;
   const offlineAgents = agents.filter((agent) => agent.status === "ACTIVE" && !agent.online).length;
 
-  const finished = (job: PrintJobDto) => job.status === "PRINTED" || job.status === "FAILED";
+  const finished = (job: PrintJobDto) => job.status === "PRINTED" || job.status === "FAILED" || job.status === "CANCELLED";
+  const cancellable = (job: PrintJobDto) => job.status === "PENDING" || job.status === "FAILED";
   const selectableJobs = visibleJobs.filter(finished);
   const allSelected = selectableJobs.length > 0 && selectableJobs.every((job) => selected.has(job.id));
   const toggle = (id: string) =>
@@ -226,6 +297,12 @@ export function PrintingConsoleView({
       else next.add(id);
       return next;
     });
+
+  const archivedPrinters = printers.filter((printer) => printer.archivedAt);
+  const shownPrinters = showArchived ? printers : printers.filter((printer) => !printer.archivedAt);
+  const pairingExpired = (agent: PrintingConsoleAgent) => agent.status === "PENDING_PAIRING" && (!agent.pairingExpiresAt || Date.parse(agent.pairingExpiresAt) < nowMs);
+  const stalePairings = agents.filter(pairingExpired);
+  const shownAgents = showPairings ? agents : agents.filter((agent) => !pairingExpired(agent));
 
   const columns: DataTableColumn<PrintJobDto>[] = [
     ...(can.managePrinters
@@ -244,21 +321,36 @@ export function PrintingConsoleView({
     { key: "type", header: "Job", primary: true, text: (job) => `${JOB_TYPE_LABELS[job.jobType]}${job.isReprint ? " (reprint)" : ""}` },
     { key: "reference", header: "Ticket / order", text: jobReference },
     { key: "printer", header: "Printer", truncate: true, text: (job) => job.printer.name },
-    { key: "status", header: "Status", cell: (job) => <StatusBadge domain="printJob" status={job.status} /> },
+    {
+      key: "status",
+      header: "Status",
+      cell: (job) => (
+        <span className="flex flex-col gap-1">
+          <StatusBadge domain="printJobDisplay" status={job.displayStatus} />
+          {job.displayStatus === "RETRYING" ? <span className="text-caption text-fg-secondary">Next try {untilText(job.nextAttemptAt, nowMs)}</span> : null}
+        </span>
+      ),
+      text: (job) => job.displayStatus,
+    },
     { key: "attempts", header: "Attempts", numeric: true, text: (job) => `${job.attemptCount}/${job.maxAttempts}` },
     {
       key: "error",
       header: "Last error",
       truncate: true,
-      cell: (job) =>
-        job.lastErrorCode ? (
-          <span className="text-status-danger">
-            {job.lastErrorCode}
-            {job.lastErrorMessage ? ` — ${job.lastErrorMessage}` : ""}
+      cell: (job) => {
+        if (job.status === "CANCELLED") return <span className="text-fg-secondary">{job.cancelReason ? `Cancelled: ${job.cancelReason}` : "Cancelled"}</span>;
+        if (!job.lastErrorCode) return "—";
+        const described = describePrintError(job.lastErrorCode, job.printer.name, job.lastErrorMessage);
+        return (
+          <span className="flex flex-col gap-0.5" title={job.lastErrorMessage ?? described.technical}>
+            <span className="text-status-danger">{described.user}</span>
+            <span className="text-caption text-fg-secondary">
+              {described.code}
+              {job.lastErrorMessage ? ` — ${job.lastErrorMessage}` : ""}
+            </span>
           </span>
-        ) : (
-          "—"
-        ),
+        );
+      },
       text: (job) => (job.lastErrorCode ? `${job.lastErrorCode}${job.lastErrorMessage ? ` — ${job.lastErrorMessage}` : ""}` : "—"),
     },
     {
@@ -290,7 +382,7 @@ export function PrintingConsoleView({
               }`}
             >
               {tab.label}
-              <span className="text-numeric text-caption">{jobs.filter((job) => (tab.jobStatus ? job.status === tab.jobStatus : true)).length}</span>
+              <span className="text-numeric text-caption">{jobs.filter((job) => (tab.display ? job.displayStatus === tab.display : true)).length}</span>
             </button>
           ))}
         </div>
@@ -361,14 +453,22 @@ export function PrintingConsoleView({
             description="Kitchen tickets are queued when an order is accepted, and receipts when you print one from an order."
           />
         }
-        rowActions={(job) =>
-          can.retryJobs && job.status === "FAILED" ? (
-            <Button size="sm" variant="secondary" loading={busyId === job.id} loadingLabel="Queueing…" onClick={() => void retry(job)}>
-              <Icon icon={RefreshCw} size={16} />
-              Retry
-            </Button>
-          ) : null
-        }
+        rowActions={(job) => (
+          <div className="flex flex-wrap gap-2">
+            {can.retryJobs && job.status === "FAILED" ? (
+              <Button size="sm" variant="secondary" loading={busyId === job.id} loadingLabel="Queueing…" onClick={() => void retry(job)}>
+                <Icon icon={RefreshCw} size={16} />
+                Retry
+              </Button>
+            ) : null}
+            {can.managePrinters && cancellable(job) ? (
+              <Button size="sm" variant="ghost" onClick={() => setCancelling(job)}>
+                <Icon icon={Ban} size={16} />
+                Cancel
+              </Button>
+            ) : null}
+          </div>
+        )}
       />
     </div>
   );
@@ -387,7 +487,13 @@ export function PrintingConsoleView({
           </Button>
         </div>
       )}
-      {printers.length === 0 ? (
+      {archivedPrinters.length > 0 ? (
+        <label className="flex items-center gap-2 text-label text-fg-secondary">
+          <input type="checkbox" className="size-4 accent-action-primary" checked={showArchived} onChange={() => setShowArchived((open) => !open)} />
+          Show archived printers ({archivedPrinters.length})
+        </label>
+      ) : null}
+      {shownPrinters.length === 0 ? (
         <Card>
           <EmptyState
             icon={DOMAIN_ICONS.printer}
@@ -397,8 +503,13 @@ export function PrintingConsoleView({
         </Card>
       ) : (
         <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {printers.map((printer) => {
+          {shownPrinters.map((printer) => {
             const health = HEALTH[printer.health];
+            const waiting = jobs.filter((job) => job.printer.id === printer.id && job.displayStatus === "RETRYING");
+            const nextTry = waiting.map((job) => job.nextAttemptAt).sort()[0];
+            const key = addressKey(printer);
+            const sharedWith = printer.isActive && key ? printers.filter((other) => other.id !== printer.id && other.isActive && addressKey(other) === key) : [];
+            const lastFailure = printer.lastErrorCode ? describePrintError(printer.lastErrorCode, printer.name) : null;
             return (
               <li key={printer.id} className="flex">
                 <Card className="w-full gap-3">
@@ -406,12 +517,29 @@ export function PrintingConsoleView({
                     <CardTitle>{printer.name}</CardTitle>
                     <CardDescription>{PURPOSE_LABELS[printer.purpose]}</CardDescription>
                   </CardHeader>
+                  {waiting.length > 0 ? (
+                    <p role="status" className="flex items-start gap-2 rounded-xl border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-caption text-status-warning">
+                      <Icon icon={RefreshCw} size={16} />
+                      <span>
+                        Printer offline — {waiting.length === 1 ? "1 ticket" : `${waiting.length} tickets`} waiting, retrying automatically
+                        {nextTry ? ` · next try ${untilText(nextTry, nowMs)}` : ""}
+                      </span>
+                    </p>
+                  ) : null}
+                  {sharedWith.length > 0 ? (
+                    <p className="flex items-start gap-2 rounded-xl border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-caption text-status-warning">
+                      <Icon icon={TriangleAlert} size={16} />
+                      <span>Same address as {sharedWith.map((other) => other.name).join(", ")}. Keep one printer per device, or tickets may go to two agents.</span>
+                    </p>
+                  ) : null}
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-body">
                     <dt className="text-fg-secondary">Connection</dt>
                     <dd className="text-numeric text-fg-primary">
                       {printer.connectionType}
                       {printer.connectionAddress ? ` · ${printer.connectionAddress}` : ""}
                     </dd>
+                    <dt className="text-fg-secondary">Model</dt>
+                    <dd className="text-fg-primary">{profileOf(printer.profile).label}</dd>
                     <dt className="text-fg-secondary">Paper</dt>
                     <dd className="text-fg-primary">{printer.paperWidthMm} mm</dd>
                     <dt className="text-fg-secondary">Station</dt>
@@ -425,7 +553,32 @@ export function PrintingConsoleView({
                     <dd className="text-fg-primary">
                       {printer.healthReportedAt ? formatInZone(printer.healthReportedAt, timezone, "datetime", "en-GB") : "Never"}
                     </dd>
+                    <dt className="text-fg-secondary">Last delivered</dt>
+                    <dd className="text-fg-primary">{printer.lastDeliveredAt ? formatInZone(printer.lastDeliveredAt, timezone, "datetime", "en-GB") : "Never"}</dd>
+                    <dt className="text-fg-secondary">Last failure</dt>
+                    <dd className="text-fg-primary">
+                      {printer.lastFailedAt ? `${formatInZone(printer.lastFailedAt, timezone, "datetime", "en-GB")}${lastFailure ? ` · ${lastFailure.code}` : ""}` : "None"}
+                    </dd>
                   </dl>
+                  {lastFailure && printer.lastFailedAt && (!printer.lastDeliveredAt || printer.lastFailedAt > printer.lastDeliveredAt) ? (
+                    <p className="text-caption text-status-danger">{lastFailure.user}</p>
+                  ) : null}
+                  {can.managePrinters && printer.isActive && <PrinterCheckPanel printerId={printer.id} />}
+                  {can.managePrinters && !printer.isActive && (
+                    <div className="mt-auto flex flex-wrap gap-2 pt-4">
+                      {printer.archivedAt ? (
+                        <Button size="sm" variant="secondary" onClick={() => void setArchived(printer, false)}>
+                          <Icon icon={ArchiveRestore} size={16} />
+                          Restore
+                        </Button>
+                      ) : (
+                        <Button size="sm" variant="ghost" onClick={() => void setArchived(printer, true)}>
+                          <Icon icon={Archive} size={16} />
+                          Archive
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {can.managePrinters && printer.isActive && (
                     <div className="mt-auto flex flex-wrap gap-2 pt-4">
                       <Button size="sm" variant="secondary" onClick={() => setEditing({ open: true, printer })}>
@@ -459,6 +612,19 @@ export function PrintingConsoleView({
           </Button>
         </div>
       )}
+      {stalePairings.length > 0 ? (
+        <div className="flex flex-col gap-2 rounded-2xl border border-border-subtle bg-card p-3 md:flex-row md:items-center md:justify-between">
+          <label className="flex items-center gap-2 text-label text-fg-secondary">
+            <input type="checkbox" className="size-4 accent-action-primary" checked={showPairings} onChange={() => setShowPairings((open) => !open)} />
+            Show {stalePairings.length} expired pairing attempt{stalePairings.length === 1 ? "" : "s"}
+          </label>
+          {can.manageAgents ? (
+            <Button size="sm" variant="secondary" onClick={() => void clearPairings()}>
+              Close expired pairing attempts
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {agents.length === 0 ? (
         <Card>
           <EmptyState
@@ -469,7 +635,7 @@ export function PrintingConsoleView({
         </Card>
       ) : (
         <ul className="flex flex-col gap-3">
-          {agents.map((agent) => (
+          {shownAgents.map((agent) => (
             <li key={agent.id}>
               <Card className="flex-row items-center gap-4">
                 <IconTile icon={agent.online ? DOMAIN_ICONS.agentOnline : DOMAIN_ICONS.agentOffline} tone={agent.online ? "success" : "neutral"} label="" />
@@ -482,8 +648,14 @@ export function PrintingConsoleView({
                         ? `Last seen ${formatInZone(agent.lastSeenAt, timezone, "datetime", "en-GB")}`
                         : "Never connected"}
                     {agent.agentVersion ? ` · v${agent.agentVersion}` : ""}
+                    {agent.osInfo ? ` · ${agent.osInfo}` : ""}
                     {agent.tokenPrefix ? ` · token ${agent.tokenPrefix}…` : ""}
                   </p>
+                  {agent.status === "ACTIVE" ? (
+                    <p className="text-caption text-fg-secondary">
+                      Printers: {printers.filter((printer) => printer.printAgentId === agent.id && printer.isActive).map((printer) => printer.name).join(", ") || "none assigned"}
+                    </p>
+                  ) : null}
                 </div>
                 <StatusBadge domain="agent" status={agent.status === "REVOKED" ? "REVOKED" : agent.online ? "ONLINE" : "OFFLINE"} />
                 {can.manageAgents && agent.status !== "REVOKED" && (
@@ -587,10 +759,33 @@ export function PrintingConsoleView({
         onConfirm={() => (revoking ? revoke(revoking) : undefined)}
       />
       <ConfirmDialog
+        open={cancelling !== null}
+        onClose={() => {
+          setCancelling(null);
+          setCancelReason("");
+        }}
+        title={cancelling ? `Cancel this ${JOB_TYPE_LABELS[cancelling.jobType].toLowerCase()}?` : "Cancel print job?"}
+        description="It will not be printed. Only queued, retrying and failed jobs can be cancelled; the cancellation is recorded."
+        confirmLabel="Cancel job"
+        tone="destructive"
+        onConfirm={() => (cancelling ? cancelJob(cancelling) : undefined)}
+      >
+        <label className="flex flex-col gap-1.5 text-label text-fg-primary">
+          Reason (optional)
+          <input
+            type="text"
+            maxLength={200}
+            value={cancelReason}
+            onChange={(event) => setCancelReason(event.target.value)}
+            className="h-11 rounded-xl border border-border-strong bg-canvas px-3 text-body text-fg-primary"
+          />
+        </label>
+      </ConfirmDialog>
+      <ConfirmDialog
         open={archiving !== null}
         onClose={() => setArchiving(null)}
         title={archiving && "jobIds" in archiving ? `Remove ${archiving.jobIds.length} job${archiving.jobIds.length === 1 ? "" : "s"} from the history?` : `Clear finished jobs older than ${olderThanDays} days?`}
-        description="Printed and failed jobs disappear from this list. Jobs still waiting or printing are never touched, and the record of what was printed stays in the audit log."
+        description="Delivered, failed and cancelled jobs disappear from this list. Jobs still waiting or printing are never touched, and the record of what was printed stays in the audit log."
         tone="destructive"
         confirmLabel="Remove from history"
         onConfirm={() => (archiving ? archive(archiving) : undefined)}

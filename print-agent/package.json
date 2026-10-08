@@ -1,6 +1,6 @@
 {
   "name": "rasoios-print-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "RASOIOS local print agent: pairs with one restaurant, claims its print jobs and prints them on LAN/USB ESC/POS thermal printers (ADR-007).",
   "license": "UNLICENSED",

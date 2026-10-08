@@ -67,4 +67,4 @@ $settings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Prints FlowDineOS kitchen tickets and bills on this restaurant''s printers.' | Out-Null
 Start-ScheduledTask -TaskName $TaskName
 
-Write-Host "Installed and started '$TaskName'. Check Printing -> Agents in RASOIOS: this PC should show as online within a minute."
+Write-Host "Installed and started '$TaskName'. Check Printing -> Agents in FlowDineOS: this PC should show as online within a minute."

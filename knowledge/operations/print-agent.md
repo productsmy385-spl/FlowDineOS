@@ -101,10 +101,14 @@ stops working even if a copy was kept.
 
 | Symptom in the console | Likely cause | What to do |
 |---|---|---|
-| Agent **offline** | PC off, service stopped, no internet | Check the PC; `status` command; restart the service |
-| Printer **Offline**, job retrying, error `PRINTER_OFFLINE` | Printer off, IP changed, wrong port, different network | Power, cable/Wi-Fi, reserve the IP, fix the address in the console |
-| Error `TIMEOUT` | Printer reachable but not accepting data — often out of paper or cover open | Load paper, close cover, press FEED; retry the job |
-| Error `INVALID_ADDRESS` | Address not usable on this OS (e.g. a Windows share name on Linux) | Correct the address per §2 |
+| Agent **offline** / `AGENT_OFFLINE`, `AGENT_NOT_RESPONDING` | PC off, service stopped, no internet, or an agent older than 0.2.0 (cannot run Test connection) | Check the PC; `status` command; restart the service; update the agent |
+| `CONNECTION_TIMEOUT` — "is unreachable — it did not answer" | Printer off, its IP changed (DHCP), or it is on another network / behind AP isolation | **Test connection**; `ping` and `Test-NetConnection <ip> -Port 9100` from the agent PC; **Find nearby printers**; reserve the IP (printing-hardware-checklist.md) |
+| `PRINTER_UNREACHABLE` | No route to the address (wrong subnet, cable unplugged) | Same router and subnet as the agent PC; fix the address |
+| `CONNECTION_REFUSED` | Printer answers but not on that port | Port is usually 9100; nothing else holding the printer |
+| `CONNECTION_RESET` / `PRINT_SEND_FAILED` | Printer restarting or dropped the connection | Retried automatically |
+| `DELIVERY_UNKNOWN` | Printer stopped part-way — paper out, cover open, or jam | Check paper and cover; **Retry** only if nothing came out (never retried automatically) |
+| `PRINT_JOB_EXPIRED` | The printer stayed unavailable for the whole retry window (KOT 30 min) | Fix the printer, then **Retry** |
+| `INVALID_PRINTER_CONFIGURATION` | Address not usable (public IP, hostname, a Windows share name on Linux) | Correct the address per §2 |
 | USB error mentioning permission | Service account cannot write the device | Linux: ensure `rasoios-agent` is in group `lp`; Windows: re-share the printer |
 | Agent stops with "Pair the agent again" | Agent revoked or re-paired elsewhere | Create a new code and re-run the installer |
 | Occasional duplicate ticket | Agent crashed between printing and confirming *and* its journal was lost | Rare by design (at-least-once, ADR-007 §5); investigate crashes |

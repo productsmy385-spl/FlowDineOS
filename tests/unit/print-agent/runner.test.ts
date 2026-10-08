@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AgentApiError, type AckBody, type AgentApiLike, type AgentPrinter, type ClaimedJob, type HeartbeatBody } from "@/print-agent/src/api";
+import { AgentApiError, type AckBody, type AgentApiLike, type AgentPrinter, type ClaimedJob, type HeartbeatBody, type PrinterCheckReport, type PrinterCheckRequest } from "@/print-agent/src/api";
 import { PrintedJournal } from "@/print-agent/src/journal";
 import { createLogger } from "@/print-agent/src/logger";
 import { FatalAgentError, IDLE_POLL_MS, MAX_NETWORK_BACKOFF_MS, PrintAgentRunner } from "@/print-agent/src/runner";
@@ -47,6 +47,10 @@ class ScriptedServer implements AgentApiLike {
   outage = 0;
   revoked = false;
   printers: AgentPrinter[] = [printer];
+  checks: PrinterCheckRequest[] = [];
+  checkReports: Array<{ checkId: string } & PrinterCheckReport> = [];
+  /** Jobs per claim: the real server gives at most one per printer (lib/data/printing.ts claimJobs). */
+  perClaim = 1;
 
   private gate() {
     if (this.revoked) throw new AgentApiError("AUTH", "revoked", 401, "INVALID_AGENT_TOKEN");
@@ -66,7 +70,12 @@ class ScriptedServer implements AgentApiLike {
   }
   async claim() {
     this.gate();
-    return { jobs: this.queue.splice(0, 1) };
+    return { jobs: this.queue.splice(0, this.perClaim), checks: this.checks.splice(0) };
+  }
+  async reportCheck(checkId: string, report: PrinterCheckReport) {
+    this.gate();
+    this.checkReports.push({ checkId, ...report });
+    return { checkId, status: "COMPLETED" };
   }
   async ack(jobId: string, body: AckBody) {
     this.gate();
@@ -172,32 +181,32 @@ describe("TC-AGENT-012 server unreachable", () => {
 });
 
 describe("failures are reported, never hidden", () => {
-  it("printer offline → FAILED with PRINTER_OFFLINE and health OFFLINE; nothing journaled", async () => {
+  it("printer switched off → FAILED with CONNECTION_REFUSED and health OFFLINE; nothing journaled", async () => {
     const { runner, journal } = await newRunner();
     await simulator.setMode("offline");
     const kot = job("KOT #9");
     server.queue.push(kot);
     await runner.cycle();
 
-    expect(server.acks[0]).toMatchObject({ jobId: kot.jobId, result: "FAILED", errorCode: "PRINTER_OFFLINE" });
+    expect(server.acks[0]).toMatchObject({ jobId: kot.jobId, result: "FAILED", errorCode: "CONNECTION_REFUSED" });
     expect(runner.health.get(printer.printerId)?.health).toBe("OFFLINE");
     expect(journal.has(kot.jobId)).toBe(false);
     expect(server.heartbeats[0]!.printers[0]).toMatchObject({ health: "OFFLINE" });
   });
 
-  it("a payload that is not a PrintDocument is FAILED as INVALID_PAYLOAD and never sent to the printer", async () => {
+  it("a payload that is not a PrintDocument is FAILED as ESC_POS_RENDER_FAILED and never sent to the printer", async () => {
     const { runner } = await newRunner();
     server.queue.push(job("x", { payload: { version: 1, widthMm: 80, blocks: [{ type: "raw", bytes: "1b70" }] } }));
     await runner.cycle();
-    expect(server.acks[0]).toMatchObject({ result: "FAILED", errorCode: "INVALID_PAYLOAD" });
+    expect(server.acks[0]).toMatchObject({ result: "FAILED", errorCode: "ESC_POS_RENDER_FAILED" });
     expect(simulator.tickets).toHaveLength(0);
   });
 
-  it("a job for a printer not assigned to this agent is FAILED as UNKNOWN_PRINTER", async () => {
+  it("a job for a printer not assigned to this agent is FAILED as PRINTER_NOT_FOUND", async () => {
     const { runner } = await newRunner();
     server.queue.push(job("x", { printerId: randomUUID() }));
     await runner.cycle();
-    expect(server.acks[0]).toMatchObject({ result: "FAILED", errorCode: "UNKNOWN_PRINTER" });
+    expect(server.acks[0]).toMatchObject({ result: "FAILED", errorCode: "PRINTER_NOT_FOUND" });
     expect(simulator.tickets).toHaveLength(0);
   });
 
@@ -213,5 +222,62 @@ describe("failures are reported, never hidden", () => {
     const running = runner.run(controller.signal);
     controller.abort();
     await expect(running).resolves.toBeUndefined();
+  });
+});
+
+describe("printing hardening 2026-10-08", () => {
+  it("Test connection: the agent connects and closes, reports the result, and prints nothing", async () => {
+    const { runner } = await newRunner();
+    const checkId = randomUUID();
+    server.checks.push({ checkId, printerId: printer.printerId });
+    await runner.cycle();
+    expect(server.checkReports).toEqual([expect.objectContaining({ checkId, ok: true })]);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(simulator.tickets).toHaveLength(0);
+
+    await simulator.setMode("offline");
+    const failingId = randomUUID();
+    server.checks.push({ checkId: failingId, printerId: printer.printerId });
+    await runner.cycle();
+    expect(server.checkReports[1]).toMatchObject({ checkId: failingId, ok: false, errorCode: "CONNECTION_REFUSED" });
+    expect(runner.health.get(printer.printerId)?.health).toBe("OFFLINE");
+  });
+
+  it("a check for a printer this agent does not own is reported as PRINTER_NOT_FOUND", async () => {
+    const { runner } = await newRunner();
+    server.checks.push({ checkId: randomUUID(), printerId: randomUUID() });
+    await runner.cycle();
+    expect(server.checkReports[0]).toMatchObject({ ok: false, errorCode: "PRINTER_NOT_FOUND" });
+  });
+
+  it("one lane per printer: an unreachable kitchen printer does not hold up the bar printer's ticket", async () => {
+    const bar: AgentPrinter = { ...printer, printerId: randomUUID(), name: "Bar Printer", connectionAddress: "192.168.1.51:9100" };
+    server.printers = [printer, bar];
+    server.perClaim = 2;
+    const j = new PrintedJournal(path.join(dir, "journal.json"), logger);
+    await j.load();
+    const runner = new PrintAgentRunner({
+      api: server,
+      journal: j,
+      logger,
+      // The kitchen printer never answers (TEST-NET-1 is never routed); the bar printer is the simulator.
+      transportFor: (p) => (p.printerId === printer.printerId ? new LanTransport("192.0.2.1", 9100, { connectMs: 1_500, writeMs: 500 }) : new LanTransport(simulator.host, simulator.port, { connectMs: 1_000, writeMs: 1_000 })),
+      sleep: async () => undefined,
+      random: () => 0.5,
+    });
+    await runner.heartbeat();
+    const kitchenJob = job("KOT #1 kitchen");
+    const barJob = job("KOT #2 bar", { printerId: bar.printerId });
+    server.queue.push(kitchenJob, barJob);
+
+    const barPrinted = simulator.waitForTickets(1);
+    const started = Date.now();
+    const cycle = runner.cycle();
+    await barPrinted;
+    // The bar ticket came out while the kitchen printer was still timing out.
+    expect(Date.now() - started).toBeLessThan(1_400);
+    await cycle;
+    expect(server.acks.find((a) => a.jobId === barJob.jobId)).toMatchObject({ result: "PRINTED" });
+    expect(server.acks.find((a) => a.jobId === kitchenJob.jobId)).toMatchObject({ result: "FAILED" });
   });
 });

@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createLogger } from "@/print-agent/src/logger";
 import { JOURNAL_RETENTION_MS, PrintedJournal } from "@/print-agent/src/journal";
 import { transportFor } from "@/print-agent/src/transports";
-import { LanTransport } from "@/print-agent/src/transports/lan";
-import { PrintTransportError } from "@/print-agent/src/transports/types";
+import { LanTransport, mapSocketError } from "@/print-agent/src/transports/lan";
+import { PrintTransportError, UNREACHABLE_CODES } from "@/print-agent/src/transports/types";
 import { usbDevicePath } from "@/print-agent/src/transports/usb";
 import { decodeEscPos } from "@/tools/printer-simulator/decode";
 import { startPrinterSimulator, type PrinterSimulator } from "@/tools/printer-simulator/server";
@@ -35,24 +35,25 @@ describe("TC-AGENT-014 LAN transport", () => {
     expect(simulator.tickets).toHaveLength(0);
   });
 
-  it("printer switched off → PRINTER_OFFLINE", async () => {
+  it("printer switched off → CONNECTION_REFUSED (its health shows Offline)", async () => {
     await simulator.setMode("offline");
     const error = await new LanTransport(simulator.host, simulator.port, quick).send(Buffer.from("x")).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PrintTransportError);
-    expect((error as PrintTransportError).code).toBe("PRINTER_OFFLINE");
-    await expect(new LanTransport(simulator.host, simulator.port, quick).probe()).rejects.toMatchObject({ code: "PRINTER_OFFLINE" });
+    expect((error as PrintTransportError).code).toBe("CONNECTION_REFUSED");
+    expect(UNREACHABLE_CODES.has("CONNECTION_REFUSED")).toBe(true);
+    await expect(new LanTransport(simulator.host, simulator.port, quick).probe()).rejects.toMatchObject({ code: "CONNECTION_REFUSED" });
 
     await simulator.setMode("normal");
     await new LanTransport(simulator.host, simulator.port, quick).send(Buffer.from("back\n"));
     expect(await simulator.waitForTickets(1)).toHaveLength(1);
   });
 
-  it("an address that never answers → TIMEOUT (bounded, not hung)", async () => {
+  it("an address that never answers → CONNECTION_TIMEOUT, never a paper problem (bounded, not hung)", async () => {
     // TEST-NET-1 (RFC 5737) is never routed; the connect attempt hangs until our timeout fires.
     const started = Date.now();
     const error = await new LanTransport("192.0.2.1", 9100, { connectMs: 300, writeMs: 300 }).probe().catch((e: unknown) => e);
     expect(Date.now() - started).toBeLessThan(5_000);
-    expect(["TIMEOUT", "PRINTER_OFFLINE"]).toContain((error as PrintTransportError).code);
+    expect(["CONNECTION_TIMEOUT", "PRINTER_UNREACHABLE"]).toContain((error as PrintTransportError).code);
   });
 
   it("refuses public, loopback and hostname addresses before connecting (SC-PRINT-06)", () => {
@@ -99,7 +100,8 @@ describe("TC-AGENT-015 simulator fault modes", () => {
     // is that the agent is never stuck on a dead printer and never claims paper came out.
     const error = await new LanTransport(simulator.host, simulator.port, { connectMs: 1_000, writeMs: 500 }).send(payload).catch((e: unknown) => e);
     expect(Date.now() - started).toBeLessThan(3_000);
-    if (error) expect(error).toMatchObject({ code: "TIMEOUT" });
+    // A printer that took part of the ticket and stopped may have printed it: DELIVERY_UNKNOWN, never retried blindly.
+    if (error) expect(["DELIVERY_UNKNOWN", "PRINT_SEND_FAILED"]).toContain((error as PrintTransportError).code);
     expect(simulator.tickets).toHaveLength(0);
   });
 });
@@ -136,5 +138,24 @@ describe("printed-job journal (ADR-007 §5)", () => {
     await journal.load();
     expect(journal.size).toBe(0);
     expect((await readdir(dir)).some((name) => name.startsWith("journal.json.corrupt-"))).toBe(true);
+  });
+});
+
+describe("TC-AGENT-016 every socket outcome maps to one catalogue code (printing audit 2026-10-08)", () => {
+  const err = (code: string) => Object.assign(new Error(code), { code }) as NodeJS.ErrnoException;
+  it("before any byte is sent", () => {
+    expect(mapSocketError(err("ECONNREFUSED"), "192.168.1.103", 9100, 0).code).toBe("CONNECTION_REFUSED");
+    expect(mapSocketError(err("ETIMEDOUT"), "192.168.1.103", 9100, 0).code).toBe("CONNECTION_TIMEOUT");
+    for (const code of ["EHOSTUNREACH", "ENETUNREACH", "EHOSTDOWN"]) expect(mapSocketError(err(code), "192.168.1.103", 9100, 0).code, code).toBe("PRINTER_UNREACHABLE");
+    for (const code of ["ECONNRESET", "EPIPE"]) expect(mapSocketError(err(code), "192.168.1.103", 9100, 0).code, code).toBe("CONNECTION_RESET");
+    expect(mapSocketError(err("EWHATEVER"), "192.168.1.103", 9100, 0).code).toBe("PRINT_SEND_FAILED");
+  });
+
+  it("after part of the ticket was sent, any failure is DELIVERY_UNKNOWN", () => {
+    for (const code of ["ECONNRESET", "EPIPE", "ETIMEDOUT"]) expect(mapSocketError(err(code), "192.168.1.103", 9100, 512).code, code).toBe("DELIVERY_UNKNOWN");
+  });
+
+  it("the technical message names the address and port, never anything secret", () => {
+    expect(mapSocketError(err("ETIMEDOUT"), "192.168.1.103", 9100, 0).message).toBe("TCP 192.168.1.103:9100: no answer to the connection");
   });
 });

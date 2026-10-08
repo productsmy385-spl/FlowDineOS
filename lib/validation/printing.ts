@@ -10,6 +10,7 @@
 import { PrintJobStatus, PrintJobType, PrinterConnection, PrinterHealth, PrinterPurpose } from "@prisma/client";
 import { z } from "zod";
 import { isPrivateIpv4, isPrivateLanAddress, USB_ADDRESS_PATTERN } from "@/lib/print/address";
+import { PRINTER_PROFILE_KEYS, type PrinterProfileKey } from "@/lib/print/profiles";
 import { boundedText, optionalText, strictObject, uuidParam } from "./core";
 
 // ─── Printer addresses (SC-PRINT-06) — shared with the local agent via lib/print/address.ts ───
@@ -45,6 +46,9 @@ export type PrintJobPollInput = z.input<typeof printJobPollSchema>;
 const paperWidthField = z.union([z.literal(58), z.literal(80)], { errorMap: () => ({ message: "Choose 58 mm or 80 mm" }) });
 const addressField = boundedText(255, { label: "Connection address" });
 
+/** A capability profile key (lib/print/profiles.ts). */
+const profileField = z.enum(PRINTER_PROFILE_KEYS as [PrinterProfileKey, ...PrinterProfileKey[]], { errorMap: () => ({ message: "Choose a printer model" }) });
+
 export const createPrinterSchema = strictObject({
   name: boundedText(60, { label: "Printer name" }),
   purpose: z.nativeEnum(PrinterPurpose),
@@ -53,6 +57,7 @@ export const createPrinterSchema = strictObject({
   paperWidthMm: paperWidthField,
   kitchenSectionId: uuidParam.nullish().transform((value) => value ?? null),
   printAgentId: uuidParam.nullish().transform((value) => value ?? null),
+  profile: profileField.optional(),
 }).superRefine((value, ctx) => {
   const issue = connectionAddressIssue(value.connectionType, value.connectionAddress);
   if (issue) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionAddress"], message: issue });
@@ -70,6 +75,7 @@ export const updatePrinterSchema = strictObject({
   // station or an agent.
   kitchenSectionId: uuidParam.nullable().optional(),
   printAgentId: uuidParam.nullable().optional(),
+  profile: profileField.optional(),
 }).superRefine((value, ctx) => {
   if (value.connectionAddress === undefined) return;
   if (value.connectionType === undefined) {
@@ -92,6 +98,28 @@ export type TestPrintInput = z.input<typeof testPrintSchema>;
 
 export const retryPrintJobSchema = strictObject({ jobId: uuidParam });
 export type RetryPrintJobInput = z.input<typeof retryPrintJobSchema>;
+
+/** Cancel a queued, retrying or failed job (2026-10-08); the reason is optional and kept on the job. */
+export const cancelPrintJobSchema = strictObject({ jobId: uuidParam, reason: optionalText(200, "Reason") });
+export type CancelPrintJobInput = z.input<typeof cancelPrintJobSchema>;
+
+/** Test connection of one printer, and reading one check back (2026-10-08). */
+export const printerCheckIdSchema = strictObject({ checkId: uuidParam });
+export type PrinterCheckIdInput = z.input<typeof printerCheckIdSchema>;
+
+/** RH-AGT-07 — the agent's result of one connection check. */
+export const agentCheckReportSchema = strictObject({
+  ok: z.boolean(),
+  errorCode: z
+    .string()
+    .trim()
+    .max(40)
+    .regex(/^[A-Z][A-Z0-9_]*$/, "Use an UPPER_SNAKE_CASE error code")
+    .optional(),
+  detail: optionalText(200, "Detail"),
+  elapsedMs: z.number().int().min(0).max(120_000),
+});
+export type AgentCheckReportInput = z.input<typeof agentCheckReportSchema>;
 
 /** RASOIOS-ADR-022 — remove finished jobs from the history: chosen ones, or all older than N days. */
 export const archivePrintJobsSchema = z.union([

@@ -119,7 +119,7 @@ describe("TC-PRINT-011 printer management (SA-PRN-01…03)", () => {
     const result = dataOf(await invokeAction(deactivatePrinterAction, { printerId: printer.id }));
     expect(result).toMatchObject({ failedJobs: 1, printer: { isActive: false, health: "UNKNOWN" } });
 
-    expect(await db.printJob.findUniqueOrThrow({ where: { id: pending.id } })).toMatchObject({ status: "FAILED", lastErrorCode: "PRINTER_DEACTIVATED" });
+    expect(await db.printJob.findUniqueOrThrow({ where: { id: pending.id } })).toMatchObject({ status: "FAILED", lastErrorCode: "PRINTER_DISABLED" });
     expect((await db.printJob.findUniqueOrThrow({ where: { id: processing.id } })).status).toBe("PROCESSING");
     expect((await db.printJob.findUniqueOrThrow({ where: { id: printed.id } })).status).toBe("PRINTED");
 

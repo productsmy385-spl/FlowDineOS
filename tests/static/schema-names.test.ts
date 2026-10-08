@@ -15,13 +15,14 @@ const { models, enums } = Prisma.dmmf.datamodel;
 describe("TC-DB-003 schema names", () => {
   // 28 since migration 0002 added WEBSITE_SECTION (ADR-013 §6); 29 since 0003 added PRINTER_DISCOVERY (ADR-015).
   // 30 since 0004 added MEDIA_ASSET (ADR-017, which superseded Q-009 A); 32 since 0005 added STAFF_CREDENTIAL and
-  // STAFF_SESSION (ADR-019 — staff daily-password login and the attendance they double as).
-  it("has the 35 unconditional entities", () => {
+  // STAFF_SESSION (ADR-019 — staff daily-password login and the attendance they double as). 36 since 0010 added
+  // PRINTER_CHECK (printing hardening 2026-10-08: "Test connection" without a print job).
+  it("has the 36 unconditional entities", () => {
     expect(models.map((m) => m.name).sort()).toEqual(
       [
         "AuditLog", "BusinessDayClose", "Customer", "DailyMenu", "DailyMenuItem", "DemoRequest", "DiningTable", "KitchenSection", "KotItem",
         "KotTicket", "MediaAsset", "MenuCategory", "MenuItem", "MenuItemAddon", "MenuItemVariant", "Order", "OrderItem",
-        "OrderItemAddon", "PrintAgent", "PrintJob", "Printer", "PrinterDiscovery", "RateLimitBucket", "Restaurant", "RestaurantHours",
+        "OrderItemAddon", "PrintAgent", "PrintJob", "Printer", "PrinterCheck", "PrinterDiscovery", "RateLimitBucket", "Restaurant", "RestaurantHours",
         "SocialPost", "StaffCredential", "StaffSession", "Tenant", "TenantCounter", "TenantFeature", "Transaction", "User", "UserTenant", "WebsiteSection",
       ].sort(),
     );

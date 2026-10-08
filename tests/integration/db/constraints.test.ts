@@ -71,6 +71,9 @@ async function buildFixture() {
   const agent = await createPrintAgent(db, tenant.id, user.id);
   const printer = await createPrinter(db, tenant.id, { printAgentId: agent.id });
   const printJob = await createPrintJob(db, tenant.id, printer.id);
+  const printerCheck = await db.printerCheck.create({
+    data: { tenantId: tenant.id, printerId: printer.id, printAgentId: agent.id, requestedByUserId: user.id, status: "COMPLETED", ok: true, elapsedMs: 5, completedAt: new Date() },
+  });
   await db.tenantCounter.create({
     data: { tenantId: tenant.id, counterType: "ORDER", businessDate: new Date("2026-09-15T00:00:00Z"), lastValue: 1 },
   });
@@ -130,7 +133,7 @@ async function buildFixture() {
   const diningTable = await db.diningTable.create({ data: { tenantId: tenant.id, label: "T1", publicCode: `c${randomUUID().replace(/-/g, "").slice(0, 11)}` } });
   await db.tenantFeature.create({ data: { tenantId: tenant.id, featureKey: "SOCIAL", enabled: false } });
   const demoRequest = await db.demoRequest.create({ data: { name: "N", businessName: "B", phone: "+919390038335", email: "d@example.test", city: "C", preferredDate: new Date("2030-01-01T00:00:00Z"), preferredTime: "10:00" } });
-  return { demoRequest, diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
+  return { demoRequest, diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, printerCheck, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
 }
 
 beforeAll(async () => {
@@ -212,7 +215,13 @@ const CHECK_CASES: CheckCase[] = [
   { constraint: "printers_paper_width_mm_check", table: "printers", set: "paper_width_mm = 72", where: byId(() => f.printer.id) },
   { constraint: "print_jobs_printed_at_check", table: "print_jobs", set: "status = 'PRINTED'", where: byId(() => f.printJob.id) },
   { constraint: "print_jobs_attempt_count_check", table: "print_jobs", set: "attempt_count = -1", where: byId(() => f.printJob.id) },
-  { constraint: "print_jobs_max_attempts_check", table: "print_jobs", set: "max_attempts = 11", where: byId(() => f.printJob.id) },
+  { constraint: "print_jobs_max_attempts_check", table: "print_jobs", set: "max_attempts = 31", where: byId(() => f.printJob.id) },
+  // Printing hardening (migration 0010, 2026-10-08)
+  { constraint: "print_jobs_cancelled_by_check", table: "print_jobs", set: "cancelled_at = now()", where: byId(() => f.printJob.id) },
+  { constraint: "printers_profile_check", table: "printers", set: "profile = 'tvs rp3230'", where: byId(() => f.printer.id) },
+  { constraint: "printers_archived_inactive_check", table: "printers", set: "archived_at = now(), is_active = true", where: byId(() => f.printer.id) },
+  { constraint: "printer_checks_elapsed_ms_check", table: "printer_checks", set: "elapsed_ms = -1", where: byId(() => f.printerCheck.id) },
+  { constraint: "printer_checks_completed_check", table: "printer_checks", set: "ok = NULL", where: byId(() => f.printerCheck.id) },
   { constraint: "print_jobs_kot_ticket_check", table: "print_jobs", set: "job_type = 'KOT'", where: byId(() => f.printJob.id) },
   // E02 RESTAURANT — website theme and identity (migration 0002, ADR-013 §6)
   { constraint: "restaurants_brand_accent_hex_check", table: "restaurants", set: "brand_accent_hex = '#12ab34'", where: byId(() => f.restaurant.id) },

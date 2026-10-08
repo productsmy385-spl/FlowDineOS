@@ -251,7 +251,7 @@ describe("TC-PRINT-012 test print (SA-PRN-04)", () => {
     const first = dataOf(await invokeAction(createTestPrintJobAction, { printerId: printer.id }));
     expect(first).toMatchObject({ jobType: "TEST", status: "PENDING", printer: { id: printer.id } });
     const document = parsePrintDocument((await db.printJob.findUniqueOrThrow({ where: { id: first.id } })).payload);
-    expect(JSON.stringify(document)).toContain("TEST PRINT");
+    expect(JSON.stringify(document)).toContain("PRINTER TEST");
     expect(JSON.stringify(document)).toContain("Rate limit printer");
 
     for (let i = 0; i < 5; i++) dataOf(await invokeAction(createTestPrintJobAction, { printerId: printer.id }));

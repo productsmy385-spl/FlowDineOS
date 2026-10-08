@@ -27,6 +27,16 @@ import {
   kitchenSectionExists,
   kotDispatchOfOrder,
   completeDiscovery,
+  cancelJob,
+  closeExpiredPairings,
+  completeCheck,
+  expireCheck,
+  findCheck,
+  findOpenCheck,
+  insertCheck,
+  setPrinterArchived,
+  takeRequestedChecks,
+  type PrinterCheckRow,
   findDiscovery,
   findOpenDiscovery,
   insertDiscovery,
@@ -59,7 +69,10 @@ import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/e
 import { logger } from "@/lib/logger";
 import { renderKotDocument } from "@/lib/print/render-kot";
 import { renderReceiptDocument } from "@/lib/print/render-receipt";
+import { describePrintError, isPrintErrorCode, type PrintErrorCode } from "@/lib/print/error-codes";
+import { profileOf } from "@/lib/print/profiles";
 import { renderTestDocument } from "@/lib/print/render-test";
+import { AGENT_VERSION_WITH_CODES, agentVersionAtLeast } from "@/lib/print/types";
 import { consume } from "@/lib/security/rate-limit";
 import { now } from "@/lib/time/clock";
 import { PAIRING_ALPHABET, PAIRING_CODE_LENGTH, connectionAddressIssue, discoveredPrinterSchema, type AgentDiscoveryReport, type DiscoveredPrinter } from "@/lib/validation/printing";
@@ -397,6 +410,9 @@ export async function createTestPrintJob(ctx: TenantContext, printerId: string):
     if (!printer) throw new NotFoundError("Printer not found");
 
     const profile = await printingProfile(tx, ctx);
+    const row = required(await findPrinterRow(tx, ctx, printer.id), "Printer");
+    const agent = row.printAgentId ? await findPrintAgentRow(tx, ctx, row.printAgentId) : null;
+    const model = profileOf(row.profile);
     const requestedAt = now();
     const document = renderTestDocument({
       widthMm: printer.paperWidthMm,
@@ -404,6 +420,12 @@ export async function createTestPrintJob(ctx: TenantContext, printerId: string):
       printerName: printer.name,
       requestedAt,
       timeZone: ctx.restaurant.timezone,
+      modelLabel: model.label,
+      agentName: row.printAgentName,
+      stationName: row.kitchenSectionName,
+      connection: row.connectionType,
+      // Only an agent that knows QR blocks gets one (older agents refuse unknown blocks), and only for a QR printer.
+      withQr: model.supportsQr && agentVersionAtLeast(agent?.agentVersion, AGENT_VERSION_WITH_CODES),
     });
 
     const { id } = await createPrintJob(tx, ctx, {
@@ -480,7 +502,7 @@ export async function createPrinter(ctx: TenantContext, data: CreatePrinterData)
       action: "printer.created",
       resourceType: "printer",
       resourceId: created.id,
-      after: { name: created.name, purpose: created.purpose, connectionType: created.connectionType, paperWidthMm: created.paperWidthMm, kitchenSectionId: created.kitchenSectionId, printAgentId: created.printAgentId },
+      after: { name: created.name, purpose: created.purpose, connectionType: created.connectionType, paperWidthMm: created.paperWidthMm, kitchenSectionId: created.kitchenSectionId, printAgentId: created.printAgentId, profile: created.profile },
     });
     return created;
   });
@@ -507,14 +529,14 @@ export async function updatePrinter(ctx: TenantContext, input: UpdatePrinterData
       action: "printer.updated",
       resourceType: "printer",
       resourceId: printerId,
-      before: { name: existing.name, purpose: existing.purpose, connectionType: existing.connectionType, paperWidthMm: existing.paperWidthMm, kitchenSectionId: existing.kitchenSectionId, printAgentId: existing.printAgentId },
-      after: { name: updated.name, purpose: updated.purpose, connectionType: updated.connectionType, paperWidthMm: updated.paperWidthMm, kitchenSectionId: updated.kitchenSectionId, printAgentId: updated.printAgentId },
+      before: { name: existing.name, purpose: existing.purpose, connectionType: existing.connectionType, paperWidthMm: existing.paperWidthMm, kitchenSectionId: existing.kitchenSectionId, printAgentId: existing.printAgentId, profile: existing.profile },
+      after: { name: updated.name, purpose: updated.purpose, connectionType: updated.connectionType, paperWidthMm: updated.paperWidthMm, kitchenSectionId: updated.kitchenSectionId, printAgentId: updated.printAgentId, profile: updated.profile },
     });
     return updated;
   });
 }
 
-/** SA-PRN-03 — deactivation also fails the printer's waiting jobs with `PRINTER_DEACTIVATED` (architecture.md §6.3). */
+/** SA-PRN-03 — deactivation also fails the printer's waiting jobs with `PRINTER_DISABLED` (architecture.md §6.3). */
 export async function deactivatePrinter(ctx: TenantContext, printerId: string): Promise<{ printer: PrinterDto; failedJobs: number }> {
   const result = await withTx(ctx, async (tx) => {
     const existing = required(await findPrinterRow(tx, ctx, printerId), "Printer");
@@ -671,15 +693,21 @@ export async function recordHeartbeat(ctx: AgentContext, input: { agentVersion?:
  * RH-AGT-03 — atomic lease claim, restricted to the agent's tenant and its own printers. The response also hands over
  * a printer scan an admin asked this agent for (ADR-015), so no separate poll is needed.
  */
-export async function claimPrintJobs(ctx: AgentContext, max: number): Promise<{ jobs: ClaimedJob[]; discovery: { discoveryId: string } | null }> {
+export async function claimPrintJobs(
+  ctx: AgentContext,
+  max: number,
+): Promise<{ jobs: ClaimedJob[]; discovery: { discoveryId: string } | null; checks: Array<{ checkId: string; printerId: string }> }> {
   const at = now();
   const jobs = await claimJobs(ctx, max, at);
   const discoveryId = await takeRequestedDiscovery(ctx, new Date(at.getTime() - DISCOVERY_PICKUP_MS), at);
+  // Connection tests ride on the same poll (printing audit 2026-10-08): the agent connects locally, never the cloud.
+  const checks = await takeRequestedChecks(ctx, new Date(at.getTime() - CHECK_PICKUP_MS), at);
   if (discoveryId) logger.info("printer.discovery_started", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, discoveryId });
+  for (const check of checks) logger.info("printer.test_started", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, printerId: check.printerId, checkId: check.checkId });
   if (jobs.length > 0) {
     logger.info("print_job.claimed", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, count: jobs.length });
   }
-  return { jobs, discovery: discoveryId ? { discoveryId } : null };
+  return { jobs, discovery: discoveryId ? { discoveryId } : null, checks };
 }
 
 /**
@@ -700,7 +728,7 @@ export async function acknowledgePrintJob(
         action: "print_job.failed",
         resourceType: "print_job",
         resourceId: jobId,
-        after: { status: result.status, attemptCount: result.attemptCount, errorCode: input.errorCode ?? "PRINT_FAILED" },
+        after: { status: result.status, attemptCount: result.attemptCount, errorCode: result.errorCode },
       });
     });
   }
@@ -879,4 +907,173 @@ export async function archivePrintHistory(ctx: TenantContext, input: { jobIds: s
     }
     return { archived: jobIds.length, jobIds };
   });
+}
+
+// ─── Test connection (printing audit 2026-10-08 P0) ───
+
+/** A check not picked up within this window is reported as "agent did not answer" (idle agents poll every ≤15 s). */
+export const CHECK_PICKUP_MS = 45_000;
+/** A probe takes at most the 5 s connect timeout; one still RUNNING after this never reported. */
+export const CHECK_RUN_MS = 30_000;
+const CHECK_RATE_LIMIT = { limit: 20, windowSec: 60, failOpen: false } as const;
+
+export type PrinterCheckState = "WAITING" | "RUNNING" | "DONE";
+export type PrinterCheckView = {
+  /** Null when the check could not even be sent (agent offline, printer not assigned): nothing was stored. */
+  checkId: string | null;
+  printerId: string;
+  state: PrinterCheckState;
+  ok: boolean | null;
+  error: { code: PrintErrorCode; user: string; technical: string; detail: string | null } | null;
+  elapsedMs: number | null;
+  address: string | null;
+  agentName: string | null;
+  agentOnline: boolean;
+  protocol: string;
+};
+
+function errorView(code: string, printerName: string, detail: string | null): PrinterCheckView["error"] {
+  const described = describePrintError(code, printerName, detail);
+  return { code: described.code, user: described.user, technical: described.technical, detail };
+}
+
+async function checkView(ctx: TenantContext, row: PrinterCheckRow): Promise<PrinterCheckView> {
+  const at = now();
+  let current = row;
+  const pickupOverdue = row.status === "REQUESTED" && at.getTime() - row.requestedAt.getTime() > CHECK_PICKUP_MS;
+  const runOverdue = row.status === "RUNNING" && row.startedAt !== null && at.getTime() - row.startedAt.getTime() > CHECK_RUN_MS;
+  if (pickupOverdue || runOverdue) current = (await expireCheck(ctx, row.id, at)) ?? row;
+
+  const { printer, agent } = await withTx(ctx, async (tx) => ({
+    printer: required(await findPrinterRow(tx, ctx, current.printerId), "Printer"),
+    agent: await findPrintAgentRow(tx, ctx, current.printAgentId),
+  }));
+  const base = {
+    checkId: current.id,
+    printerId: current.printerId,
+    address: printer.connectionAddress,
+    agentName: agent?.name ?? null,
+    agentOnline: agent ? isAgentOnline(agent, at) : false,
+    protocol: `${profileOf(printer.profile).protocol === "ESC_POS" ? "ESC/POS" : printer.connectionType} over ${printer.connectionType === "LAN" ? "TCP" : "USB"}`,
+  };
+  switch (current.status) {
+    case "REQUESTED":
+      return { ...base, state: "WAITING", ok: null, error: null, elapsedMs: null };
+    case "RUNNING":
+      return { ...base, state: "RUNNING", ok: null, error: null, elapsedMs: null };
+    case "EXPIRED":
+      return { ...base, state: "DONE", ok: false, error: errorView("AGENT_NOT_RESPONDING", printer.name, null), elapsedMs: null };
+    case "COMPLETED":
+      return {
+        ...base,
+        state: "DONE",
+        ok: current.ok === true,
+        error: current.ok ? null : errorView(current.errorCode ?? "PRINT_FAILED", printer.name, current.detail),
+        elapsedMs: current.elapsedMs,
+      };
+  }
+}
+
+/**
+ * "Test connection" — asks the printer's own agent to open and close a TCP connection to it. Never creates a print job
+ * and never prints. Refused up front, with the reason, when it cannot work: printer deactivated, no agent assigned,
+ * agent revoked or offline. A second click while a check is open returns the same check. Audited.
+ */
+export async function startPrinterCheck(ctx: TenantContext, printerId: string): Promise<PrinterCheckView> {
+  await enforceRateLimit("printer.check", ctx.userId, CHECK_RATE_LIMIT, "Too many connection tests. Wait a minute and try again.");
+  const at = now();
+  const outcome = await withTx(ctx, async (tx) => {
+    const printer = required(await findPrinterRow(tx, ctx, printerId), "Printer");
+    const agent = printer.printAgentId ? await findPrintAgentRow(tx, ctx, printer.printAgentId) : null;
+    const refuse = (code: PrintErrorCode): PrinterCheckView => ({
+      checkId: null,
+      printerId,
+      state: "DONE",
+      ok: false,
+      error: errorView(code, printer.name, null),
+      elapsedMs: null,
+      address: printer.connectionAddress,
+      agentName: agent?.name ?? null,
+      agentOnline: agent ? isAgentOnline(agent, at) : false,
+      protocol: "ESC/POS",
+    });
+    if (!printer.isActive) return { view: refuse("PRINTER_DISABLED") };
+    if (connectionAddressIssue(printer.connectionType, printer.connectionAddress)) return { view: refuse("INVALID_PRINTER_CONFIGURATION") };
+    if (!agent || agent.status === "REVOKED" || agent.status === "PENDING_PAIRING") return { view: refuse("PRINTER_NOT_ASSIGNED") };
+    if (!isAgentOnline(agent, at)) return { view: refuse("AGENT_OFFLINE") };
+
+    const open = await findOpenCheck(tx, ctx, printerId, new Date(at.getTime() - CHECK_PICKUP_MS));
+    if (open) return { row: open };
+    const created = await insertCheck(tx, ctx, { printerId, printAgentId: agent.id, requestedByUserId: ctx.userId }, at);
+    await audit(tx, ctx, { action: "printer.connection_test_requested", resourceType: "printer", resourceId: printerId, after: { checkId: created.id, printAgentId: agent.id } });
+    return { row: created };
+  });
+  if ("view" in outcome && outcome.view) {
+    logger.info("printer.test_refused", { requestId: ctx.requestId, tenantId: ctx.tenantId, printerId, code: outcome.view.error?.code ?? null });
+    return outcome.view;
+  }
+  const row = (outcome as { row: PrinterCheckRow }).row;
+  logger.info("printer.test_requested", { requestId: ctx.requestId, tenantId: ctx.tenantId, printerId, checkId: row.id });
+  return checkView(ctx, row);
+}
+
+/** The console polls this while the agent tests. Another tenant's check is a 404. */
+export async function getPrinterCheck(ctx: TenantContext, checkId: string): Promise<PrinterCheckView> {
+  return checkView(ctx, required(await findCheck(ctx, checkId), "Connection test"));
+}
+
+/**
+ * RH-AGT-07 — the agent's result for a check it is running (tenant and agent from the token). The printer's health is
+ * updated from the same probe. Anything else is 409, so a report never lands on another agent's or tenant's check.
+ */
+export async function reportPrinterCheck(
+  ctx: AgentContext,
+  checkId: string,
+  report: { ok: boolean; errorCode?: string; detail?: string | null; elapsedMs: number },
+): Promise<{ checkId: string; status: "COMPLETED" }> {
+  const at = now();
+  const code = report.ok ? null : isPrintErrorCode(report.errorCode) ? report.errorCode : describePrintError(report.errorCode, "", report.detail).code;
+  const saved = await completeCheck(ctx, checkId, { ok: report.ok, errorCode: code, detail: report.ok ? null : (report.detail ?? null), elapsedMs: report.elapsedMs }, at);
+  if (!saved) throw new ConflictError("This connection test is not running on this agent.", "CHECK_NOT_RUNNING");
+  const health = report.ok ? PrinterHealth.ONLINE : code && describePrintError(code, "", null).offline ? PrinterHealth.OFFLINE : PrinterHealth.ERROR;
+  await applyPrinterHealth(ctx, [{ printerId: saved.printerId, health }], at);
+  logger.info(report.ok ? "printer.test_succeeded" : "printer.test_failed", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, printerId: saved.printerId, checkId, code, elapsedMs: report.elapsedMs });
+  return { checkId, status: "COMPLETED" };
+}
+
+// ─── Cancel, archive, stale pairings (printing audit 2026-10-08) ───
+
+/** Cancels a queued, retrying or failed job. Never one being sent or delivered. Audited with the optional reason. */
+export async function cancelPrintJob(ctx: TenantContext, jobId: string, reason: string | null): Promise<PrintJobDto> {
+  const job = await withTx(ctx, async (tx) => {
+    const { before } = await cancelJob(tx, ctx, jobId, { userId: ctx.userId, reason }, now());
+    await audit(tx, ctx, { action: "print_job.cancelled", resourceType: "print_job", resourceId: jobId, before, after: { status: PrintJobStatus.CANCELLED, reason } });
+    return getPrintJob(tx, ctx, jobId);
+  });
+  logger.info("print_job.cancelled", { requestId: ctx.requestId, tenantId: ctx.tenantId, printJobId: jobId });
+  return job;
+}
+
+/** Archive hides a deactivated printer from the list; restore shows it again (still deactivated). Audited. */
+export async function setPrinterArchive(ctx: TenantContext, printerId: string, archived: boolean): Promise<PrinterDto> {
+  return withTx(ctx, async (tx) => {
+    const existing = required(await findPrinterRow(tx, ctx, printerId), "Printer");
+    const changed = await setPrinterArchived(tx, ctx, printerId, archived, now());
+    if (changed === 0) {
+      throw new ConflictError(archived ? "Deactivate the printer before archiving it." : "This printer is not archived.", archived ? "PRINTER_ACTIVE" : "NOT_ARCHIVED");
+    }
+    await audit(tx, ctx, { action: archived ? "printer.archived" : "printer.restored", resourceType: "printer", resourceId: printerId, before: { archivedAt: existing.archivedAt }, after: { archived } });
+    return required(await findPrinterRow(tx, ctx, printerId), "Printer");
+  });
+}
+
+/** Closes every pairing attempt whose code has expired (nothing is deleted). Audited once with the ids. */
+export async function closeStalePairings(ctx: TenantContext): Promise<{ closed: number }> {
+  const ids = await withTx(ctx, async (tx) => {
+    const closed = await closeExpiredPairings(tx, ctx, ctx.userId, now());
+    if (closed.length > 0) await audit(tx, ctx, { action: "print_agent.pairings_expired", resourceType: "print_agent", after: { agentIds: closed, count: closed.length } });
+    return closed;
+  });
+  logger.info("print_agent.pairings_expired", { requestId: ctx.requestId, tenantId: ctx.tenantId, count: ids.length });
+  return { closed: ids.length };
 }

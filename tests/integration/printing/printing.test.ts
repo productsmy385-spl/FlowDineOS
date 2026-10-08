@@ -151,7 +151,7 @@ describe("SA-PRN-04 test print", () => {
     const document = parsePrintDocument(row.payload);
     expect(document).toMatchObject({ version: 1, widthMm: 80 });
     expect(JSON.stringify(document)).toContain(restaurant.name);
-    expect(JSON.stringify(document)).toContain("TEST PRINT");
+    expect(JSON.stringify(document)).toContain("PRINTER TEST");
     expect(await db.auditLog.count({ where: { action: "print_job.created", resourceId: job.id, tenantId: tenantIdOf("A") } })).toBe(1);
   });
 

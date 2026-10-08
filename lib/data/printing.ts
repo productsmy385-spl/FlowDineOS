@@ -1,9 +1,10 @@
 import "server-only";
-import { PrintAgentStatus, PrintJobStatus, PrintJobType, PrinterConnection, PrinterDiscoveryStatus, PrinterHealth, PrinterPurpose, Prisma } from "@prisma/client";
+import { PrintAgentStatus, PrintJobStatus, PrintJobType, PrinterCheckStatus, PrinterConnection, PrinterDiscoveryStatus, PrinterHealth, PrinterPurpose, Prisma } from "@prisma/client";
 import type { AgentContext, TenantContext, TenantScopedContext } from "@/lib/auth/context-types";
 import { db } from "@/lib/db/prisma";
 import { ConflictError } from "@/lib/errors";
-import { LEASE_MS, outcomeOfFailure } from "@/lib/print/state-machine";
+import { canonicalPrintErrorCode } from "@/lib/print/error-codes";
+import { LEASE_MS, RETRY_POLICIES, displayStatus, outcomeOfFailure, type PrintJobDisplayStatus } from "@/lib/print/state-machine";
 import type { PrintDocument } from "@/lib/print/types";
 import { instantDto, nullableInstantDto } from "./dto";
 import { mapErrors } from "./errors";
@@ -44,6 +45,9 @@ export type PrintJobDto = {
   updatedAt: string;
   printedAt: string | null;
   nextAttemptAt: string;
+  /** What staff see: QUEUED, PRINTING, RETRYING, DELIVERED, FAILED or CANCELLED (lib/print/state-machine.ts). */
+  displayStatus: PrintJobDisplayStatus;
+  cancelReason: string | null;
   printer: { id: string; name: string };
   orderNumber: string | null;
   kotNumber: string | null;
@@ -65,6 +69,12 @@ export type PrinterDto = {
   printAgentId: string | null;
   printAgentName: string | null;
   printAgentStatus: PrintAgentStatus | null;
+  /** Capability profile key (lib/print/profiles.ts). */
+  profile: string;
+  archivedAt: string | null;
+  lastDeliveredAt: string | null;
+  lastFailedAt: string | null;
+  lastErrorCode: string | null;
 };
 
 export type PrintAgentDto = {
@@ -96,6 +106,7 @@ const JOB_SELECT = {
   updatedAt: true,
   printedAt: true,
   nextAttemptAt: true,
+  cancelReason: true,
   printer: { select: { id: true, name: true } },
   order: { select: { orderNumber: true } },
   kotTicket: { select: { kotNumber: true } },
@@ -119,6 +130,8 @@ function toJobDto(row: JobRow): PrintJobDto {
     updatedAt: instantDto(row.updatedAt),
     printedAt: nullableInstantDto(row.printedAt),
     nextAttemptAt: instantDto(row.nextAttemptAt),
+    displayStatus: displayStatus(row),
+    cancelReason: row.cancelReason,
     printer: row.printer,
     orderNumber: row.order?.orderNumber ?? null,
     kotNumber: row.kotTicket?.kotNumber ?? null,
@@ -139,6 +152,11 @@ const PRINTER_SELECT = {
   printAgentId: true,
   kitchenSection: { select: { name: true } },
   printAgent: { select: { name: true, status: true } },
+  profile: true,
+  archivedAt: true,
+  lastDeliveredAt: true,
+  lastFailedAt: true,
+  lastErrorCode: true,
 } satisfies Prisma.PrinterSelect;
 
 type PrinterRow = Prisma.PrinterGetPayload<{ select: typeof PRINTER_SELECT }>;
@@ -162,6 +180,11 @@ function toPrinterDto(row: PrinterRow): PrinterRowDto {
     printAgentId: row.printAgentId,
     printAgentName: row.printAgent?.name ?? null,
     printAgentStatus: row.printAgent?.status ?? null,
+    profile: row.profile,
+    archivedAt: nullableInstantDto(row.archivedAt),
+    lastDeliveredAt: nullableInstantDto(row.lastDeliveredAt),
+    lastFailedAt: nullableInstantDto(row.lastFailedAt),
+    lastErrorCode: row.lastErrorCode,
   };
 }
 
@@ -228,7 +251,7 @@ export async function countPrintJobs(ctx: TenantContext, status: PrintJobStatus)
 export async function archivePrintJobs(client: Tx, ctx: TenantContext, target: { jobIds: string[] } | { before: Date }): Promise<string[]> {
   const where = tenantScope(ctx, {
     archivedAt: null,
-    status: { in: [PrintJobStatus.PRINTED, PrintJobStatus.FAILED] },
+    status: { in: [PrintJobStatus.PRINTED, PrintJobStatus.FAILED, PrintJobStatus.CANCELLED] },
     ...("jobIds" in target ? { id: { in: target.jobIds } } : { createdAt: { lt: target.before } }),
   });
   const rows = await client.printJob.findMany({ where: tenantScope(ctx, where), select: { id: true } });
@@ -396,7 +419,7 @@ export async function createPrintJob(client: Tx, ctx: TenantContext, job: NewPri
       ${JSON.stringify(job.payload)}::jsonb,
       'PENDING'::print_job_status,
       0,
-      ${job.maxAttempts ?? 3},
+      ${job.maxAttempts ?? RETRY_POLICIES[job.jobType].maxAttempts},
       now(),
       ${job.requestedByUserId ?? null}::uuid,
       now(),
@@ -502,17 +525,39 @@ type ClaimRow = {
  *
  * Claimable = PENDING and due, or PROCESSING with an expired lease (a crashed agent's jobs return to the queue,
  * S1-P16-T007). Both are restricted to the agent's own tenant *and* the printers assigned to that agent.
+ *
+ * One lane per printer (printing audit 2026-10-08 P1): at most one job per printer per claim — that printer's oldest
+ * due job — and none for a printer that already has a job in flight under a live lease. A dead printer therefore holds
+ * at most one lease and never takes another printer's turn; a printer's own tickets go out in order.
  */
 export async function claimJobs(ctx: AgentContext, max: number, at: Date): Promise<ClaimedJob[]> {
   if (ctx.printerIds.length === 0) return [];
   const leaseExpiresAt = new Date(at.getTime() + LEASE_MS);
   const rows = await mapErrors("Print job", () =>
     db.$queryRaw<ClaimRow[]>`
-      WITH claimable AS (
+      WITH firsts AS (
+        SELECT DISTINCT ON (j.printer_id) j.id
+        FROM print_jobs j
+        WHERE j.tenant_id = ${ctx.tenantId}::uuid
+          AND j.printer_id = ANY(${[...ctx.printerIds]}::uuid[])
+          AND (
+            (j.status = 'PENDING' AND j.next_attempt_at <= ${at})
+            OR (j.status = 'PROCESSING' AND j.lease_expires_at IS NOT NULL AND j.lease_expires_at < ${at})
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM print_jobs busy
+            WHERE busy.tenant_id = j.tenant_id
+              AND busy.printer_id = j.printer_id
+              AND busy.status = 'PROCESSING'
+              AND busy.lease_expires_at >= ${at}
+          )
+        ORDER BY j.printer_id, j.created_at, j.id
+      ),
+      claimable AS (
         SELECT id
         FROM print_jobs
         WHERE tenant_id = ${ctx.tenantId}::uuid
-          AND printer_id = ANY(${[...ctx.printerIds]}::uuid[])
+          AND id IN (SELECT id FROM firsts)
           AND (
             (status = 'PENDING' AND next_attempt_at <= ${at})
             OR (status = 'PROCESSING' AND lease_expires_at IS NOT NULL AND lease_expires_at < ${at})
@@ -555,11 +600,13 @@ export type AckResult = {
   changed: boolean;
   /** True when this ack moved the job to terminal FAILED, which the caller audits as `print_job.failed`. */
   terminalFailure: boolean;
+  /** The catalogue code recorded on the job (lib/print/error-codes.ts); null for a delivery. */
+  errorCode: string | null;
 };
 
 export type AckInput = { result: "PRINTED" | "FAILED"; errorCode?: string | null; errorMessage?: string | null };
 
-type AckRow = { id: string; status: PrintJobStatus; claim_token: string | null; attempt_count: number; max_attempts: number };
+type AckRow = { id: string; status: PrintJobStatus; claim_token: string | null; attempt_count: number; max_attempts: number; job_type: PrintJobType; created_at: Date; printer_id: string };
 
 /**
  * Acknowledges one job of the calling agent inside a transaction that locks the row first.
@@ -574,7 +621,7 @@ export async function ackJob(ctx: AgentContext, jobId: string, claimToken: strin
   return mapErrors("Print job", () =>
     db.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<AckRow[]>`
-        SELECT id, status, claim_token::text AS claim_token, attempt_count, max_attempts
+        SELECT id, status, claim_token::text AS claim_token, attempt_count, max_attempts, job_type, COALESCE(retry_window_started_at, created_at) AS created_at, printer_id::text AS printer_id
         FROM print_jobs
         WHERE tenant_id = ${ctx.tenantId}::uuid AND id = ${jobId}::uuid AND print_agent_id = ${ctx.agentId}::uuid
         FOR UPDATE`;
@@ -585,13 +632,15 @@ export async function ackJob(ctx: AgentContext, jobId: string, claimToken: strin
 
       const attemptCount = Number(job.attempt_count);
       const maxAttempts = Number(job.max_attempts);
+      const failure = () =>
+        outcomeOfFailure({ jobType: job.job_type, attemptCount, maxAttempts, createdAt: new Date(job.created_at), errorCode: input.errorCode, errorMessage: input.errorMessage }, at);
 
       if (job.status !== PrintJobStatus.PROCESSING) {
         // Terminal or already re-queued by this same acknowledgement: identical repeats are a no-op, a different
         // outcome for a settled job is a conflict.
-        const settledBy = input.result === "PRINTED" ? PrintJobStatus.PRINTED : outcomeOfFailure(attemptCount, maxAttempts, at).status;
+        const settledBy = input.result === "PRINTED" ? PrintJobStatus.PRINTED : failure().status;
         if (job.status === settledBy) {
-          return { jobId, status: job.status, attemptCount, changed: false, terminalFailure: false };
+          return { jobId, status: job.status, attemptCount, changed: false, terminalFailure: false, errorCode: null };
         }
         throw new ConflictError("This print job was already acknowledged.", "ALREADY_ACKNOWLEDGED");
       }
@@ -608,10 +657,14 @@ export async function ackJob(ctx: AgentContext, jobId: string, claimToken: strin
             lastErrorMessage: null,
           },
         });
-        return { jobId, status: PrintJobStatus.PRINTED, attemptCount, changed: true, terminalFailure: false };
+        await tx.printer.updateMany({ where: tenantScope(ctx, { id: job.printer_id }), data: { lastDeliveredAt: at } });
+        return { jobId, status: PrintJobStatus.PRINTED, attemptCount, changed: true, terminalFailure: false, errorCode: null };
       }
 
-      const outcome = outcomeOfFailure(attemptCount, maxAttempts, at);
+      // Codes are normalised to the catalogue (older agents send older codes, lib/print/error-codes.ts).
+      const outcome = failure();
+      const cause = canonicalPrintErrorCode(input.errorCode, input.errorMessage);
+      const message = input.errorMessage ?? null;
       await tx.printJob.updateMany({
         where: tenantScope(ctx, { id: jobId, status: PrintJobStatus.PROCESSING }),
         data: {
@@ -619,16 +672,19 @@ export async function ackJob(ctx: AgentContext, jobId: string, claimToken: strin
           leaseExpiresAt: null,
           nextAttemptAt: outcome.nextAttemptAt ?? at,
           failedAt: outcome.status === PrintJobStatus.FAILED ? at : null,
-          lastErrorCode: input.errorCode ?? "PRINT_FAILED",
-          lastErrorMessage: input.errorMessage ?? null,
+          lastErrorCode: outcome.errorCode,
+          // When retries ran out, the last cause stays readable: "CONNECTION_TIMEOUT: TCP 192.168.1.103:9100: …".
+          lastErrorMessage: (outcome.gaveUp ? `${cause}${message ? `: ${message}` : ""}` : message)?.slice(0, 500) ?? null,
         },
       });
+      await tx.printer.updateMany({ where: tenantScope(ctx, { id: job.printer_id }), data: { lastFailedAt: at, lastErrorCode: cause } });
       return {
         jobId,
         status: outcome.status,
         attemptCount,
         changed: true,
         terminalFailure: outcome.status === PrintJobStatus.FAILED,
+        errorCode: outcome.errorCode,
       };
     }),
   );
@@ -641,7 +697,7 @@ export type RetryOutcome = { before: { status: PrintJobStatus; attemptCount: num
 /** Puts one FAILED job back in the queue, due immediately, with attempts reset (ADR-007 §4, S1-P16-T007). */
 export async function retryJob(client: Tx, ctx: TenantContext, jobId: string, at: Date): Promise<RetryOutcome> {
   const existing = required(
-    await client.printJob.findUnique({ where: tenantKey(ctx, jobId), select: { status: true, attemptCount: true, lastErrorCode: true } }),
+    await client.printJob.findUnique({ where: tenantKey(ctx, jobId), select: { status: true, attemptCount: true, lastErrorCode: true, jobType: true } }),
     "Print job",
   );
   if (existing.status !== PrintJobStatus.FAILED) throw new ConflictError("Only failed print jobs can be retried.", "NOT_FAILED");
@@ -651,6 +707,9 @@ export async function retryJob(client: Tx, ctx: TenantContext, jobId: string, at
     data: {
       status: PrintJobStatus.PENDING,
       attemptCount: 0,
+      // A manual retry restarts the automatic retry window and takes the job type's current policy (2026-10-08).
+      retryWindowStartedAt: at,
+      maxAttempts: RETRY_POLICIES[existing.jobType].maxAttempts,
       nextAttemptAt: at,
       failedAt: null,
       lastErrorCode: null,
@@ -661,7 +720,7 @@ export async function retryJob(client: Tx, ctx: TenantContext, jobId: string, at
     },
   });
   if (count === 0) throw new ConflictError("Only failed print jobs can be retried.", "NOT_FAILED");
-  return { before: existing };
+  return { before: { status: existing.status, attemptCount: existing.attemptCount, lastErrorCode: existing.lastErrorCode } };
 }
 
 /** Deactivating a printer fails its queued work rather than leaving it waiting for a device nobody will switch on. */
@@ -671,7 +730,7 @@ export async function failPendingJobsForPrinter(client: Tx, ctx: TenantContext, 
     data: {
       status: PrintJobStatus.FAILED,
       failedAt: at,
-      lastErrorCode: "PRINTER_DEACTIVATED",
+      lastErrorCode: "PRINTER_DISABLED",
       lastErrorMessage: "The printer was deactivated while this job was waiting.",
       leaseExpiresAt: null,
     },
@@ -689,6 +748,7 @@ export type NewPrinter = {
   paperWidthMm: number;
   kitchenSectionId: string | null;
   printAgentId: string | null;
+  profile?: string;
 };
 
 export async function kitchenSectionExists(client: Tx, ctx: TenantContext, kitchenSectionId: string): Promise<boolean> {
@@ -848,6 +908,8 @@ export type AgentPrinterConfig = {
   connectionType: PrinterConnection;
   connectionAddress: string;
   paperWidthMm: number;
+  /** Capability profile key (lib/print/profiles.ts); agents older than 2026-10-08 ignore it. */
+  profile: string;
 };
 
 /** RH-AGT-05 — the printers the calling agent is responsible for, and nothing else (TC-AGENT-005, TI-041). */
@@ -855,7 +917,7 @@ export async function agentPrinterConfig(ctx: AgentContext): Promise<AgentPrinte
   const rows = await mapErrors("Printer", () =>
     db.printer.findMany({
       where: tenantScope(ctx, { printAgentId: ctx.agentId, isActive: true }),
-      select: { id: true, name: true, purpose: true, connectionType: true, connectionAddress: true, paperWidthMm: true },
+      select: { id: true, name: true, purpose: true, connectionType: true, connectionAddress: true, paperWidthMm: true, profile: true },
       orderBy: [{ name: "asc" }, { id: "asc" }],
     }),
   );
@@ -866,6 +928,7 @@ export async function agentPrinterConfig(ctx: AgentContext): Promise<AgentPrinte
     connectionType: row.connectionType,
     connectionAddress: row.connectionAddress,
     paperWidthMm: row.paperWidthMm,
+    profile: row.profile,
   }));
 }
 
@@ -979,4 +1042,156 @@ export async function completeDiscovery(
     }),
   );
   return count === 1;
+}
+
+// ─── Printer connection checks (printing audit 2026-10-08 P0) ───
+
+export type PrinterCheckRow = {
+  id: string;
+  printerId: string;
+  printAgentId: string;
+  status: PrinterCheckStatus;
+  ok: boolean | null;
+  errorCode: string | null;
+  detail: string | null;
+  elapsedMs: number | null;
+  requestedAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+};
+
+const checkSelect = {
+  id: true,
+  printerId: true,
+  printAgentId: true,
+  status: true,
+  ok: true,
+  errorCode: true,
+  detail: true,
+  elapsedMs: true,
+  requestedAt: true,
+  startedAt: true,
+  completedAt: true,
+} as const;
+
+/** A check of this printer still REQUESTED or RUNNING and newer than `since` — a second click reuses it. */
+export async function findOpenCheck(client: Tx, ctx: TenantContext, printerId: string, since: Date): Promise<PrinterCheckRow | null> {
+  return client.printerCheck.findFirst({
+    where: tenantScope(ctx, { printerId, status: { in: [PrinterCheckStatus.REQUESTED, PrinterCheckStatus.RUNNING] }, requestedAt: { gte: since } }),
+    orderBy: { requestedAt: "desc" },
+    select: checkSelect,
+  });
+}
+
+export async function insertCheck(client: Tx, ctx: TenantContext, input: { printerId: string; printAgentId: string; requestedByUserId: string }, at: Date): Promise<PrinterCheckRow> {
+  return client.printerCheck.create({
+    data: { tenantId: ctx.tenantId, printerId: input.printerId, printAgentId: input.printAgentId, requestedByUserId: input.requestedByUserId, requestedAt: at },
+    select: checkSelect,
+  });
+}
+
+/** One check of the caller's tenant; another tenant's id is a miss. */
+export async function findCheck(ctx: TenantContext, checkId: string): Promise<PrinterCheckRow | null> {
+  return mapErrors("Printer check", () => db.printerCheck.findUnique({ where: tenantKey(ctx, checkId), select: checkSelect }));
+}
+
+/** REQUESTED/RUNNING → EXPIRED once the agent has had its chance. Returns the row as it is afterwards. */
+export async function expireCheck(ctx: TenantContext, checkId: string, at: Date): Promise<PrinterCheckRow | null> {
+  await mapErrors("Printer check", () =>
+    db.printerCheck.updateMany({
+      where: tenantScope(ctx, { id: checkId, status: { in: [PrinterCheckStatus.REQUESTED, PrinterCheckStatus.RUNNING] } }),
+      data: { status: PrinterCheckStatus.EXPIRED, completedAt: at },
+    }),
+  );
+  return findCheck(ctx, checkId);
+}
+
+/**
+ * Hands this agent its waiting checks, atomically (REQUESTED → RUNNING), only for printers it still owns. Tenant and
+ * agent come from the bearer token, so an agent never receives another agent's — or tenant's — request.
+ */
+export async function takeRequestedChecks(ctx: AgentContext, since: Date, at: Date): Promise<Array<{ checkId: string; printerId: string }>> {
+  if (ctx.printerIds.length === 0) return [];
+  const rows = await mapErrors("Printer check", () =>
+    db.$queryRaw<Array<{ id: string; printer_id: string }>>`
+      UPDATE printer_checks c
+      SET status = 'RUNNING'::printer_check_status, started_at = ${at}, updated_at = now()
+      WHERE c.id IN (
+        SELECT id FROM printer_checks
+        WHERE tenant_id = ${ctx.tenantId}::uuid
+          AND print_agent_id = ${ctx.agentId}::uuid
+          AND printer_id = ANY(${[...ctx.printerIds]}::uuid[])
+          AND status = 'REQUESTED'
+          AND requested_at >= ${since}
+        ORDER BY requested_at
+        LIMIT 5
+        FOR UPDATE SKIP LOCKED
+      ) AND c.tenant_id = ${ctx.tenantId}::uuid
+      RETURNING c.id::text AS id, c.printer_id::text AS printer_id`,
+  );
+  return rows.map((row) => ({ checkId: row.id, printerId: row.printer_id }));
+}
+
+/** RUNNING → COMPLETED with the agent's result, only for the agent running it. False when it was not (any more). */
+export async function completeCheck(
+  ctx: AgentContext,
+  checkId: string,
+  result: { ok: boolean; errorCode: string | null; detail: string | null; elapsedMs: number },
+  at: Date,
+): Promise<PrinterCheckRow | null> {
+  const { count } = await mapErrors("Printer check", () =>
+    db.printerCheck.updateMany({
+      where: tenantScope(ctx, { id: checkId, printAgentId: ctx.agentId, status: PrinterCheckStatus.RUNNING }),
+      data: { status: PrinterCheckStatus.COMPLETED, ok: result.ok, errorCode: result.errorCode, detail: result.detail, elapsedMs: result.elapsedMs, completedAt: at },
+    }),
+  );
+  if (count !== 1) return null;
+  return mapErrors("Printer check", () => db.printerCheck.findUnique({ where: tenantKey(ctx, checkId), select: checkSelect }));
+}
+
+// ─── Cancel, archive, stale pairings (printing audit 2026-10-08) ───
+
+const CANCELLABLE = [PrintJobStatus.PENDING, PrintJobStatus.FAILED];
+
+/**
+ * QUEUED / RETRYING (PENDING) or FAILED → CANCELLED. A job being sent (PROCESSING) or already delivered is never
+ * cancelled: the agent may be writing it to the printer at this moment.
+ */
+export async function cancelJob(client: Tx, ctx: TenantContext, jobId: string, input: { userId: string; reason: string | null }, at: Date): Promise<{ before: { status: PrintJobStatus; attemptCount: number } }> {
+  const existing = required(await client.printJob.findUnique({ where: tenantKey(ctx, jobId), select: { status: true, attemptCount: true } }), "Print job");
+  const refuse = () => new ConflictError("Only queued, retrying or failed print jobs can be cancelled. A job being sent to the printer cannot be stopped.", "NOT_CANCELLABLE");
+  if (!CANCELLABLE.some((status) => status === existing.status)) throw refuse();
+  const { count } = await client.printJob.updateMany({
+    where: tenantScope(ctx, { id: jobId, status: { in: CANCELLABLE } }),
+    data: { status: PrintJobStatus.CANCELLED, cancelledAt: at, cancelledByUserId: input.userId, cancelReason: input.reason, claimToken: null, leaseExpiresAt: null },
+  });
+  if (count === 0) throw refuse();
+  return { before: existing };
+}
+
+/** Archive hides a deactivated printer from the list (the row and its jobs stay); restore brings it back, still inactive. */
+export async function setPrinterArchived(client: Tx, ctx: TenantContext, printerId: string, archived: boolean, at: Date): Promise<number> {
+  const { count } = await client.printer.updateMany({
+    where: tenantScope(ctx, archived ? { id: printerId, isActive: false, archivedAt: null } : { id: printerId, archivedAt: { not: null } }),
+    data: { archivedAt: archived ? at : null },
+  });
+  return count;
+}
+
+/**
+ * Pairing attempts whose code has expired are closed (status REVOKED, code hash cleared) — never deleted, so the history
+ * of who started a pairing stays. Returns the ids closed.
+ */
+export async function closeExpiredPairings(client: Tx, ctx: TenantContext, userId: string, at: Date): Promise<string[]> {
+  const stale = await client.printAgent.findMany({
+    where: tenantScope(ctx, { status: PrintAgentStatus.PENDING_PAIRING, OR: [{ pairingExpiresAt: null }, { pairingExpiresAt: { lt: at } }] }),
+    select: { id: true },
+  });
+  if (stale.length === 0) return [];
+  const ids = stale.map((row) => row.id);
+  await client.printAgent.updateMany({
+    where: tenantScope(ctx, { id: { in: ids }, status: PrintAgentStatus.PENDING_PAIRING }),
+    data: { status: PrintAgentStatus.REVOKED, revokedAt: at, revokedByUserId: userId, pairingCodeHash: null, pairingExpiresAt: null },
+  });
+  return ids;
 }

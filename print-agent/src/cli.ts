@@ -26,7 +26,7 @@ export type CliOptions = { env?: AgentEnv; fetch?: FetchLike; io?: CliIo; signal
 
 const USAGE = [
   "Usage:",
-  "  rasoios-print-agent pair <CODE> [--server https://your-rasoios-site]",
+  "  rasoios-print-agent pair <CODE> [--server https://your-flowdineos-site]",
   "  rasoios-print-agent run",
   "  rasoios-print-agent status",
   "  rasoios-print-agent version",
@@ -139,7 +139,7 @@ async function run(paths: AgentPaths, io: CliIo, options: CliOptions): Promise<n
   const journal = new PrintedJournal(paths.journal, logger);
   await journal.load();
 
-  const api = new AgentApi(paired.config.serverUrl, paired.credential.token, { fetch: options.fetch, userAgent: `rasoios-print-agent/${AGENT_VERSION}` });
+  const api = new AgentApi(paired.config.serverUrl, paired.credential.token, { fetch: options.fetch, userAgent: `flowdineos-print-agent/${AGENT_VERSION}` });
   const runner = new PrintAgentRunner({ api, journal, logger, transportFor });
 
   const controller = new AbortController();

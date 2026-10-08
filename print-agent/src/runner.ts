@@ -1,19 +1,22 @@
+import { profileOf } from "@/lib/print/profiles";
 import { parsePrintDocument } from "@/lib/print/types";
-import { AgentApiError, type AckBody, type AgentApiLike, type AgentPrinter, type ClaimedJob, type DiscoveredDevice, type PrinterHealthValue } from "./api";
+import { AgentApiError, type AckBody, type AgentApiLike, type AgentPrinter, type ClaimedJob, type DiscoveredDevice, type PrinterCheckRequest, type PrinterHealthValue } from "./api";
 import { discoverPrinters } from "./discovery";
 import { encodeDocument } from "./escpos";
 import type { PrintedJournal } from "./journal";
 import type { Logger } from "./logger";
 import { PrintTransportError, type Transport } from "./transports";
+import { UNREACHABLE_CODES } from "./transports/types";
 import { AGENT_VERSION } from "./version";
 
 /**
  * The poll → claim → print → acknowledge loop (S1-P17-T004, ADR-007 §3–§7).
  *
  * - Heartbeat (with each printer's probed health) and a config refresh every `heartbeatIntervalMs` (server: 30 s).
- * - Claim one job at a time. When a job came back, claim again straight away; when the queue is empty, wait the poll
- *   interval (3 s ± 1 s jitter), backing off to 15 s after 10 empty polls. One job per claim keeps every lease short:
- *   a slow printer can never hold ten leases until they expire under it.
+ * - One lane per printer (printing audit 2026-10-08 P1): a claim returns at most one job per printer, and printers are
+ *   served in parallel — an unreachable kitchen printer never delays the bar printer. A printer's own tickets stay in
+ *   order. When jobs came back, claim again straight away; when the queue is empty, wait the poll interval (3 s ± 1 s
+ *   jitter), backing off to 15 s after 10 empty polls. One job per printer per claim keeps every lease short.
  * - Network or server failure: exponential backoff 1 s → 60 s. 429: wait what the server says.
  * - 401: the token was revoked — stop with {@link FatalAgentError}; the service manager must not restart-loop on it.
  * - The journal is checked before printing and written before acknowledging (at-least-once with duplicate mitigation).
@@ -22,6 +25,8 @@ import { AGENT_VERSION } from "./version";
 export const EMPTY_POLLS_BEFORE_BACKOFF = 10;
 export const IDLE_POLL_MS = 15_000;
 export const MAX_NETWORK_BACKOFF_MS = 60_000;
+/** The server caps a claim at 10 jobs. */
+export const MAX_CLAIM = 10;
 const ACK_ATTEMPTS = 4;
 
 export class FatalAgentError extends Error {
@@ -68,6 +73,9 @@ export class PrintAgentRunner {
   private emptyPolls = 0;
   private networkFailures = 0;
   private nextHeartbeatAt = 0;
+  /** A heartbeat probes every printer; after the first one it runs beside the claim loop, never in front of it. */
+  private heartbeatInFlight: Promise<void> | null = null;
+  private heartbeatError: unknown = null;
 
   private readonly now: () => number;
   private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
@@ -92,16 +100,46 @@ export class PrintAgentRunner {
   /** One iteration: heartbeat when due, then one claim. Returns how long to wait before the next iteration. */
   async cycle(): Promise<number> {
     try {
-      if (this.now() >= this.nextHeartbeatAt) {
-        await this.heartbeat();
-        this.nextHeartbeatAt = this.now() + this.heartbeatIntervalMs;
+      if (this.heartbeatError !== null) {
+        // A background heartbeat failed (server down, or the token was revoked): handle it like any other failure.
+        const error = this.heartbeatError;
+        this.heartbeatError = null;
+        throw error;
       }
-      const { jobs, discovery } = await this.deps.api.claim(1);
+      if (this.now() >= this.nextHeartbeatAt && this.heartbeatInFlight === null) {
+        this.nextHeartbeatAt = this.now() + this.heartbeatIntervalMs;
+        if (this.printers.size === 0) {
+          // The first heartbeat loads the printer list the claim depends on, so it is awaited.
+          await this.heartbeat();
+        } else {
+          // Later ones probe printers in the background: an unreachable printer's 5 s connect timeout must never hold
+          // up the tickets of the other printers (printing audit 2026-10-08).
+          this.heartbeatInFlight = this.heartbeat()
+            .catch((error: unknown) => {
+              this.heartbeatError = error;
+            })
+            .finally(() => {
+              this.heartbeatInFlight = null;
+            });
+        }
+      }
+      const { jobs, discovery, checks } = await this.deps.api.claim(Math.min(MAX_CLAIM, Math.max(1, this.printers.size)));
       this.networkFailures = 0;
+      if (checks && checks.length > 0) await this.runChecks(checks);
       if (discovery) await this.runDiscovery(discovery.discoveryId);
       if (jobs.length > 0) {
         this.emptyPolls = 0;
-        for (const job of jobs) await this.process(job);
+        const lanes = new Map<string, ClaimedJob[]>();
+        for (const job of jobs) lanes.set(job.printerId, [...(lanes.get(job.printerId) ?? []), job]);
+        // Different printers in parallel; one printer's jobs in order. A failure in one lane never stops another.
+        const results = await Promise.allSettled([...lanes.values()].map(async (lane) => {
+          for (const job of lane) await this.process(job);
+        }));
+        const fatal = results.find((result): result is PromiseRejectedResult => result.status === "rejected" && result.reason instanceof FatalAgentError);
+        if (fatal) throw fatal.reason;
+        for (const result of results) {
+          if (result.status === "rejected") this.deps.logger.error("job.lane_failed", { error: result.reason instanceof Error ? result.reason.name : "UNKNOWN" });
+        }
         return 0;
       }
       this.emptyPolls += 1;
@@ -194,6 +232,49 @@ export class PrintAgentRunner {
     }
   }
 
+  /**
+   * "Test connection" from the console (printing audit 2026-10-08 P0): open a TCP connection to the printer and close
+   * it — the same probe the heartbeat uses — and report the outcome. Never prints, never creates a job.
+   */
+  async runChecks(checks: readonly PrinterCheckRequest[]): Promise<void> {
+    const { api, logger } = this.deps;
+    if (!api.reportCheck) return;
+    for (const check of checks) {
+      let printer = this.printers.get(check.printerId);
+      if (!printer) {
+        await this.refreshConfig().catch(() => undefined);
+        printer = this.printers.get(check.printerId);
+      }
+      const started = this.now();
+      let report: Parameters<NonNullable<AgentApiLike["reportCheck"]>>[1];
+      if (!printer) {
+        report = { ok: false, errorCode: "PRINTER_NOT_FOUND", detail: "This printer is not assigned to this agent.", elapsedMs: 0 };
+      } else {
+        try {
+          await this.deps.transportFor(printer).probe();
+          this.health.set(printer.printerId, { health: "ONLINE" });
+          report = { ok: true, elapsedMs: Math.max(0, this.now() - started) };
+        } catch (error) {
+          const state = healthFromError(error);
+          this.health.set(printer.printerId, state);
+          report = {
+            ok: false,
+            errorCode: error instanceof PrintTransportError ? error.code : "PRINT_FAILED",
+            detail: (state.detail ?? "Connection test failed").slice(0, 200),
+            elapsedMs: Math.max(0, this.now() - started),
+          };
+        }
+      }
+      try {
+        await api.reportCheck(check.checkId, report);
+        logger.info("printer.check_reported", { checkId: check.checkId, printerId: check.printerId, ok: report.ok, code: report.errorCode ?? null });
+      } catch (error) {
+        if (error instanceof AgentApiError && error.kind === "AUTH") throw new FatalAgentError("The server rejected this agent's token (revoked or replaced). Pair the agent again.");
+        logger.warn("printer.check_report_failed", { checkId: check.checkId, kind: error instanceof AgentApiError ? error.kind : "UNKNOWN" });
+      }
+    }
+  }
+
   async process(job: ClaimedJob): Promise<void> {
     const { logger, journal } = this.deps;
     const ctx = { jobId: job.jobId, printerId: job.printerId, jobType: job.jobType, attempt: job.attemptCount };
@@ -205,15 +286,6 @@ export class PrintAgentRunner {
       return;
     }
 
-    let bytes: Buffer;
-    try {
-      bytes = encodeDocument(parsePrintDocument(job.payload));
-    } catch {
-      logger.error("job.invalid_payload", ctx);
-      await this.acknowledge(job, { result: "FAILED", errorCode: "INVALID_PAYLOAD", errorMessage: "The agent could not read this ticket." });
-      return;
-    }
-
     let printer = this.printers.get(job.printerId);
     if (!printer) {
       await this.refreshConfig().catch(() => undefined);
@@ -221,7 +293,17 @@ export class PrintAgentRunner {
     }
     if (!printer) {
       logger.error("job.unknown_printer", ctx);
-      await this.acknowledge(job, { result: "FAILED", errorCode: "UNKNOWN_PRINTER", errorMessage: "This printer is not assigned to this agent." });
+      await this.acknowledge(job, { result: "FAILED", errorCode: "PRINTER_NOT_FOUND", errorMessage: "This printer is not assigned to this agent." });
+      return;
+    }
+
+    let bytes: Buffer;
+    try {
+      // Encoded for this printer's capability profile (cut type, code page, QR/barcode support).
+      bytes = encodeDocument(parsePrintDocument(job.payload), { profile: profileOf(printer.profile) });
+    } catch {
+      logger.error("job.invalid_payload", ctx);
+      await this.acknowledge(job, { result: "FAILED", errorCode: "ESC_POS_RENDER_FAILED", errorMessage: "The agent could not turn this ticket into printer commands." });
       return;
     }
 
@@ -230,7 +312,7 @@ export class PrintAgentRunner {
     } catch (error) {
       const state = healthFromError(error);
       this.health.set(printer.printerId, state);
-      const code = error instanceof PrintTransportError ? error.code : "PRINT_FAILED";
+      const code = error instanceof PrintTransportError ? error.code : "PRINT_SEND_FAILED";
       logger.warn("job.print_failed", { ...ctx, code });
       await this.acknowledge(job, { result: "FAILED", errorCode: code, errorMessage: (state.detail ?? "Printing failed").slice(0, 500) });
       return;
@@ -277,7 +359,7 @@ export class PrintAgentRunner {
 
 function healthFromError(error: unknown): Health {
   if (error instanceof PrintTransportError) {
-    const health: PrinterHealthValue = error.code === "PRINTER_OFFLINE" || error.code === "TIMEOUT" ? "OFFLINE" : "ERROR";
+    const health: PrinterHealthValue = UNREACHABLE_CODES.has(error.code) ? "OFFLINE" : "ERROR";
     return { health, detail: error.message.slice(0, 120) };
   }
   return { health: "ERROR", detail: "Unexpected printer error" };

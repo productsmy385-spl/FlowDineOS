@@ -153,7 +153,7 @@ describe("TC-AGENT-009 pair → assign → print → PRINTED", () => {
     expect(kotText).not.toMatch(/Rs|INR/);
     const billText = texts.find((text) => text.includes("TOTAL"))!;
     expect(billText).toContain(order.orderNumber);
-    expect(texts.some((text) => text.includes("TEST PRINT"))).toBe(true);
+    expect(texts.some((text) => text.includes("PRINTER TEST"))).toBe(true);
 
     // The agent was told to print to the configured LAN addresses of the right printers.
     const printers = await db.printer.findMany({ where: { id: { in: [KITCHEN_PRINTER, COUNTER_PRINTER] } } });
@@ -174,8 +174,9 @@ describe("TC-AGENT-009 pair → assign → print → PRINTED", () => {
       await simulator.setMode("normal");
     }
     const row = await db.printJob.findUniqueOrThrow({ where: { id: job.id } });
-    expect(row.status).toBe("PENDING"); // retry scheduled (attempt 1 of 3), per ADR-007 §4
-    expect(row).toMatchObject({ attemptCount: 1, lastErrorCode: "PRINTER_OFFLINE", printedAt: null });
+    expect(row.status).toBe("PENDING"); // retry scheduled by the job type's policy (lib/print/state-machine.ts)
+    expect(row).toMatchObject({ attemptCount: 1, lastErrorCode: "CONNECTION_REFUSED", printedAt: null });
+    expect((await db.printer.findUniqueOrThrow({ where: { id: KITCHEN_PRINTER } })).lastErrorCode).toBe("CONNECTION_REFUSED");
     expect((await db.printer.findUniqueOrThrow({ where: { id: KITCHEN_PRINTER } })).health).toBe("OFFLINE");
     expect(simulator.tickets).toHaveLength(0);
   });

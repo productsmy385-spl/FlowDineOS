@@ -16,6 +16,8 @@ type JournalFile = { version: 1; printed: Record<string, number> };
 
 export class PrintedJournal {
   private readonly printed = new Map<string, number>();
+  /** Writes run one after another: printers print in parallel (2026-10-08) and Windows refuses concurrent renames. */
+  private writing: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly file: string,
@@ -54,8 +56,12 @@ export class PrintedJournal {
   async record(jobId: string): Promise<void> {
     this.printed.set(jobId, this.now());
     this.prune();
-    const body: JournalFile = { version: 1, printed: Object.fromEntries(this.printed) };
-    await writeFileAtomic(this.file, JSON.stringify(body), 0o600);
+    // Each queued write saves the whole journal as it is when the write runs, so no entry is lost between writers.
+    const write = this.writing
+      .catch(() => undefined)
+      .then(() => writeFileAtomic(this.file, JSON.stringify({ version: 1, printed: Object.fromEntries(this.printed) } satisfies JournalFile), 0o600));
+    this.writing = write;
+    await write;
   }
 
   get size(): number {

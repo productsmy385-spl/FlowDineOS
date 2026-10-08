@@ -45,9 +45,17 @@ describe("TC-AGENT-011 config.json", () => {
   });
 
   it("per-OS data directory, overridable for development", () => {
-    expect(agentPaths({ ProgramData: "C:\\ProgramData" }, "win32").credentials).toBe("C:\\ProgramData\\RasoiOS\\PrintAgent\\credentials.json");
-    expect(agentPaths({}, "linux").journal).toBe("/var/lib/rasoios-print-agent/journal.json");
+    // FlowDineOS folders for a new install; an existing RasoiOS folder keeps being used so a paired agent keeps its
+    // pairing and printed-job journal (branding 2026-10-08).
+    const none = () => false;
+    const legacyOnly = (dir: string) => /RasoiOS|rasoios/.test(dir);
+    expect(agentPaths({ ProgramData: "C:\\ProgramData" }, "win32", none).credentials).toBe("C:\\ProgramData\\FlowDineOS\\PrintAgent\\credentials.json");
+    expect(agentPaths({}, "linux", none).journal).toBe("/var/lib/flowdineos-print-agent/journal.json");
+    expect(agentPaths({ ProgramData: "C:\\ProgramData" }, "win32", legacyOnly).credentials).toBe("C:\\ProgramData\\RasoiOS\\PrintAgent\\credentials.json");
+    expect(agentPaths({}, "linux", legacyOnly).journal).toBe("/var/lib/rasoios-print-agent/journal.json");
+    expect(agentPaths({}, "linux", () => true).home).toBe("/var/lib/flowdineos-print-agent");
     expect(agentPaths({ RASOIOS_AGENT_HOME: "/tmp/agent" }, "linux").home).toBe(path.resolve("/tmp/agent"));
+    expect(agentPaths({ FLOWDINEOS_AGENT_HOME: "/tmp/fd" }, "linux").home).toBe(path.resolve("/tmp/fd"));
   });
 });
 

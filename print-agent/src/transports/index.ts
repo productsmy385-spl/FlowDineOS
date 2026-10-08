@@ -14,7 +14,7 @@ export { PrintTransportError, type Transport } from "./types";
 export function transportFor(printer: Pick<AgentPrinter, "connectionType" | "connectionAddress">): Transport {
   if (printer.connectionType === "LAN") {
     const target = parseLanAddress(printer.connectionAddress);
-    if (!target) throw new PrintTransportError("INVALID_ADDRESS", "LAN printers must use a private IPv4 address such as 192.168.1.50:9100");
+    if (!target) throw new PrintTransportError("INVALID_PRINTER_CONFIGURATION", "LAN printers must use a private IPv4 address such as 192.168.1.50:9100");
     return new LanTransport(target.host, target.port);
   }
   return new UsbTransport(printer.connectionAddress);

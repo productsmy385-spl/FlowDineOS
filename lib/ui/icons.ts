@@ -50,6 +50,7 @@ import {
   LayoutList,
   Leaf,
   LoaderCircle,
+  RefreshCw,
   Mail,
   MapPin,
   Phone,
@@ -223,6 +224,17 @@ export const STATUS_ICONS = {
     PROCESSING: { icon: LoaderCircle, tone: "primary", label: "Sending to printer" },
     PRINTED: { icon: PrinterCheck, tone: "success", label: "Delivered to printer" },
     FAILED: { icon: TriangleAlert, tone: "danger", label: "Failed" },
+    CANCELLED: { icon: CircleX, tone: "neutral", label: "Cancelled", muted: true },
+  },
+  // What staff see for a print job (lib/print/state-machine.ts displayStatus, 2026-10-08): a queued job that already
+  // failed once is "Retrying", and nothing claims paper came out.
+  printJobDisplay: {
+    QUEUED: { icon: Clock, tone: "neutral", label: "Queued" },
+    PRINTING: { icon: LoaderCircle, tone: "primary", label: "Sending to printer" },
+    RETRYING: { icon: RefreshCw, tone: "warning", label: "Retrying" },
+    DELIVERED: { icon: PrinterCheck, tone: "success", label: "Delivered to printer" },
+    FAILED: { icon: TriangleAlert, tone: "danger", label: "Failed" },
+    CANCELLED: { icon: CircleX, tone: "neutral", label: "Cancelled", muted: true },
   },
   dailyMenu: {
     DRAFT: { icon: FilePen, tone: "neutral", label: "Draft" },
