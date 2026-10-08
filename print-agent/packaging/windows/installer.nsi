@@ -113,8 +113,10 @@ Function OnlySafeChars
   Pop $R4
   Pop $R3
   Pop $R2
-  Pop $R1
+  ; Stack is [old $R1, old $R0]: restore both and leave the result ($R0) on the stack.
   Exch $R0
+  Exch
+  Pop $R1
 FunctionEnd
 
 ; Push haystack, push one character → pops 1 when found (case-sensitive), else 0.
@@ -139,8 +141,10 @@ Function StrContainsExact
   StrCpy $R0 $R3
   Pop $R3
   Pop $R2
-  Pop $R1
+  ; Stack is [old $R1, old $R0]: restore both and leave the result ($R0) on the stack.
   Exch $R0
+  Exch
+  Pop $R1
 FunctionEnd
 
 Function .onInit
@@ -266,8 +270,10 @@ Function StrContains
   Pop $R4
   Pop $R3
   Pop $R2
-  Pop $R1
+  ; Stack is [old $R1, old $R0]: restore both and leave the result ($R0) on the stack.
   Exch $R0
+  Exch
+  Pop $R1
 FunctionEnd
 
 ; ── Install / upgrade / repair ──
