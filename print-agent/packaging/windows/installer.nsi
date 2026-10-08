@@ -19,9 +19,7 @@ Unicode true
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
-!include "StrFunc.nsh"
 !include "x64.nsh"
-${StrFilter}
 
 !ifndef VERSION
   !error "Pass /DVERSION=x.y.z"
@@ -76,15 +74,74 @@ UninstPage custom un.PurgePage un.PurgePageLeave
 
 ; ── Helpers ──
 
-; True (1) when $0 contains only the allowed characters; the code and URL are passed to the agent as arguments.
+; RESULT = 1 when INPUT contains only letters, digits and the EXTRA characters. The pairing code and the address are
+; passed to the agent as arguments, so quotes, spaces and shell characters are refused here.
+!define SAFE_BASE "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 !macro ONLY_SAFE_CHARS INPUT EXTRA RESULT
-  ${StrFilter} "${INPUT}" "12" "${EXTRA}" "" $R9
-  ${If} "$R9" == "${INPUT}"
-    StrCpy ${RESULT} 1
-  ${Else}
-    StrCpy ${RESULT} 0
-  ${EndIf}
+  Push "${INPUT}"
+  Push "${SAFE_BASE}${EXTRA}"
+  Call OnlySafeChars
+  Pop ${RESULT}
 !macroend
+
+; Push input, push allowed → pops 1 when every character of input is in allowed, else 0.
+Function OnlySafeChars
+  Exch $R1 ; allowed
+  Exch
+  Exch $R0 ; input
+  Push $R2
+  Push $R3
+  Push $R4
+  StrCpy $R2 0
+  StrCpy $R4 1
+  ${Do}
+    StrCpy $R3 $R0 1 $R2
+    ${If} $R3 == ""
+      ${Break}
+    ${EndIf}
+    Push $R1
+    Push $R3
+    Call StrContainsExact
+    Pop $R3
+    ${If} $R3 != 1
+      StrCpy $R4 0
+      ${Break}
+    ${EndIf}
+    IntOp $R2 $R2 + 1
+  ${Loop}
+  StrCpy $R0 $R4
+  Pop $R4
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Exch $R0
+FunctionEnd
+
+; Push haystack, push one character → pops 1 when found (case-sensitive), else 0.
+Function StrContainsExact
+  Exch $R1
+  Exch
+  Exch $R0
+  Push $R2
+  Push $R3
+  StrCpy $R2 0
+  StrCpy $R3 0
+  ${Do}
+    StrCpy $R5 $R0 1 $R2
+    ${If} $R5 == ""
+      ${Break}
+    ${EndIf}
+    StrCmpS $R5 $R1 0 +3
+      StrCpy $R3 1
+      ${Break}
+    IntOp $R2 $R2 + 1
+  ${Loop}
+  StrCpy $R0 $R3
+  Pop $R3
+  Pop $R2
+  Pop $R1
+  Exch $R0
+FunctionEnd
 
 Function .onInit
   ${IfNot} ${RunningX64}
