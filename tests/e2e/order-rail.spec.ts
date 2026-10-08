@@ -69,7 +69,10 @@ test("TC-RAIL-011 a new order in the database appears on the rail without a relo
   });
 
   await expect(rail.getByText(number)).toBeVisible({ timeout: 45_000 });
-  expect(await rail.locator("[data-rail-card]").count()).toBe(before + 1);
+  // Exactly one card for the new order. The total is not compared with `before`: the desktop, tablet and mobile runs
+  // insert their own orders into the same restaurant at the same time, so other cards can arrive too.
+  await expect(rail.locator("[data-rail-card]").filter({ hasText: number })).toHaveCount(1);
+  expect(await rail.locator("[data-rail-card]").count()).toBeGreaterThanOrEqual(before + 1);
 });
 
 test("TC-RAIL-012 the kitchen shows three status rails, each with every ticket in that state", async ({ page }) => {
