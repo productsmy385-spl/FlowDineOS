@@ -54,3 +54,7 @@ npm-audit.json
 *.key
 signing-credentials.json
 
+# Local NSIS compiler binaries
+/nsis-3.10/
+nsis*.zip
+

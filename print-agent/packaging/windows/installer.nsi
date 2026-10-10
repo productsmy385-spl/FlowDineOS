@@ -65,15 +65,22 @@ Var Upgrade
 
 !define MUI_ABORTWARNING
 !insertmacro MUI_PAGE_WELCOME
-Page custom PairingPage PairingPageLeave
 !insertmacro MUI_PAGE_INSTFILES
+
+!define MUI_FINISHPAGE_TITLE "Installation Complete"
+!define MUI_FINISHPAGE_TEXT "FlowDineOS Print Agent has been installed on this computer.$\r$\n$\r$\n✓ Windows service installed and running in background$\r$\n✓ Automatic recovery on PC restart configured$\r$\n$\r$\nNext step: Connect this computer to your restaurant using the FlowDineOS Print Agent pairing window."
 !define MUI_FINISHPAGE_RUN "$INSTDIR\FlowDineOS.PrintAgent.UI.exe"
-!define MUI_FINISHPAGE_RUN_TEXT "Open FlowDineOS Print Agent to connect this computer"
+!define MUI_FINISHPAGE_RUN_TEXT "Open FlowDineOS Print Agent Pairing Window"
 !define MUI_FINISHPAGE_RUN_CHECKED
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE OnFinishPageLeave
 !insertmacro MUI_PAGE_FINISH
 UninstPage custom un.PurgePage un.PurgePageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
+
+Function OnFinishPageLeave
+  Exec '"$INSTDIR\FlowDineOS.PrintAgent.UI.exe"'
+FunctionEnd
 
 ; ── Helpers ──
 
@@ -325,6 +332,11 @@ Section "Install"
     CopyFiles /SILENT "$LegacyDir\credentials.json" "$DataDir"
     CopyFiles /SILENT "$LegacyDir\journal.json" "$DataDir"
   data_ready:
+  IfFileExists "$DataDir\config.json" config_ready 0
+    FileOpen $0 "$DataDir\config.json" w
+    FileWrite $0 '{"serverUrl":"$ServerUrl"}'
+    FileClose $0
+  config_ready:
 
   ; 5. The service: quoted path (no unquoted-path hijack), own virtual account, delayed auto start, restart on failure.
   nsExec::ExecToStack '"$SYSDIR\sc.exe" query ${SERVICE}'
@@ -350,10 +362,8 @@ Section "Install"
   nsExec::ExecToLog '"$SYSDIR\sc.exe" sidtype ${SERVICE} unrestricted'
   Pop $0
 
-  ; 6. Data folder permissions: only SYSTEM, Administrators and the service account (inherited by every file in it).
-  ; The folder gets the explicit ACL; files already in it (a carried-over pairing, logs) are then reset to inherit it.
-  ; (Applying the folder ACL with /T would strip the files' inherited entries and leave them unreadable.)
-  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "${SERVICE_ACCOUNT}:(OI)(CI)M" /Q'
+  ; 6. Data folder permissions: SYSTEM, Administrators, Users and the service account.
+  nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)M" "${SERVICE_ACCOUNT}:(OI)(CI)M" /Q'
   Pop $0
   ${If} $0 == 0
     nsExec::ExecToLog '"$SYSDIR\icacls.exe" "$DataDir\*" /reset /T /Q'
@@ -407,12 +417,11 @@ Section "Install"
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "EstimatedSize" $0
 
-  ; 10. Start Menu shortcut and auto-launch if silent
+  ; 10. Start Menu shortcut and auto-launch
   CreateDirectory "$SMPROGRAMS\FlowDineOS"
   CreateShortcut "$SMPROGRAMS\FlowDineOS\FlowDineOS Print Agent.lnk" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" "" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" 0
   CreateShortcut "$SMPROGRAMS\FlowDineOS Print Agent.lnk" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" "" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" 0
-  IfSilent 0 +2
-    Exec '"$INSTDIR\FlowDineOS.PrintAgent.UI.exe"'
+  Exec '"$INSTDIR\FlowDineOS.PrintAgent.UI.exe"'
 
   DetailPrint "${PRODUCT} ${VERSION} is installed and running."
 SectionEnd

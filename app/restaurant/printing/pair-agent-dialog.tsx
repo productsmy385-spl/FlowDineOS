@@ -227,8 +227,8 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
                 To verify package authenticity before running on counter hardware, compare the binary SHA-256 hash:
               </p>
               <div className="flex items-center justify-between gap-2 rounded-lg border border-border-subtle bg-raised px-2.5 py-1.5 font-mono text-caption text-fg-primary overflow-x-auto">
-                <span className="truncate select-all" title="33f65953b874569baa15ff242f4595534b1f2a48a8b7b70c00aaa73f46ed341d">
-                  SHA-256: 33f65953b874569baa15ff242f4595534b1f2a48a8b7b70c00aaa73f46ed341d
+                <span className="truncate select-all" title="25c98f9a1270b00bc4c26709eeaef92f44c3bb2a92f120d78eeed5e92dcf5d95">
+                  SHA-256: 25c98f9a1270b00bc4c26709eeaef92f44c3bb2a92f120d78eeed5e92dcf5d95
                 </span>
               </div>
             </div>

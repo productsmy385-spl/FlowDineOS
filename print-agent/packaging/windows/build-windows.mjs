@@ -79,7 +79,13 @@ console.log("FlowDineOS.PrintAgent.UI.exe compiled");
 copyFileSync(path.join(here, "README-windows.txt"), path.join(out, "README.txt"));
 
 // ── 3. Installer ──
-const candidates = [process.env.MAKENSIS, "makensis", "C:\\Program Files (x86)\\NSIS\\makensis.exe", "C:\\Program Files\\NSIS\\makensis.exe"].filter(Boolean);
+const candidates = [
+  process.env.MAKENSIS,
+  "makensis",
+  path.join(repoRoot, "nsis-3.10", "makensis.exe"),
+  "C:\\Program Files (x86)\\NSIS\\makensis.exe",
+  "C:\\Program Files\\NSIS\\makensis.exe"
+].filter(Boolean);
 let makensis = null;
 for (const candidate of candidates) {
   try {

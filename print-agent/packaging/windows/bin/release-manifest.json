@@ -2,9 +2,9 @@
     "product":  "FlowDineOS Print Agent",
     "platform":  "windows",
     "version":  "0.2.0",
-    "buildTimestamp":  "2026-10-10T07:52:44.9156204Z",
+    "buildTimestamp":  "2026-10-10T08:20:33.3152216Z",
     "signingStatus":  {
-                          "isSigned":  true,
+                          "isSigned":  false,
                           "isPubliclyTrusted":  false,
                           "provider":  "None / Local Development",
                           "notes":  "Signed with self-signed test certificate; public CA certificate required for public distribution."
@@ -23,7 +23,7 @@
                       {
                           "name":  "FlowDineOS.PrintAgent.Service.exe",
                           "size":  8704,
-                          "sha256":  "9a5bab01b82b1ce638169a8a18feb83cc6b0e2aacfde7d279f98cdcc708c016b",
+                          "sha256":  "0dac24f52d361cad077a0cee69ad84ccf4f5b1cca2b970981cc7f58dc3d37d63",
                           "signed":  false,
                           "signatureStatus":  "NotSigned",
                           "signerSubject":  null,
@@ -32,8 +32,8 @@
                       },
                       {
                           "name":  "FlowDineOS.PrintAgent.UI.exe",
-                          "size":  13312,
-                          "sha256":  "f4d5850cc624f8c6f511bc650593f9f3d6ca385d10c2c04b3eb42b4228f1388b",
+                          "size":  16896,
+                          "sha256":  "6730a3f10328f54f77e190c0919cbba16b17ee95ed60c70b941e0573ebd11b95",
                           "signed":  false,
                           "signatureStatus":  "NotSigned",
                           "signerSubject":  null,
@@ -42,18 +42,18 @@
                       },
                       {
                           "name":  "FlowDineOS-Print-Agent-Setup.exe",
-                          "size":  23307432,
-                          "sha256":  "33f65953b874569baa15ff242f4595534b1f2a48a8b7b70c00aaa73f46ed341d",
-                          "signed":  true,
-                          "signatureStatus":  "UnknownError",
-                          "signerSubject":  "CN=FlowDineOS Development Test Signer, O=FlowDineOS, C=IN",
-                          "signerIssuer":  "CN=FlowDineOS Development Test Signer, O=FlowDineOS, C=IN",
-                          "timestamped":  true
+                          "size":  23302285,
+                          "sha256":  "25c98f9a1270b00bc4c26709eeaef92f44c3bb2a92f120d78eeed5e92dcf5d95",
+                          "signed":  false,
+                          "signatureStatus":  "NotSigned",
+                          "signerSubject":  null,
+                          "signerIssuer":  null,
+                          "timestamped":  false
                       },
                       {
                           "name":  "FlowDineOS-Print-Agent-Setup.zip",
-                          "size":  23293660,
-                          "sha256":  "e0295df8aa6818f44362133d47027b3b41d21e75c9db925c9d6f453fbebf978e",
+                          "size":  23290154,
+                          "sha256":  "d536f96bf3e9d6ec42020ace6f749b601c1b5829a7fac3eda9a08dd52f5c36b9",
                           "signed":  false,
                           "contains":  "FlowDineOS-Print-Agent-Setup.exe"
                       }
