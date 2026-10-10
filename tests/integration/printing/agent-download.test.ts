@@ -45,7 +45,7 @@ describe("TC-PRINT-031 who may download the agent", () => {
     await asSeedUser("A", "TENANT_ADMIN");
     const response = await invokeRoute(GET, { url: "/api/v1/printing/agent-download/windows", params: { platform: "windows" } });
     expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("application/vnd.microsoft.portable-executable");
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
     expect(response.headers.get("content-disposition")).toContain("FlowDineOS-Print-Agent-Setup.exe");
     expect(response.headers.get("content-disposition")).not.toContain(".zip");
     expect(Number(response.headers.get("content-length"))).toBeGreaterThan(1_000_000);

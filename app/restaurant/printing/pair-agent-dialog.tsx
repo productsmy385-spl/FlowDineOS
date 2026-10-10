@@ -32,6 +32,44 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
   const [pending, setPending] = React.useState(false);
   const [nowMs, setNowMs] = React.useState(() => Date.now());
   const [showLinux, setShowLinux] = React.useState(false);
+  const [downloading, setDownloading] = React.useState<"exe" | "zip" | null>(null);
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
+
+  const handleDownload = async (format: "exe" | "zip") => {
+    if (downloading) return;
+    setDownloading(format);
+    setDownloadError(null);
+    const endpoint = format === "zip" ? "/api/v1/printing/agent-download/windows?format=zip" : "/api/v1/printing/agent-download/windows";
+    const filename = format === "zip" ? "FlowDineOS-Print-Agent-Setup.zip" : "FlowDineOS-Print-Agent-Setup.exe";
+
+    try {
+      const res = await fetch(endpoint);
+      if (!res.ok) {
+        let msg = `Download failed (${res.status})`;
+        try {
+          const body = await res.json();
+          if (body?.message) msg = body.message;
+        } catch {
+          // ignore json parse error
+        }
+        setDownloadError(msg);
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(link);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : "Download failed. Please try again.");
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   // The agent talks to this same site; read on the client so the command shows the address the admin is using.
   const serverOrigin = typeof window === "undefined" ? "https://<this-site>" : window.location.origin;
@@ -127,40 +165,55 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
                 Self-contained Windows installer. Automatically installs the FlowDineOS Print Agent service with auto-recovery on PC restart. No Node.js required.
               </p>
               <div className="flex flex-wrap items-center gap-3">
-                <a
-                  href="/api/v1/printing/agent-download/windows"
-                  download="FlowDineOS-Print-Agent-Setup.exe"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-action-primary px-4 text-label font-medium text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover motion-safe:hover:shadow-glow"
+                <button
+                  type="button"
+                  disabled={downloading !== null}
+                  onClick={() => handleDownload("exe")}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-action-primary px-4 text-label font-medium text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover disabled:opacity-60"
                 >
                   <Icon icon={Download} size={16} />
-                  Download for Windows (.exe)
-                </a>
-                <a
-                  href="/api/v1/printing/agent-download/windows?format=zip"
-                  download="FlowDineOS-Print-Agent-Setup.zip"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong bg-card px-4 text-label font-medium text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised"
+                  {downloading === "exe" ? "Downloading installer..." : "Download Windows Installer (.exe)"}
+                </button>
+                <button
+                  type="button"
+                  disabled={downloading !== null}
+                  onClick={() => handleDownload("zip")}
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong bg-card px-4 text-label font-medium text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised disabled:opacity-60"
                 >
                   <Icon icon={Download} size={16} />
-                  Download as .ZIP
-                </a>
+                  {downloading === "zip" ? "Downloading ZIP..." : "Download ZIP (.zip)"}
+                </button>
                 <span className="text-caption text-fg-secondary font-mono">~23 MB</span>
               </div>
+              {downloadError && (
+                <p className="text-caption text-feedback-error font-medium" role="alert">
+                  {downloadError}
+                </p>
+              )}
             </div>
 
-            <ol className="flex list-decimal flex-col gap-2 pl-5 text-body text-fg-secondary">
-              <li>
-                Run <strong>FlowDineOS-Print-Agent-Setup.exe</strong> (or extract the <strong>.zip</strong>) as Administrator on the restaurant PC.
-              </li>
-              <li>
-                When prompted, paste the pairing code: <strong className="text-fg-primary font-mono">{issued.pairingCode}</strong>.
-              </li>
-              <li>
-                The installer registers and starts the background Windows service automatically.
-              </li>
-              <li>
-                Assign this agent to your printers on the <strong>Printers</strong> tab, then send a test print.
-              </li>
-            </ol>
+            <div className="flex flex-col gap-2.5">
+              <ol className="flex list-decimal flex-col gap-2 pl-5 text-body text-fg-secondary">
+                <li>
+                  Download and install <strong>FlowDineOS Print Agent</strong>.
+                </li>
+                <li>
+                  The installer automatically starts the Print Agent service.
+                </li>
+                <li>
+                  Enter the pairing code shown above in the Print Agent window: <strong className="text-fg-primary font-mono">{issued.pairingCode}</strong>.
+                </li>
+                <li>
+                  After pairing, assign your printer.
+                </li>
+                <li>
+                  Send a test print.
+                </li>
+              </ol>
+              <p className="rounded-lg bg-surface-muted/60 px-3 py-2 text-caption text-fg-muted border border-border-subtle">
+                <strong>Zero technical setup:</strong> You do not need PowerShell, Node.js, or any technical setup. Everything is configured and started automatically.
+              </p>
+            </div>
 
             <div className="flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface-muted/40 p-3 text-caption text-fg-secondary">
               <div className="flex items-center justify-between">

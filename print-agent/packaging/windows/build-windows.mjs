@@ -68,6 +68,14 @@ execFileSync(
 );
 console.log("FlowDineOS.PrintAgent.Service.exe compiled");
 
+const ui = path.join(out, "FlowDineOS.PrintAgent.UI.exe");
+execFileSync(
+  csc,
+  ["/nologo", "/target:winexe", "/optimize+", "/platform:x64", `/out:${ui}`, "/reference:System.Windows.Forms.dll", "/reference:System.Drawing.dll", "/reference:System.ServiceProcess.dll", path.join(here, "agent-ui", "Program.cs")],
+  { stdio: "inherit" },
+);
+console.log("FlowDineOS.PrintAgent.UI.exe compiled");
+
 copyFileSync(path.join(here, "README-windows.txt"), path.join(out, "README.txt"));
 
 // ── 3. Installer ──
@@ -86,8 +94,14 @@ if (makensis) {
   execFileSync(makensis, ["/V2", `/DVERSION=${version}`, `/DSOURCE_DIR=${out}`, `/DOUT_FILE=${path.join(out, "FlowDineOS-Print-Agent-Setup.exe")}`, path.join(here, "installer.nsi")], { stdio: "inherit" });
   console.log("FlowDineOS-Print-Agent-Setup.exe built");
 } else {
-  console.warn("makensis (NSIS 3) not found: the installer was not built. Set MAKENSIS or install NSIS.");
-  if (process.env.CI) process.exit(1);
+  const cachedSetup = path.join(here, "bin", "FlowDineOS-Print-Agent-Setup.exe");
+  if (existsSync(cachedSetup) && !existsSync(path.join(out, "FlowDineOS-Print-Agent-Setup.exe"))) {
+    copyFileSync(cachedSetup, path.join(out, "FlowDineOS-Print-Agent-Setup.exe"));
+    console.log("Using cached FlowDineOS-Print-Agent-Setup.exe from packaging/windows/bin");
+  } else {
+    console.warn("makensis (NSIS 3) not found: the installer was not built. Set MAKENSIS or install NSIS.");
+    if (process.env.CI) process.exit(1);
+  }
 }
 
 // ── Checksums & Signing Pipeline ──

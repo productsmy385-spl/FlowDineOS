@@ -25,8 +25,9 @@ type PackageConfig = {
 const PACKAGES: Record<"windows" | "windows-zip" | "linux", PackageConfig> = {
   windows: {
     file: "FlowDineOS-Print-Agent-Setup.exe",
-    type: "application/vnd.microsoft.portable-executable",
+    type: "application/octet-stream",
     candidates: (root: string) => [
+      path.join(root, "release", "FlowDineOS-Print-Agent-Setup.exe"),
       path.join(root, "print-agent", "dist", "windows", "FlowDineOS-Print-Agent-Setup.exe"),
       path.join(root, "print-agent", "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.exe"),
       path.join(root, "public", "downloads", "FlowDineOS-Print-Agent-Setup.exe"),
@@ -36,6 +37,7 @@ const PACKAGES: Record<"windows" | "windows-zip" | "linux", PackageConfig> = {
     file: "FlowDineOS-Print-Agent-Setup.zip",
     type: "application/zip",
     candidates: (root: string) => [
+      path.join(root, "release", "FlowDineOS-Print-Agent-Setup.zip"),
       path.join(root, "print-agent", "dist", "windows", "FlowDineOS-Print-Agent-Setup.zip"),
       path.join(root, "print-agent", "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.zip"),
       path.join(root, "public", "downloads", "FlowDineOS-Print-Agent-Setup.zip"),

@@ -1,26 +1,31 @@
-# FlowDineOS Print Agent — Windows Authenticode Signing & Verification Pipeline
+# FlowDineOS Print Agent — Windows Authenticode Signing & Release Pipeline
 # (C) FlowDineOS. Designed for CI/CD releases and local validation.
 [CmdletBinding()]
 param(
   [string]$TargetDir = "",
-  [string]$SignToolPath = ""
+  [string]$SignToolPath = "",
+  [switch]$RequireTrusted
 )
 
 $ErrorActionPreference = "Stop"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = Resolve-Path (Join-Path $scriptDir "..\..\..")
+
 if (-not $TargetDir) {
   $TargetDir = Resolve-Path (Join-Path $scriptDir "..\..\dist\windows")
 }
 
 Write-Host "==========================================================" -ForegroundColor Cyan
-Write-Host " FlowDineOS Windows Authenticode Signing & Verification" -ForegroundColor Cyan
+Write-Host " FlowDineOS Windows Release & Signing Pipeline" -ForegroundColor Cyan
 Write-Host "==========================================================" -ForegroundColor Cyan
 Write-Host " Target Directory: $TargetDir"
+Write-Host " Repo Root:        $repoRoot"
 
 $binaries = @(
   (Join-Path $TargetDir "FlowDineOS.PrintAgent.exe"),
   (Join-Path $TargetDir "FlowDineOS.PrintAgent.Service.exe"),
+  (Join-Path $TargetDir "FlowDineOS.PrintAgent.UI.exe"),
   (Join-Path $TargetDir "FlowDineOS-Print-Agent-Setup.exe")
 )
 
@@ -131,57 +136,136 @@ if (-not $signedAny -and ($env:SIGNING_CERT_PFX -or $env:SIGNING_CERT_BASE64)) {
   }
 }
 
-# Method C: Verification of current binaries
+# 4. Verification of binaries
 Write-Host "`n==> Verifying Digital Signatures..." -ForegroundColor Cyan
+$artifactRecords = @()
+
 foreach ($bin in $existingBinaries) {
   $leaf = Split-Path -Leaf $bin
+  $item = Get-Item $bin
+  $hash = (Get-FileHash -Path $bin -Algorithm SHA256).Hash.ToLower()
   $sig = Get-AuthenticodeSignature -FilePath $bin
 
-  if ($sig.Status -eq "Valid") {
+  $isSigned = ($sig.Status -ne "NotSigned" -and $sig.SignerCertificate -ne $null)
+  $isValidTrusted = ($sig.Status -eq "Valid")
+
+  if ($isValidTrusted) {
     Write-Host " [AUTHENTICODE VALID] $leaf" -ForegroundColor Green
     Write-Host "   Signer:      $($sig.SignerCertificate.Subject)" -ForegroundColor Green
     Write-Host "   Thumbprint:  $($sig.SignerCertificate.Thumbprint)"
     Write-Host "   Timestamped: $($sig.TimeStamperCertificate -ne $null)"
-  } else {
-    Write-Host " [NOT SIGNED / UNTRUSTED] $leaf" -ForegroundColor Yellow
+  } elseif ($isSigned) {
+    Write-Host " [SIGNED BUT UNTRUSTED ROOT] $leaf" -ForegroundColor Yellow
     Write-Host "   Status:      $($sig.Status)"
-    Write-Host "   Explanation: Binary has no trusted commercial Authenticode certificate attached." -ForegroundColor DarkGray
+    Write-Host "   Signer:      $($sig.SignerCertificate.Subject)"
+    Write-Host "   Issuer:      $($sig.SignerCertificate.Issuer)"
+    Write-Host "   Timestamped: $($sig.TimeStamperCertificate -ne $null)"
+  } else {
+    Write-Host " [NOT SIGNED] $leaf" -ForegroundColor Yellow
+    Write-Host "   Status:      $($sig.Status)"
+  }
+
+  $artifactRecords += [PSCustomObject]@{
+    name = $leaf
+    size = $item.Length
+    sha256 = $hash
+    signed = $isSigned
+    signatureStatus = $sig.Status.ToString()
+    signerSubject = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { $null }
+    signerIssuer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Issuer } else { $null }
+    timestamped = ($sig.TimeStamperCertificate -ne $null)
   }
 }
 
-# 4. Recompute exact SHA-256 Checksums
-Write-Host "`n==> Updating SHA256SUMS and Release ZIP..." -ForegroundColor Cyan
-$shaLines = @()
-foreach ($bin in $existingBinaries) {
-  $hash = (Get-FileHash -Path $bin -Algorithm SHA256).Hash.ToLower()
-  $leaf = Split-Path -Leaf $bin
-  $shaLines += "$hash  $leaf"
+# Strict enforcement check
+$requireTrustedCheck = $RequireTrusted -or ($env:CI_REQUIRE_TRUSTED_SIGNING -eq "true")
+$setupRecord = $artifactRecords | Where-Object { $_.name -eq "FlowDineOS-Print-Agent-Setup.exe" }
+
+if ($requireTrustedCheck -and (-not $setupRecord -or $setupRecord.signatureStatus -ne "Valid")) {
+  throw "PUBLIC CODE SIGNING FAILED: FlowDineOS-Print-Agent-Setup.exe signature is not Valid (status: $($setupRecord.signatureStatus)). Production release requires a public trusted CA certificate."
 }
 
-$shaFile = Join-Path $TargetDir "SHA256SUMS"
-[string]::Join([Environment]::NewLine, $shaLines) | Set-Content -Path $shaFile -Encoding ascii
-Write-Host " [OK] Updated $shaFile" -ForegroundColor Green
+# 5. Recompute Checksums and Build Clean ZIP
+Write-Host "`n==> Updating SHA256SUMS and Release ZIP..." -ForegroundColor Cyan
 
-# 5. Package verified clean ZIP from exact installer
 $setupExe = Join-Path $TargetDir "FlowDineOS-Print-Agent-Setup.exe"
+$setupZip = Join-Path $TargetDir "FlowDineOS-Print-Agent-Setup.zip"
+
 if (Test-Path $setupExe) {
-  $setupZip = Join-Path $TargetDir "FlowDineOS-Print-Agent-Setup.zip"
   if (Test-Path $setupZip) { Remove-Item $setupZip -Force }
-  
   Compress-Archive -Path $setupExe -DestinationPath $setupZip -Force
+  $zipItem = Get-Item $setupZip
   $zipHash = (Get-FileHash -Path $setupZip -Algorithm SHA256).Hash.ToLower()
-  Add-Content -Path $shaFile -Value "$zipHash  FlowDineOS-Print-Agent-Setup.zip" -Encoding ascii
   Write-Host " [OK] Created clean ZIP: $setupZip" -ForegroundColor Green
   Write-Host "      ZIP SHA256: $zipHash" -ForegroundColor DarkGray
 
-  # Sync to packaging/windows/bin cache
-  $pkgBin = Join-Path $scriptDir "bin"
-  if (Test-Path $pkgBin) {
-    Copy-Item $setupExe (Join-Path $pkgBin "FlowDineOS-Print-Agent-Setup.exe") -Force
-    Copy-Item $setupZip (Join-Path $pkgBin "FlowDineOS-Print-Agent-Setup.zip") -Force
-    Copy-Item $shaFile (Join-Path $pkgBin "SHA256SUMS") -Force
-    Write-Host " [OK] Synced to packaging\windows\bin cache" -ForegroundColor Green
+  $artifactRecords += [PSCustomObject]@{
+    name = "FlowDineOS-Print-Agent-Setup.zip"
+    size = $zipItem.Length
+    sha256 = $zipHash
+    signed = $false
+    contains = "FlowDineOS-Print-Agent-Setup.exe"
   }
 }
 
-Write-Host "`n==> Signing & verification pipeline complete!" -ForegroundColor Green
+$shaLines = @()
+foreach ($rec in $artifactRecords) {
+  $shaLines += "$($rec.sha256)  $($rec.name)"
+}
+
+$shaFile = Join-Path $TargetDir "SHA256SUMS"
+$chkFile = Join-Path $TargetDir "checksums.txt"
+$shaContent = [string]::Join([Environment]::NewLine, $shaLines)
+Set-Content -Path $shaFile -Value $shaContent -Encoding ascii
+Set-Content -Path $chkFile -Value $shaContent -Encoding ascii
+Write-Host " [OK] Updated $shaFile and $chkFile" -ForegroundColor Green
+
+# 6. Generate release-manifest.json
+$manifestObj = [PSCustomObject]@{
+  product = "FlowDineOS Print Agent"
+  platform = "windows"
+  version = "0.2.0"
+  buildTimestamp = (Get-Date).ToUniversalTime().ToString("o")
+  signingStatus = [PSCustomObject]@{
+    isSigned = if ($setupRecord) { $setupRecord.signed } else { $false }
+    isPubliclyTrusted = if ($setupRecord) { ($setupRecord.signatureStatus -eq "Valid") } else { $false }
+    provider = if ($env:TRUSTED_SIGNING_ACCOUNT) { "Microsoft Trusted Signing" } elseif ($env:SIGNING_CERT_PFX) { "Commercial Authenticode PFX" } else { "None / Local Development" }
+    notes = if ($setupRecord -and $setupRecord.signatureStatus -ne "Valid") { "Signed with self-signed test certificate; public CA certificate required for public distribution." } else { "Verified release." }
+  }
+  artifacts = $artifactRecords
+}
+
+$manifestFile = Join-Path $TargetDir "release-manifest.json"
+$manifestJson = $manifestObj | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText($manifestFile, $manifestJson, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host " [OK] Generated $manifestFile" -ForegroundColor Green
+
+# 7. Sync release artifacts to authoritative release/ folder and packaging/windows/bin
+$releaseDir = Join-Path $repoRoot "release"
+if (-not (Test-Path $releaseDir)) {
+  New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+}
+
+$pkgBin = Join-Path $scriptDir "bin"
+if (-not (Test-Path $pkgBin)) {
+  New-Item -ItemType Directory -Path $pkgBin -Force | Out-Null
+}
+
+$syncFiles = @(
+  "FlowDineOS-Print-Agent-Setup.exe",
+  "FlowDineOS-Print-Agent-Setup.zip",
+  "SHA256SUMS",
+  "checksums.txt",
+  "release-manifest.json"
+)
+
+foreach ($f in $syncFiles) {
+  $src = Join-Path $TargetDir $f
+  if (Test-Path $src) {
+    Copy-Item $src (Join-Path $releaseDir $f) -Force
+    Copy-Item $src (Join-Path $pkgBin $f) -Force
+  }
+}
+Write-Host " [OK] Synced all release artifacts to $releaseDir and $pkgBin" -ForegroundColor Green
+
+Write-Host "`n==> Release pipeline execution complete!" -ForegroundColor Green

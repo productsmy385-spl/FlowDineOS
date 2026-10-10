@@ -67,6 +67,9 @@ Var Upgrade
 !insertmacro MUI_PAGE_WELCOME
 Page custom PairingPage PairingPageLeave
 !insertmacro MUI_PAGE_INSTFILES
+!define MUI_FINISHPAGE_RUN "$INSTDIR\FlowDineOS.PrintAgent.UI.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Open FlowDineOS Print Agent to connect this computer"
+!define MUI_FINISHPAGE_RUN_CHECKED
 !insertmacro MUI_PAGE_FINISH
 UninstPage custom un.PurgePage un.PurgePageLeave
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -305,6 +308,7 @@ Section "Install"
   ClearErrors
   File "${SOURCE_DIR}\FlowDineOS.PrintAgent.exe"
   File "${SOURCE_DIR}\FlowDineOS.PrintAgent.Service.exe"
+  File "${SOURCE_DIR}\FlowDineOS.PrintAgent.UI.exe"
   File "${SOURCE_DIR}\README.txt"
   ${If} ${Errors}
     Call Rollback
@@ -402,6 +406,14 @@ Section "Install"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 0
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "EstimatedSize" $0
+
+  ; 10. Start Menu shortcut and auto-launch if silent
+  CreateDirectory "$SMPROGRAMS\FlowDineOS"
+  CreateShortcut "$SMPROGRAMS\FlowDineOS\FlowDineOS Print Agent.lnk" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" "" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" 0
+  CreateShortcut "$SMPROGRAMS\FlowDineOS Print Agent.lnk" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" "" "$INSTDIR\FlowDineOS.PrintAgent.UI.exe" 0
+  IfSilent 0 +2
+    Exec '"$INSTDIR\FlowDineOS.PrintAgent.UI.exe"'
+
   DetailPrint "${PRODUCT} ${VERSION} is installed and running."
 SectionEnd
 
@@ -459,9 +471,13 @@ Section "Uninstall"
   Pop $0
   Delete "$INSTDIR\FlowDineOS.PrintAgent.exe"
   Delete "$INSTDIR\FlowDineOS.PrintAgent.Service.exe"
+  Delete "$INSTDIR\FlowDineOS.PrintAgent.UI.exe"
   Delete "$INSTDIR\*.rollback"
   Delete "$INSTDIR\README.txt"
   Delete "$INSTDIR\Uninstall.exe"
+  Delete "$SMPROGRAMS\FlowDineOS Print Agent.lnk"
+  Delete "$SMPROGRAMS\FlowDineOS\FlowDineOS Print Agent.lnk"
+  RMDir "$SMPROGRAMS\FlowDineOS"
   RMDir "$INSTDIR"
   DeleteRegKey HKLM "${UNINSTALL_KEY}"
   ${If} $Purge == 1
