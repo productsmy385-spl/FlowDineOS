@@ -147,17 +147,17 @@ On a Windows 10/11 PC where `node --version` fails:
 11. On a PC that had the older RasoiOS agent: after Setup, the same agent (same name) shows Online, and no new agent
     appears.
 
+## Current Distribution Status & Trust
+
+- **Current Status**: Internal pilot / controlled hardware validation.
+- **Trust Status**: Signed with development test certificate (`CN=FlowDineOS Development Test Signer`). Not yet a publicly trusted Authenticode release.
+- **Prerequisites for Public General Availability**: Commercial Authenticode Code Signing Certificate (Sectigo or DigiCert OV/EV) registered to the business in India with hardware token / Cloud HSM storage, followed by Microsoft Defender and Google Safe Browsing reputation accumulation.
+
 ## Troubleshooting
 
 | Symptom | Check |
 |---|---|
 | Service stops right after starting | `C:\ProgramData\FlowDineOS\PrintAgent\logs\agent.log`; Event Viewer → Windows Logs → Application |
 | Log says `agent.needs_pairing` | Pair: `"C:\Program Files\FlowDineOS Print Agent\FlowDineOS.PrintAgent.exe" pair <CODE>` (Administrator) |
-| SmartScreen "Windows protected your PC" | Unsigned pilot build: More info → Run anyway, after checking SHA256SUMS |
+| SmartScreen / Chrome Warnings | Expected during internal testing until commercial Authenticode certificate is issued. Verify binary SHA-256 matches `SHA256SUMS`. |
 | Agent offline but service running | Internet/firewall: outbound HTTPS to the FlowDineOS address must be allowed |
-
-## Not included
-
-The console's Pair-agent download still serves the Node.js zip, because Railway builds on Linux and cannot build the
-Windows exe. The installer is published by CI as a build artifact. Linking the pairing dialog to a released
-`FlowDineOS-Print-Agent-Setup.exe` (GitHub Release or object storage) is the next step once the PC test passes.
