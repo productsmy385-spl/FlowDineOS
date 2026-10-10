@@ -327,9 +327,9 @@ Section "Install"
   Pop $0
   Pop $1
   ${If} $0 == 0
-    nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${SERVICE} binPath= "\"$INSTDIR\FlowDineOS.PrintAgent.Service.exe\"" start= delayed-auto obj= "${SERVICE_ACCOUNT}" DisplayName= "${PRODUCT}"'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" config ${SERVICE} binPath= "\"$INSTDIR\FlowDineOS.PrintAgent.Service.exe\"" start= auto obj= "${SERVICE_ACCOUNT}" DisplayName= "${PRODUCT}"'
   ${Else}
-    nsExec::ExecToLog '"$SYSDIR\sc.exe" create ${SERVICE} binPath= "\"$INSTDIR\FlowDineOS.PrintAgent.Service.exe\"" start= delayed-auto obj= "${SERVICE_ACCOUNT}" DisplayName= "${PRODUCT}"'
+    nsExec::ExecToLog '"$SYSDIR\sc.exe" create ${SERVICE} binPath= "\"$INSTDIR\FlowDineOS.PrintAgent.Service.exe\"" start= auto obj= "${SERVICE_ACCOUNT}" DisplayName= "${PRODUCT}"'
   ${EndIf}
   Pop $0
   ${If} $0 != 0
@@ -339,7 +339,7 @@ Section "Install"
   ${EndIf}
   nsExec::ExecToLog '"$SYSDIR\sc.exe" description ${SERVICE} "FlowDineOS local printing agent for restaurant printers."'
   Pop $0
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" failure ${SERVICE} reset= 86400 actions= restart/5000/restart/30000/restart/60000'
+  nsExec::ExecToLog '"$SYSDIR\sc.exe" failure ${SERVICE} reset= 86400 actions= restart/5000/restart/10000/restart/20000'
   Pop $0
   nsExec::ExecToLog '"$SYSDIR\sc.exe" failureflag ${SERVICE} 1'
   Pop $0

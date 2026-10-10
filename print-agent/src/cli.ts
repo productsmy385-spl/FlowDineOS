@@ -1,7 +1,10 @@
+import { readFile, rm } from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { AgentApi, AgentApiError, type FetchLike } from "./api";
 import { ConfigError, loadAgentConfig, parseAgentConfig, saveAgentConfig, type AgentConfig } from "./config";
 import { CredentialError, FileCredentialStore } from "./credentials";
+import { writeFileAtomic } from "./fs-atomic";
 import { PrintedJournal } from "./journal";
 import { createLogger, type Logger } from "./logger";
 import { agentPaths, type AgentEnv, type AgentPaths } from "./paths";
@@ -143,10 +146,47 @@ async function loadPaired(paths: AgentPaths, io: CliIo) {
   return { config, credential };
 }
 
+export async function acquireProcessLock(home: string): Promise<(() => Promise<void>) | null> {
+  const lockFile = path.join(home, "agent.lock");
+  try {
+    const existing = await readFile(lockFile, "utf8").catch(() => null);
+    if (existing) {
+      try {
+        const parsed = JSON.parse(existing);
+        const pid = parsed?.pid;
+        if (typeof pid === "number") {
+          try {
+            process.kill(pid, 0);
+            return null;
+          } catch {
+            // Previous process is no longer alive, stale lock
+          }
+        }
+      } catch {
+        // Corrupt lock file, overwrite
+      }
+    }
+    await writeFileAtomic(lockFile, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }) + "\n", 0o600);
+    return async () => {
+      await rm(lockFile, { force: true }).catch(() => undefined);
+    };
+  } catch {
+    return async () => undefined;
+  }
+}
+
 async function run(paths: AgentPaths, io: CliIo, options: CliOptions): Promise<number> {
   const paired = await loadPaired(paths, io);
   if (!paired) return EXIT.NEEDS_PAIRING;
   const logger = options.logger ?? createLogger(paired.config.logLevel);
+
+  const releaseLock = await acquireProcessLock(paths.home);
+  if (!releaseLock) {
+    logger.warn("agent.already_running", { message: "Another print agent process is already active." });
+    io.err("Another print agent process is already running for this identity. Exiting to avoid duplicate polling.");
+    return EXIT.OK;
+  }
+
   const journal = new PrintedJournal(paths.journal, logger);
   await journal.load();
 
@@ -187,6 +227,7 @@ async function run(paths: AgentPaths, io: CliIo, options: CliOptions): Promise<n
       process.stdin.pause();
       process.stdin.unref?.();
     }
+    await releaseLock();
   }
 }
 

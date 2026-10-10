@@ -49,13 +49,14 @@ agent writes inherits it, so the token is unreadable to ordinary users.
 
 ## Service behaviour
 
-- Starts with Windows (delayed auto), restarts on failure (5 s, 30 s, 60 s; failure count reset daily), and the host
-  itself restarts the agent with 2 s → 60 s backoff.
+- Starts automatically with Windows (`start= auto`), with automated failure recovery actions (`sc.exe failure FlowDineOSPrintAgent reset= 86400 actions= restart/5000/restart/10000/restart/20000`).
+- The service host itself manages child process crashes with internal backoff (2 s → 60 s).
 - Stop and shutdown: the host closes the agent's stdin (`FLOWDINEOS_SERVICE=1`), the agent finishes the ticket in flight
   and exits; after 20 s it is killed.
+- Single-instance protection: `agent.lock` enforces process mutual exclusion so duplicate processes do not corrupt presence or race for print jobs.
 - Not paired / token revoked (agent exit 2): the service stays running and checks every 60 s, so pairing later needs no
-  restart.
-- No internet / server down: the agent's own backoff (1 s → 60 s); the service never crash-loops.
+  service restart.
+- No internet / server down: the agent's own backoff (1 s → 60 s with 20% jitter); credentials and journal remain untouched.
 - The service host logs only the agent's own log lines, which are already redacted (no token, pairing code or ticket text).
 
 ## Install, upgrade, repair, uninstall

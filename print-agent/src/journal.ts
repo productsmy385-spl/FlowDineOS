@@ -30,8 +30,23 @@ export class PrintedJournal {
     try {
       text = await readFile(this.file, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw error;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        const legacyFile = this.file
+          .replace("FlowDineOS\\PrintAgent", "RasoiOS\\PrintAgent")
+          .replace("FlowDineOS/PrintAgent", "RasoiOS/PrintAgent")
+          .replace("flowdineos-print-agent", "rasoios-print-agent");
+        if (legacyFile !== this.file) {
+          try {
+            text = await readFile(legacyFile, "utf8");
+          } catch {
+            return;
+          }
+        } else {
+          return;
+        }
+      } else {
+        throw error;
+      }
     }
     try {
       const parsed = JSON.parse(text) as Partial<JournalFile>;

@@ -53,7 +53,26 @@ export class FileCredentialStore {
       }
       text = await readFile(this.file, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        const legacyFile = this.file
+          .replace("FlowDineOS\\PrintAgent", "RasoiOS\\PrintAgent")
+          .replace("FlowDineOS/PrintAgent", "RasoiOS/PrintAgent")
+          .replace("flowdineos-print-agent", "rasoios-print-agent");
+        if (legacyFile !== this.file) {
+          try {
+            const legacyText = await readFile(legacyFile, "utf8");
+            const raw = JSON.parse(legacyText);
+            const parsed = storedCredentialSchema.safeParse(raw);
+            if (parsed.success) {
+              await this.save(parsed.data).catch(() => undefined);
+              return parsed.data;
+            }
+          } catch {
+            // legacy file absent or unreadable
+          }
+        }
+        return null;
+      }
       throw error;
     }
     let raw: unknown;

@@ -1,0 +1,38 @@
+# FlowDineOS local print agent with systemd. Installed by install.sh.
+# Exit status 2 means "not paired / token revoked": systemd must not restart-loop on it.
+[Unit]
+Description=FlowDineOS print agent
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=flowdineos-agent
+Group=flowdineos-agent
+# usblp devices (/dev/usb/lp*) belong to the lp group.
+SupplementaryGroups=lp
+Environment=FLOWDINEOS_AGENT_HOME=/var/lib/flowdineos-print-agent
+Environment=RASOIOS_AGENT_HOME=/var/lib/flowdineos-print-agent
+StateDirectory=flowdineos-print-agent
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/env node /opt/flowdineos-print-agent/rasoios-print-agent.cjs run
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+
+# Hardening: the agent only needs outbound TCP and its state directory.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+# No DeviceAllow=: that would close the device policy. USB printer access is governed by /dev/usb/lp* ownership (lp).
+
+[Install]
+WantedBy=multi-user.target

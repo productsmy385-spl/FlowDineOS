@@ -2,7 +2,7 @@
 // release artifacts. esbuild resolves from the repository root's node_modules; `@/` maps to the repository root so
 // the agent bundles the exact PrintDocument schema and text rules the server uses (lib/print/*).
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -27,19 +27,28 @@ await build({
 
 const bundle = readFileSync(outfile);
 const sum = createHash("sha256").update(bundle).digest("hex");
-const sums = `${sum}  rasoios-print-agent.cjs\n`;
+let sums = `${sum}  rasoios-print-agent.cjs\n`;
+
+// Copy pre-built or CI-provided Windows setup executable if present
+const bundledSetup = path.join(here, "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.exe");
+const distWindowsDir = path.join(here, "dist", "windows");
+if (!existsSync(distWindowsDir)) mkdirSync(distWindowsDir, { recursive: true });
+const distSetup = path.join(distWindowsDir, "FlowDineOS-Print-Agent-Setup.exe");
+
+if (existsSync(bundledSetup) && !existsSync(distSetup)) {
+  copyFileSync(bundledSetup, distSetup);
+}
+if (existsSync(distSetup)) {
+  const setupBytes = readFileSync(distSetup);
+  const setupSum = createHash("sha256").update(setupBytes).digest("hex");
+  sums += `${setupSum}  FlowDineOS-Print-Agent-Setup.exe\n`;
+}
+
 writeFileSync(path.join(here, "dist", "SHA256SUMS"), sums);
 console.log(`sha256 ${sum}`);
 
 /**
- * The two packages a restaurant actually downloads (Printing -> Agents -> Pair agent).
- *
- * Each carries the bundle, the SHA256SUMS the installer verifies it against, that platform's install/uninstall
- * scripts and a README. Without this step the pairing dialog told people to "unzip the print agent download" and
- * there was nothing to download: the bundle existed but nothing packaged or served it.
- *
- * Both packages are built on every deploy (railway.json runs `agent:build`), so the file the console serves is
- * always the same version as the server that pairs it.
+ * The packages served to restaurants (Printing -> Agents -> Pair agent).
  */
 const packaged = (platform, extra) => [
   { name: "rasoios-print-agent.cjs", data: bundle, executable: true },
@@ -53,21 +62,24 @@ const file = (name, relative, executable = false) => ({
   executable,
 });
 
+// Legacy Windows zip (kept for existing automated tests or legacy tools)
 writeFileSync(
   path.join(here, "dist", "rasoios-print-agent-windows.zip"),
   zip(packaged("windows", [file("install.ps1", "windows/install.ps1"), file("uninstall.ps1", "windows/uninstall.ps1")])),
 );
-writeFileSync(
-  path.join(here, "dist", "rasoios-print-agent-linux.tar.gz"),
-  tarGz(
-    packaged("linux", [
-      file("install.sh", "linux/install.sh", true),
-      file("uninstall.sh", "linux/uninstall.sh", true),
-      file("rasoios-print-agent.service", "linux/rasoios-print-agent.service"),
-    ]),
-  ),
-);
-console.log("packaged rasoios-print-agent-windows.zip and rasoios-print-agent-linux.tar.gz");
+
+const linuxFiles = [
+  file("install.sh", "linux/install.sh", true),
+  file("uninstall.sh", "linux/uninstall.sh", true),
+  file("rasoios-print-agent.service", "linux/rasoios-print-agent.service"),
+];
+if (existsSync(path.join(here, "packaging", "linux", "flowdineos-print-agent.service"))) {
+  linuxFiles.push(file("flowdineos-print-agent.service", "linux/flowdineos-print-agent.service"));
+}
+const linuxArchive = tarGz(packaged("linux", linuxFiles));
+writeFileSync(path.join(here, "dist", "flowdineos-print-agent-linux.tar.gz"), linuxArchive);
+writeFileSync(path.join(here, "dist", "rasoios-print-agent-linux.tar.gz"), linuxArchive);
+console.log("packaged FlowDineOS print agent archives for Windows and Linux");
 
 function readme(platform) {
   const install =

@@ -29,6 +29,15 @@ export const MAX_NETWORK_BACKOFF_MS = 60_000;
 export const MAX_CLAIM = 10;
 const ACK_ATTEMPTS = 4;
 
+export type RunnerState =
+  | "STARTING"
+  | "CONNECTING"
+  | "ONLINE"
+  | "RECONNECTING"
+  | "AUTHENTICATION_REQUIRED"
+  | "REVOKED"
+  | "STOPPING";
+
 export class FatalAgentError extends Error {
   constructor(message: string) {
     super(message);
@@ -70,8 +79,10 @@ export class PrintAgentRunner {
   readonly health = new Map<string, Health>();
   pollIntervalMs = 3_000;
   heartbeatIntervalMs = 30_000;
+  private state: RunnerState = "STARTING";
   private emptyPolls = 0;
   private networkFailures = 0;
+  private consecutiveAuthFailures = 0;
   private nextHeartbeatAt = 0;
   /** A heartbeat probes every printer; after the first one it runs beside the claim loop, never in front of it. */
   private heartbeatInFlight: Promise<void> | null = null;
@@ -87,13 +98,26 @@ export class PrintAgentRunner {
     this.random = deps.random ?? Math.random;
   }
 
+  getState(): RunnerState {
+    return this.state;
+  }
+
+  private setState(next: RunnerState): void {
+    if (this.state === next) return;
+    const prev = this.state;
+    this.state = next;
+    this.deps.logger.info("agent.state_changed", { from: prev, to: next });
+  }
+
   /** Runs until `signal` aborts. Throws {@link FatalAgentError} when the agent must be re-paired. */
   async run(signal: AbortSignal): Promise<void> {
+    this.setState("STARTING");
     this.deps.logger.info("agent.started", { version: AGENT_VERSION });
     while (!signal.aborted) {
       const delay = await this.cycle();
       if (delay > 0) await this.sleep(delay, signal);
     }
+    this.setState("STOPPING");
     this.deps.logger.info("agent.stopped");
   }
 
@@ -105,6 +129,9 @@ export class PrintAgentRunner {
         const error = this.heartbeatError;
         this.heartbeatError = null;
         throw error;
+      }
+      if (this.state === "STARTING" || this.state === "RECONNECTING") {
+        this.setState("CONNECTING");
       }
       if (this.now() >= this.nextHeartbeatAt && this.heartbeatInFlight === null) {
         this.nextHeartbeatAt = this.now() + this.heartbeatIntervalMs;
@@ -123,8 +150,14 @@ export class PrintAgentRunner {
             });
         }
       }
+      const wasReconnecting = this.networkFailures > 0;
       const { jobs, discovery, checks } = await this.deps.api.claim(Math.min(MAX_CLAIM, Math.max(1, this.printers.size)));
+      this.setState("ONLINE");
+      if (wasReconnecting) {
+        this.nextHeartbeatAt = 0;
+      }
       this.networkFailures = 0;
+      this.consecutiveAuthFailures = 0;
       if (checks && checks.length > 0) await this.runChecks(checks);
       if (discovery) await this.runDiscovery(discovery.discoveryId);
       if (jobs.length > 0) {
@@ -152,28 +185,41 @@ export class PrintAgentRunner {
 
   private failureDelay(error: unknown): number {
     if (error instanceof AgentApiError) {
-      if (error.kind === "AUTH") throw new FatalAgentError("The server rejected this agent's token (revoked or replaced). Pair the agent again.");
+      if (error.kind === "AUTH") {
+        this.setState(error.code === "REVOKED_AGENT_TOKEN" ? "REVOKED" : "AUTHENTICATION_REQUIRED");
+        throw new FatalAgentError("The server rejected this agent's token (revoked or replaced). Pair the agent again.");
+      }
       if (error.kind === "RATE_LIMITED") {
+        this.setState("RECONNECTING");
         this.deps.logger.warn("agent.rate_limited", { retryAfterMs: error.retryAfterMs });
         return error.retryAfterMs ?? 30_000;
       }
     }
+    this.setState("RECONNECTING");
     this.networkFailures += 1;
-    const delay = Math.min(MAX_NETWORK_BACKOFF_MS, 1_000 * 2 ** (this.networkFailures - 1));
+    const baseDelay = Math.min(MAX_NETWORK_BACKOFF_MS, 1_000 * 2 ** (this.networkFailures - 1));
+    const jitterRatio = 1 + (this.random() - 0.5) * 0.2;
+    const delay = Math.max(500, Math.min(MAX_NETWORK_BACKOFF_MS, Math.round(baseDelay * jitterRatio)));
     this.deps.logger.warn("agent.server_unavailable", {
       kind: error instanceof AgentApiError ? error.kind : "UNKNOWN",
       status: error instanceof AgentApiError ? error.status : null,
       consecutiveFailures: this.networkFailures,
       retryInMs: delay,
     });
-    // Force a heartbeat as soon as the server is back, so the console sees the agent again immediately.
-    this.nextHeartbeatAt = 0;
     return delay;
   }
 
   /** Refreshes the printer list from RH-AGT-05 and reports each printer's probed health through RH-AGT-02. */
   async heartbeat(): Promise<void> {
-    await this.refreshConfig();
+    try {
+      await this.refreshConfig();
+    } catch (error) {
+      if (error instanceof AgentApiError && error.kind === "AUTH") throw error;
+      this.deps.logger.warn("agent.config_refresh_failed", {
+        kind: error instanceof AgentApiError ? error.kind : "UNKNOWN",
+        error: error instanceof Error ? error.message : "UNKNOWN",
+      });
+    }
     await Promise.all([...this.printers.values()].map((printer) => this.probe(printer)));
     const reply = await this.deps.api.heartbeat({
       agentVersion: AGENT_VERSION,

@@ -59,6 +59,21 @@ A claim returns at most one job per printer — that printer's oldest due job �
 flight. The agent prints different printers in parallel and each printer's tickets in order. Heartbeat probes run in the
 background. An unreachable kitchen printer therefore never delays the bar printer.
 
+## Agent presence and auto-reconnect lifecycle
+
+Restaurant print agents maintain a persistent identity across PC reboots, service restarts, and network disruptions:
+
+- **Identity persistence:** Once paired, credentials (`credentials.json`) and printed tickets (`journal.json`) are stored securely under `%ProgramData%\FlowDineOS\PrintAgent\` (with fallback migration from legacy `RasoiOS`). Credentials are never cleared on network/server errors.
+- **Client reconnection states:** `STARTING` → `CONNECTING` → `ONLINE` → `RECONNECTING` → `STOPPING`. Transient failures (DNS, timeout, HTTP 429, 500, 502, 503) enter `RECONNECTING` with exponential backoff (1 s → 60 s with 20% jitter) and retry indefinitely until restored.
+- **Server presence calculation:**
+  - `ONLINE`: Last heartbeat seen within 60 seconds (`AGENT_ONLINE_THRESHOLD_MS`).
+  - `RECONNECTING`: Last heartbeat between 60 seconds and 120 seconds (`AGENT_OFFLINE_AFTER_MS`).
+  - `OFFLINE`: No heartbeat for over 120 seconds.
+  - `AUTH_REQUIRED`: Agent record exists but has not completed initial pairing (`PENDING_PAIRING`).
+  - `REVOKED`: Administrator explicitly revoked the agent token.
+- **Out-of-order heartbeat protection:** Database updates guard `lastSeenAt` to ensure delayed or out-of-order packets cannot overwrite newer timestamps.
+- **Process mutual exclusion:** Process lock (`agent.lock`) ensures only a single agent instance polls the server at a time, preventing duplicate poll races.
+
 ## Error codes
 
 Catalogue: `lib/print/error-codes.ts`, shared by the server, the console and the agent. Each code has a technical line,

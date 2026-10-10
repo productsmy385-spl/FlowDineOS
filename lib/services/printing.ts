@@ -53,6 +53,7 @@ import {
   resolveReceiptPrinter,
   retryJob,
   revokeAgentRow,
+  touchAgent,
   updatePrinterRow,
   type AgentPrinterConfig,
   type ClaimedJob,
@@ -115,7 +116,14 @@ async function enforceRateLimit(scope: string, identifier: string, policy: { lim
 
 // ─── Console reads (LD-PRN-01, RH-PRN-01) ───
 
-export type PrintingConsoleAgent = PrintAgentDto & { online: boolean };
+export type AgentPresenceStatus = "ONLINE" | "RECONNECTING" | "OFFLINE" | "AUTH_REQUIRED" | "REVOKED";
+
+export const AGENT_ONLINE_THRESHOLD_MS = 60_000;
+
+export type PrintingConsoleAgent = PrintAgentDto & {
+  online: boolean;
+  presenceStatus: AgentPresenceStatus;
+};
 
 export type PrintingConsole = {
   agents: PrintingConsoleAgent[];
@@ -139,6 +147,16 @@ function projectAgents(ctx: TenantContext, agents: readonly PrintAgentDto[]): Pr
   return agents.map((agent) => ({ ...agent, tokenPrefix: null }));
 }
 
+export function getAgentPresenceStatus(agent: Pick<PrintAgentDto, "status" | "lastSeenAt">, at: Date = now()): AgentPresenceStatus {
+  if (agent.status === "REVOKED") return "REVOKED";
+  if (agent.status === "PENDING_PAIRING") return "AUTH_REQUIRED";
+  if (agent.status !== "ACTIVE" || !agent.lastSeenAt) return "OFFLINE";
+  const elapsed = at.getTime() - Date.parse(agent.lastSeenAt);
+  if (elapsed <= AGENT_ONLINE_THRESHOLD_MS) return "ONLINE";
+  if (elapsed <= AGENT_OFFLINE_AFTER_MS) return "RECONNECTING";
+  return "OFFLINE";
+}
+
 /** An agent is online when it called within the heartbeat grace window — never a stored flag (ADR-007 §7, BA-30). */
 export function isAgentOnline(agent: Pick<PrintAgentDto, "status" | "lastSeenAt">, at: Date = now()): boolean {
   if (agent.status !== "ACTIVE" || !agent.lastSeenAt) return false;
@@ -146,7 +164,14 @@ export function isAgentOnline(agent: Pick<PrintAgentDto, "status" | "lastSeenAt"
 }
 
 export function withOnlineFlag(agents: readonly PrintAgentDto[], at: Date = now()): PrintingConsoleAgent[] {
-  return agents.map((agent) => ({ ...agent, online: isAgentOnline(agent, at) }));
+  return agents.map((agent) => {
+    const presenceStatus = getAgentPresenceStatus(agent, at);
+    return {
+      ...agent,
+      online: isAgentOnline(agent, at),
+      presenceStatus,
+    };
+  });
 }
 
 /** LD-PRN-01 — the whole console in one read: agents, printers and the newest 50 jobs of the caller's tenant. */
@@ -681,6 +706,9 @@ export async function pairPrintAgent(
 /** RH-AGT-02 — records the health the agent reports for its own printers. Foreign ids are ignored and logged. */
 export async function recordHeartbeat(ctx: AgentContext, input: { agentVersion?: string; printers: ReadonlyArray<{ printerId: string; health: PrinterHealth; detail?: string | null }> }): Promise<{ serverTime: string; pollIntervalMs: number; heartbeatIntervalMs: number }> {
   const at = now();
+  await touchAgent(ctx, at, { agentVersion: input.agentVersion }).catch((error: unknown) =>
+    logger.warn("print_agent.heartbeat_touch_failed", { requestId: ctx.requestId, error: String(error) }),
+  );
   const { applied, ignored } = await applyPrinterHealth(ctx, input.printers, at);
   if (ignored.length > 0) {
     logger.warn("security.agent_foreign_printer_report", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, ignored: ignored.length });

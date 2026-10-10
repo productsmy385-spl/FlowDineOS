@@ -284,7 +284,8 @@ export function PrintingConsoleView({
   const wantedType = TYPE_TABS.find((tab) => tab.id === typeTab)?.jobType;
   const visibleJobs = jobs.filter((job) => (wantedStatus ? job.displayStatus === wantedStatus : true) && (wantedType ? job.jobType === wantedType : true));
   const failedCount = jobs.filter((job) => job.status === "FAILED").length;
-  const offlineAgents = agents.filter((agent) => agent.status === "ACTIVE" && !agent.online).length;
+  const reconnectingAgents = agents.filter((agent) => agent.status === "ACTIVE" && agent.presenceStatus === "RECONNECTING").length;
+  const offlineAgents = agents.filter((agent) => agent.status === "ACTIVE" && agent.presenceStatus === "OFFLINE").length;
 
   const finished = (job: PrintJobDto) => job.status === "PRINTED" || job.status === "FAILED" || job.status === "CANCELLED";
   const cancellable = (job: PrintJobDto) => job.status === "PENDING" || job.status === "FAILED";
@@ -638,15 +639,21 @@ export function PrintingConsoleView({
           {shownAgents.map((agent) => (
             <li key={agent.id}>
               <Card className="flex-row items-center gap-4">
-                <IconTile icon={agent.online ? DOMAIN_ICONS.agentOnline : DOMAIN_ICONS.agentOffline} tone={agent.online ? "success" : "neutral"} label="" />
+                <IconTile
+                  icon={agent.presenceStatus === "ONLINE" ? DOMAIN_ICONS.agentOnline : DOMAIN_ICONS.agentOffline}
+                  tone={agent.presenceStatus === "ONLINE" ? "success" : agent.presenceStatus === "RECONNECTING" ? "warning" : "neutral"}
+                  label=""
+                />
                 <div className="min-w-0 flex-1">
                   <p className="text-subheading text-fg-primary">{agent.name}</p>
                   <p className="text-caption text-fg-secondary">
                     {agent.status === "PENDING_PAIRING"
                       ? "Waiting to be paired"
-                      : agent.lastSeenAt
-                        ? `Last seen ${formatInZone(agent.lastSeenAt, timezone, "datetime", "en-GB")}`
-                        : "Never connected"}
+                      : agent.presenceStatus === "RECONNECTING"
+                        ? `Reconnecting · last seen ${formatInZone(agent.lastSeenAt!, timezone, "datetime", "en-GB")}`
+                        : agent.lastSeenAt
+                          ? `Last seen ${formatInZone(agent.lastSeenAt, timezone, "datetime", "en-GB")}`
+                          : "Never connected"}
                     {agent.agentVersion ? ` · v${agent.agentVersion}` : ""}
                     {agent.osInfo ? ` · ${agent.osInfo}` : ""}
                     {agent.tokenPrefix ? ` · token ${agent.tokenPrefix}…` : ""}
@@ -657,7 +664,7 @@ export function PrintingConsoleView({
                     </p>
                   ) : null}
                 </div>
-                <StatusBadge domain="agent" status={agent.status === "REVOKED" ? "REVOKED" : agent.online ? "ONLINE" : "OFFLINE"} />
+                <StatusBadge domain="agent" status={agent.status === "REVOKED" ? "REVOKED" : (agent.presenceStatus ?? (agent.online ? "ONLINE" : "OFFLINE"))} />
                 {can.manageAgents && agent.status !== "REVOKED" && (
                   <Button size="sm" variant="ghost" onClick={() => setRevoking(agent)}>
                     Revoke
@@ -673,11 +680,13 @@ export function PrintingConsoleView({
 
   return (
     <div className="flex flex-col gap-6">
-      {(failedCount > 0 || offlineAgents > 0) && (
+      {(failedCount > 0 || offlineAgents > 0 || reconnectingAgents > 0) && (
         <p role="status" className="flex flex-wrap items-center gap-2 rounded-xl border border-status-warning/40 bg-status-warning/10 px-4 py-3 text-label text-status-warning">
           <Icon icon={TriangleAlert} size={18} />
           {failedCount > 0 && <span>{failedCount === 1 ? "1 print job failed" : `${failedCount} print jobs failed`}</span>}
-          {failedCount > 0 && offlineAgents > 0 && <span aria-hidden="true">·</span>}
+          {failedCount > 0 && (offlineAgents > 0 || reconnectingAgents > 0) && <span aria-hidden="true">·</span>}
+          {reconnectingAgents > 0 && <span>{reconnectingAgents === 1 ? "1 agent reconnecting" : `${reconnectingAgents} agents reconnecting`}</span>}
+          {reconnectingAgents > 0 && offlineAgents > 0 && <span aria-hidden="true">·</span>}
           {offlineAgents > 0 && <span>{offlineAgents === 1 ? "1 agent offline" : `${offlineAgents} agents offline`}</span>}
         </p>
       )}

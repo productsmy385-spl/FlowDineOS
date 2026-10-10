@@ -252,7 +252,9 @@ export const STATUS_ICONS = {
   },
   agent: {
     ONLINE: { icon: Wifi, tone: "success", label: "Online" },
+    RECONNECTING: { icon: RefreshCw, tone: "warning", label: "Reconnecting", muted: true },
     OFFLINE: { icon: WifiOff, tone: "danger", label: "Offline" },
+    AUTH_REQUIRED: { icon: TriangleAlert, tone: "danger", label: "Auth required" },
     REVOKED: { icon: Ban, tone: "neutral", label: "Revoked" },
   },
   social: {

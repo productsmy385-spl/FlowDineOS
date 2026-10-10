@@ -875,7 +875,11 @@ export async function activatePairedAgent(
 export async function touchAgent(ctx: AgentContext, at: Date, input: { ip?: string | null; agentVersion?: string | null } = {}): Promise<void> {
   await mapErrors("Print agent", () =>
     db.printAgent.updateMany({
-      where: tenantScope(ctx, { id: ctx.agentId, status: PrintAgentStatus.ACTIVE }),
+      where: tenantScope(ctx, {
+        id: ctx.agentId,
+        status: PrintAgentStatus.ACTIVE,
+        OR: [{ lastSeenAt: null }, { lastSeenAt: { lte: at } }],
+      }),
       data: {
         lastSeenAt: at,
         ...(input.ip === undefined ? {} : { lastSeenIp: input.ip }),

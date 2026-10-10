@@ -65,6 +65,20 @@ export async function loadAgentConfig(file: string): Promise<AgentConfig> {
     text = await readFile(file, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      const legacyFile = file
+        .replace("FlowDineOS\\PrintAgent", "RasoiOS\\PrintAgent")
+        .replace("FlowDineOS/PrintAgent", "RasoiOS/PrintAgent")
+        .replace("flowdineos-print-agent", "rasoios-print-agent");
+      if (legacyFile !== file) {
+        try {
+          const legacyText = await readFile(legacyFile, "utf8");
+          const config = parseAgentConfig(JSON.parse(legacyText));
+          await saveAgentConfig(file, config).catch(() => undefined);
+          return config;
+        } catch {
+          // legacy absent or invalid
+        }
+      }
       throw new ConfigError(`No config.json at ${file}. Run "rasoios-print-agent pair <code> --server https://…" first.`);
     }
     throw error;

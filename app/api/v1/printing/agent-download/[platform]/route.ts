@@ -9,23 +9,37 @@ import { logger } from "@/lib/logger";
 /**
  * RH-PRINT-08 — `GET /api/v1/printing/agent-download/{platform}` (S1-P17-T009).
  *
- * Serves the print agent package the pairing dialog tells people to install. Until this existed the dialog said to
- * "unzip the RASOIOS print agent download" and there was nothing to download: `npm run agent:build` produced the
- * bundle, but nothing packaged it for a restaurant or handed it over.
+ * Serves the print agent package the pairing dialog tells people to install:
+ * - Windows: FlowDineOS-Print-Agent-Setup.exe (self-contained installer with service host, no Node.js needed)
+ * - Linux: flowdineos-print-agent-linux.tar.gz (hardened systemd service package)
  *
- * The packages are built during deployment (`railway.json` runs `agent:build`), so what a restaurant installs is
- * always the same build as the server it pairs with.
- *
- * Deliberately *not* under `/api/v1/print-agent/…`: that prefix is the agent's own bearer-token API (ADR-007), and a
- * route there would skip the Clerk gate entirely. This is a console download, so it takes a console session and the
- * permission that manages agents. The file is identical for every tenant — it holds no tenant data, and pairing is
- * what binds an installed agent to one restaurant — but it is still not public: handing the agent binary to anyone
- * who asks widens the attack surface for nothing.
+ * Requires an authenticated tenant session with print_agent:manage.
  */
 
-const PACKAGES = {
-  windows: { file: "rasoios-print-agent-windows.zip", type: "application/zip" },
-  linux: { file: "rasoios-print-agent-linux.tar.gz", type: "application/gzip" },
+type PackageConfig = {
+  file: string;
+  type: string;
+  candidates: (root: string) => string[];
+};
+
+const PACKAGES: Record<"windows" | "linux", PackageConfig> = {
+  windows: {
+    file: "FlowDineOS-Print-Agent-Setup.exe",
+    type: "application/vnd.microsoft.portable-executable",
+    candidates: (root: string) => [
+      path.join(root, "print-agent", "dist", "windows", "FlowDineOS-Print-Agent-Setup.exe"),
+      path.join(root, "print-agent", "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.exe"),
+      path.join(root, "public", "downloads", "FlowDineOS-Print-Agent-Setup.exe"),
+    ],
+  },
+  linux: {
+    file: "flowdineos-print-agent-linux.tar.gz",
+    type: "application/gzip",
+    candidates: (root: string) => [
+      path.join(root, "print-agent", "dist", "flowdineos-print-agent-linux.tar.gz"),
+      path.join(root, "print-agent", "dist", "rasoios-print-agent-linux.tar.gz"),
+    ],
+  },
 } as const;
 
 type Platform = keyof typeof PACKAGES;
@@ -39,19 +53,41 @@ export const GET = route(async (_request, { params }: { params: Promise<Record<s
   if (!isPlatform(platform)) throw new NotFoundError("That print agent package does not exist.");
 
   const pkg = PACKAGES[platform];
-  // `process.cwd()` is the repository root under both `next dev` and `next start`, which is where `agent:build` writes.
-  const file = path.join(process.cwd(), "print-agent", "dist", pkg.file);
+  const root = process.cwd();
+  const candidateFiles = pkg.candidates(root);
 
-  let bytes: Buffer;
-  try {
-    await stat(file);
-    bytes = await readFile(file);
-  } catch {
-    // The package was not built into this deployment. Say so plainly rather than serving an empty or placeholder
-    // file: an installer that verifies a truncated bundle against SHA256SUMS would fail confusingly on the
-    // restaurant's PC, long after the real mistake was made here.
-    logger.error("print_agent.package_missing", { requestId: ctx.requestId, platform, file });
-    throw new NotFoundError("The print agent package was not built into this deployment. Ask your administrator to redeploy RASOIOS.");
+  let bytes: Buffer | null = null;
+
+  for (const file of candidateFiles) {
+    try {
+      await stat(file);
+      bytes = await readFile(file);
+      break;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  // Optional remote fallback for Windows installer if not present in local deployment
+  if (!bytes && platform === "windows" && process.env.FLOWDINEOS_PRINT_AGENT_SETUP_URL) {
+    try {
+      const res = await fetch(process.env.FLOWDINEOS_PRINT_AGENT_SETUP_URL);
+      if (res.ok) {
+        const arrayBuf = await res.arrayBuffer();
+        bytes = Buffer.from(arrayBuf);
+      }
+    } catch (error) {
+      logger.error("print_agent.remote_fetch_failed", { requestId: ctx.requestId, error: (error as Error).message });
+    }
+  }
+
+  if (!bytes) {
+    logger.error("print_agent.package_missing", { requestId: ctx.requestId, platform, tried: candidateFiles });
+    throw new NotFoundError(
+      platform === "windows"
+        ? "The FlowDineOS Print Agent Windows installer (FlowDineOS-Print-Agent-Setup.exe) was not found in this deployment. Please verify the build or contact support."
+        : "The FlowDineOS Print Agent Linux package was not built into this deployment. Ask your administrator to redeploy FlowDineOS.",
+    );
   }
 
   return new Response(new Uint8Array(bytes), {
@@ -59,10 +95,7 @@ export const GET = route(async (_request, { params }: { params: Promise<Record<s
       "content-type": pkg.type,
       "content-length": String(bytes.byteLength),
       "content-disposition": `attachment; filename="${pkg.file}"`,
-      // The installer checks the bundle against SHA256SUMS inside the package; this lets someone check the package
-      // itself against what the console shows before they run anything as Administrator.
       "x-package-sha256": createHash("sha256").update(bytes).digest("hex"),
-      // Never cached: a redeploy changes these bytes, and an agent must not be older than the server that pairs it.
       "cache-control": "no-store",
     },
   });

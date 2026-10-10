@@ -103,9 +103,10 @@ export async function requireAgent(request: { headers: Headers }): Promise<Agent
   try {
     agent = await findAgentByTokenHash(sha256Hex(token));
   } catch (error) {
-    // Fail closed: an unreachable database must not let an unauthenticated caller through.
+    // Fail closed: an unreachable database must not let an unauthenticated caller through,
+    // but must fail as a server error (500/503), NEVER a 401 invalid token error.
     logger.error("security.agent_lookup_failed", { requestId, error: error instanceof Error ? error.name : "unknown" });
-    throw new InvalidAgentTokenError();
+    throw error;
   }
   if (!agent) {
     logger.warn("security.agent_unauthenticated", { requestId, reason: "unknown_or_revoked" });

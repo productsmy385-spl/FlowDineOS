@@ -176,12 +176,17 @@ export class AgentApi implements AgentApiLike {
 }
 
 function toApiError(response: Response, json: unknown): AgentApiError {
+  const status = response.status;
   const error = (json as { error?: { code?: unknown; message?: unknown } } | null)?.error;
   const code = typeof error?.code === "string" ? error.code : null;
-  const message = typeof error?.message === "string" ? error.message.slice(0, 200) : `HTTP ${response.status}`;
-  const status = response.status;
+  const message = typeof error?.message === "string" ? error.message.slice(0, 200) : `HTTP ${status}`;
   if (status === 401 && code === "INVALID_PAIRING_CODE") return new AgentApiError("INVALID_PAIRING_CODE", message, status, code);
-  if (status === 401) return new AgentApiError("AUTH", message, status, code);
+  if (status === 401) {
+    if (code === "INVALID_AGENT_TOKEN" || code === "REVOKED_AGENT_TOKEN" || code === "UNAUTHENTICATED") {
+      return new AgentApiError("AUTH", message, status, code);
+    }
+    return new AgentApiError("NETWORK", `Unauthenticated gateway or proxy (HTTP 401): ${message}`, status, code);
+  }
   if (status === 429) {
     const seconds = Number(response.headers.get("retry-after"));
     return new AgentApiError("RATE_LIMITED", message, status, code, Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 30_000);
