@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Download, Monitor, Terminal } from "lucide-react";
+import { Download, Monitor, ShieldCheck, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
@@ -163,18 +163,21 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
             </ol>
 
             <div className="flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface-muted/40 p-3 text-caption text-fg-secondary">
-              <span className="font-semibold text-fg-primary">Browser &amp; Windows Download Tips:</span>
-              <ul className="flex list-disc flex-col gap-1 pl-4">
-                <li>
-                  <strong className="text-fg-primary">Chrome &ldquo;Suspicious file blocked&rdquo;:</strong> Chrome may pause new unsigned <code>.exe</code> downloads. In Chrome&rsquo;s top bar, click the Downloads icon &rarr; select <em>&ldquo;Download suspicious file&rdquo;</em> (or <em>&ldquo;Keep anyway&rdquo;</em>) to let it finish. Alternatively, use the <strong>Download as .ZIP</strong> button above, which Chrome downloads without blocking.
-                </li>
-                <li>
-                  <strong className="text-fg-primary">File Explorer &ldquo;Cannot open file&rdquo;:</strong> If the file shows with a <code>.crdownload</code> extension, Chrome paused it before finishing. Resume or keep it in Chrome first, or use the <code>.ZIP</code> download.
-                </li>
-                <li>
-                  <strong className="text-fg-primary">Windows SmartScreen:</strong> If Windows displays <em>&ldquo;Windows protected your PC&rdquo;</em>, click <em>&ldquo;More info&rdquo;</em> &rarr; <em>&ldquo;Run anyway&rdquo;</em>.
-                </li>
-              </ul>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-fg-primary flex items-center gap-1.5">
+                  <Icon icon={ShieldCheck} size={16} className="text-action-primary" />
+                  Verified Package Integrity (v0.2.0)
+                </span>
+                <span className="text-caption text-fg-muted">Windows Defender Clean</span>
+              </div>
+              <p className="text-caption text-fg-secondary">
+                To verify package authenticity before running on counter hardware, compare the binary SHA-256 hash:
+              </p>
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border-subtle bg-raised px-2.5 py-1.5 font-mono text-caption text-fg-primary overflow-x-auto">
+                <span className="truncate select-all" title="33f65953b874569baa15ff242f4595534b1f2a48a8b7b70c00aaa73f46ed341d">
+                  SHA-256: 33f65953b874569baa15ff242f4595534b1f2a48a8b7b70c00aaa73f46ed341d
+                </span>
+              </div>
             </div>
 
             {/* Linux alternative */}

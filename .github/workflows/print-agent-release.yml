@@ -24,12 +24,18 @@ jobs:
         run: npm run agent:build:windows
         env:
           MAKENSIS: C:\Program Files (x86)\NSIS\makensis.exe
+          SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+          TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
       - name: Upload Windows setup artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-installer
           path: |
             print-agent/dist/windows/FlowDineOS-Print-Agent-Setup.exe
+            print-agent/dist/windows/FlowDineOS-Print-Agent-Setup.zip
             print-agent/dist/windows/SHA256SUMS
 
   build-linux:
@@ -71,14 +77,15 @@ jobs:
       - name: Calculate release checksums
         working-directory: dist-release
         run: |
-          sha256sum FlowDineOS-Print-Agent-Setup.exe flowdineos-print-agent-linux.tar.gz > SHA256SUMS
+          sha256sum FlowDineOS-Print-Agent-Setup.exe FlowDineOS-Print-Agent-Setup.zip flowdineos-print-agent-linux.tar.gz > SHA256SUMS
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             dist-release/FlowDineOS-Print-Agent-Setup.exe \
+            dist-release/FlowDineOS-Print-Agent-Setup.zip \
             dist-release/flowdineos-print-agent-linux.tar.gz \
             dist-release/SHA256SUMS \
             --title "FlowDineOS Print Agent ${GITHUB_REF_NAME#print-agent-v}" \
-            --notes "Self-contained Windows installer (FlowDineOS-Print-Agent-Setup.exe) and Linux systemd package. Guide: knowledge/operations/print-agent.md"
+            --notes "Self-contained Windows installer (FlowDineOS-Print-Agent-Setup.exe), ZIP package, and Linux systemd package. Guide: knowledge/operations/print-agent.md"

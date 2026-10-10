@@ -45,3 +45,12 @@ npm-audit.json
 
 # Local virtual printing test state
 /.flowdineos/
+
+# Code signing certificates and keys
+*.pfx
+*.p12
+*.snk
+*.cer
+*.key
+signing-credentials.json
+

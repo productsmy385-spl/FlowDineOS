@@ -131,6 +131,22 @@ export async function getOrCreateVirtualEnvironment(ctx: TenantContext): Promise
 
       return createdDto;
     });
+  } else if (virtualAgent.status === "ACTIVE") {
+    await touchAgent(
+      {
+        kind: "agent",
+        tenantId: ctx.tenantId,
+        agentId: virtualAgent.id,
+        requestId: randomUUID(),
+        printerIds: [],
+      },
+      now(),
+      { agentVersion: "0.2.1-virtual", ip: "127.0.0.1" },
+    );
+    virtualAgent = {
+      ...virtualAgent,
+      lastSeenAt: now().toISOString(),
+    };
   }
 
   // Find or provision Virtual Kitchen Printer
@@ -412,4 +428,19 @@ export async function executeVirtualAgentCycle(ctx: TenantContext, agentId: stri
   }
 
   return { claimedCount: claimed.length, results };
+}
+
+/**
+ * Touches the virtual agent's lastSeenAt heartbeat directly.
+ */
+export async function touchVirtualAgentHeartbeat(ctx: TenantContext, agentId: string): Promise<void> {
+  assertVirtualPrintingEnabled();
+  const agentCtx: AgentContext = {
+    kind: "agent",
+    tenantId: ctx.tenantId,
+    agentId,
+    requestId: randomUUID(),
+    printerIds: [],
+  };
+  await touchAgent(agentCtx, now(), { agentVersion: "0.2.1-virtual", ip: "127.0.0.1" });
 }

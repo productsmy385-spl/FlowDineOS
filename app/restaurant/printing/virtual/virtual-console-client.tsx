@@ -8,6 +8,7 @@ import {
   getVirtualEnvironmentAction,
   setSimulationModeAction,
   simulateDuplicatePrintAction,
+  touchHeartbeatAction,
   triggerSimulatedKotAction,
   triggerTestConnectionAction,
   triggerTestPrintAction,
@@ -124,6 +125,22 @@ export function VirtualConsoleClient({ initial }: { initial: VirtualEnvironmentS
     });
   };
 
+  const handleHeartbeat = () => {
+    const agent = env.agent;
+    if (!agent) return;
+    const agentId = agent.id;
+    startTransition(async () => {
+      setMessage("Sending heartbeat to virtual agent...");
+      const res = await touchHeartbeatAction({ agentId });
+      if (res.ok) {
+        setMessage("Agent heartbeat sent: status updated to ONLINE.");
+        refreshNow();
+      } else {
+        setMessage(`Heartbeat failed: ${res.error}`);
+      }
+    });
+  };
+
   const handleClearTickets = () => {
     const printer = env.printer;
     if (!printer) return;
@@ -198,6 +215,17 @@ export function VirtualConsoleClient({ initial }: { initial: VirtualEnvironmentS
               <span className="text-neutral-300 text-xs">
                 {env.agent?.lastSeenAt ? new Date(env.agent.lastSeenAt).toLocaleTimeString() : "Never"}
               </span>
+            </div>
+            <div className="pt-2 border-t border-neutral-800 flex items-center justify-between">
+              <span className="text-neutral-400 text-xs">Heartbeat:</span>
+              <button
+                type="button"
+                onClick={handleHeartbeat}
+                disabled={isPending}
+                className="px-2.5 py-1 text-xs rounded-lg border border-neutral-700 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 transition-colors disabled:opacity-50"
+              >
+                Wake Agent (Online)
+              </button>
             </div>
           </div>
         </div>

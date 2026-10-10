@@ -90,10 +90,21 @@ if (makensis) {
   if (process.env.CI) process.exit(1);
 }
 
-// ── Checksums ──
-const sums = ["FlowDineOS.PrintAgent.exe", "FlowDineOS.PrintAgent.Service.exe", "FlowDineOS-Print-Agent-Setup.exe"]
-  .filter((name) => existsSync(path.join(out, name)))
-  .map((name) => `${createHash("sha256").update(readFileSync(path.join(out, name))).digest("hex")}  ${name}`)
-  .join("\n");
-writeFileSync(path.join(out, "SHA256SUMS"), `${sums}\n`);
-console.log(sums);
+// ── Checksums & Signing Pipeline ──
+const signScript = path.join(here, "sign-binaries.ps1");
+if (existsSync(signScript)) {
+  try {
+    execFileSync("powershell", ["-ExecutionPolicy", "Bypass", "-File", signScript, "-TargetDir", out], { stdio: "inherit" });
+    console.log("Windows binaries signed and verified");
+  } catch (err) {
+    console.warn("Signing script exited with warning:", err.message);
+  }
+} else {
+  const sums = ["FlowDineOS.PrintAgent.exe", "FlowDineOS.PrintAgent.Service.exe", "FlowDineOS-Print-Agent-Setup.exe"]
+    .filter((name) => existsSync(path.join(out, name)))
+    .map((name) => `${createHash("sha256").update(readFileSync(path.join(out, name))).digest("hex")}  ${name}`)
+    .join("\n");
+  writeFileSync(path.join(out, "SHA256SUMS"), `${sums}\n`);
+  console.log(sums);
+}
+

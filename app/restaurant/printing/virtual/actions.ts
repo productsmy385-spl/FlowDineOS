@@ -10,6 +10,7 @@ import {
   executeVirtualAgentCycle,
   getOrCreateVirtualEnvironment,
   setVirtualSimulationMode,
+  touchVirtualAgentHeartbeat,
 } from "@/lib/services/virtual-printing";
 import type { VirtualPrinterSimulationMode } from "@/lib/print/virtual-printer";
 
@@ -17,6 +18,12 @@ export const getVirtualEnvironmentAction = action(async () => {
   const ctx = await requireTenant("printer:manage");
   assertVirtualPrintingEnabled();
   return getOrCreateVirtualEnvironment(ctx);
+});
+
+export const touchHeartbeatAction = action(async (input: { agentId: string }) => {
+  const ctx = await requireTenant("printer:manage");
+  assertVirtualPrintingEnabled();
+  return touchVirtualAgentHeartbeat(ctx, input.agentId);
 });
 
 export const setSimulationModeAction = action(async (input: { printerId: string; mode: VirtualPrinterSimulationMode }) => {
