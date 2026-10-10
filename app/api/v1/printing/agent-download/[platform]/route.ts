@@ -22,7 +22,7 @@ type PackageConfig = {
   candidates: (root: string) => string[];
 };
 
-const PACKAGES: Record<"windows" | "linux", PackageConfig> = {
+const PACKAGES: Record<"windows" | "windows-zip" | "linux", PackageConfig> = {
   windows: {
     file: "FlowDineOS-Print-Agent-Setup.exe",
     type: "application/vnd.microsoft.portable-executable",
@@ -30,6 +30,15 @@ const PACKAGES: Record<"windows" | "linux", PackageConfig> = {
       path.join(root, "print-agent", "dist", "windows", "FlowDineOS-Print-Agent-Setup.exe"),
       path.join(root, "print-agent", "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.exe"),
       path.join(root, "public", "downloads", "FlowDineOS-Print-Agent-Setup.exe"),
+    ],
+  },
+  "windows-zip": {
+    file: "FlowDineOS-Print-Agent-Setup.zip",
+    type: "application/zip",
+    candidates: (root: string) => [
+      path.join(root, "print-agent", "dist", "windows", "FlowDineOS-Print-Agent-Setup.zip"),
+      path.join(root, "print-agent", "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.zip"),
+      path.join(root, "public", "downloads", "FlowDineOS-Print-Agent-Setup.zip"),
     ],
   },
   linux: {
@@ -47,9 +56,21 @@ const isPlatform = (value: string): value is Platform => Object.hasOwn(PACKAGES,
 
 // `Record<string, string>` rather than `{ platform: string }`: Next.js accepts it (the narrower shape is assignable
 // to it), and it matches the shared `invokeRoute` test harness, so the route needs no cast to be tested.
-export const GET = route(async (_request, { params }: { params: Promise<Record<string, string>> }) => {
+export const GET = route(async (request, { params }: { params: Promise<Record<string, string>> }) => {
   const ctx = await requireTenant("print_agent:manage");
-  const { platform } = await params;
+  let { platform } = await params;
+
+  if (platform === "windows") {
+    try {
+      const url = new URL(request.url);
+      if (url.searchParams.get("format") === "zip") {
+        platform = "windows-zip";
+      }
+    } catch {
+      // ignore URL parsing error
+    }
+  }
+
   if (!isPlatform(platform)) throw new NotFoundError("That print agent package does not exist.");
 
   const pkg = PACKAGES[platform];

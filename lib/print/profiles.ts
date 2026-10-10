@@ -71,6 +71,23 @@ export const PRINTER_PROFILES = {
     source: "manufacturer specification",
     hardwareVerified: false,
   },
+  VIRTUAL_ESCPOS: {
+    key: "VIRTUAL_ESCPOS",
+    label: "Virtual ESC/POS 80mm Emulator",
+    protocol: "ESC_POS",
+    paperWidthsMm: [80],
+    columns: { 80: 48 },
+    encoding: "ascii",
+    codePage: 0,
+    cut: "partial",
+    supportsQr: true,
+    supportsBarcode: true,
+    supportsBitmap: false,
+    supportsStatus: true,
+    supportsBuzzer: false,
+    source: "conservative default",
+    hardwareVerified: false,
+  },
 } as const satisfies Record<string, PrinterProfile>;
 
 export type PrinterProfileKey = keyof typeof PRINTER_PROFILES;

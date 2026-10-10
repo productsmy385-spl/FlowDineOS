@@ -126,22 +126,30 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
               <p className="text-caption text-fg-secondary">
                 Self-contained Windows installer. Automatically installs the FlowDineOS Print Agent service with auto-recovery on PC restart. No Node.js required.
               </p>
-              <div>
+              <div className="flex flex-wrap items-center gap-3">
                 <a
                   href="/api/v1/printing/agent-download/windows"
                   download="FlowDineOS-Print-Agent-Setup.exe"
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-fg-primary px-4 text-nav text-surface transition-colors duration-fast ease-standard hover:bg-fg-secondary"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-action-primary px-4 text-label font-medium text-action-primary-fg transition-colors duration-fast ease-standard hover:bg-action-primary-hover motion-safe:hover:shadow-glow"
                 >
                   <Icon icon={Download} size={16} />
-                  Download for Windows
+                  Download for Windows (.exe)
                 </a>
-                <span className="ml-3 text-caption text-fg-muted font-mono">FlowDineOS-Print-Agent-Setup.exe (~23 MB)</span>
+                <a
+                  href="/api/v1/printing/agent-download/windows?format=zip"
+                  download="FlowDineOS-Print-Agent-Setup.zip"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl border border-border-strong bg-card px-4 text-label font-medium text-fg-primary transition-colors duration-fast ease-standard hover:bg-raised"
+                >
+                  <Icon icon={Download} size={16} />
+                  Download as .ZIP
+                </a>
+                <span className="text-caption text-fg-secondary font-mono">~23 MB</span>
               </div>
             </div>
 
             <ol className="flex list-decimal flex-col gap-2 pl-5 text-body text-fg-secondary">
               <li>
-                Run <strong>FlowDineOS-Print-Agent-Setup.exe</strong> as Administrator on the restaurant PC.
+                Run <strong>FlowDineOS-Print-Agent-Setup.exe</strong> (or extract the <strong>.zip</strong>) as Administrator on the restaurant PC.
               </li>
               <li>
                 When prompted, paste the pairing code: <strong className="text-fg-primary font-mono">{issued.pairingCode}</strong>.
@@ -154,8 +162,19 @@ export function PairAgentDialog({ open, onClose, onPaired }: { open: boolean; on
               </li>
             </ol>
 
-            <div className="rounded-lg border border-border-subtle bg-surface-muted/50 p-3 text-caption text-fg-muted">
-              <strong>SmartScreen note:</strong> As code-signing is pending for this release, if Windows displays a SmartScreen alert, click <em>&ldquo;More info&rdquo;</em> and choose <em>&ldquo;Run anyway&rdquo;</em>.
+            <div className="flex flex-col gap-2 rounded-xl border border-border-subtle bg-surface-muted/40 p-3 text-caption text-fg-secondary">
+              <span className="font-semibold text-fg-primary">Browser &amp; Windows Download Tips:</span>
+              <ul className="flex list-disc flex-col gap-1 pl-4">
+                <li>
+                  <strong className="text-fg-primary">Chrome &ldquo;Suspicious file blocked&rdquo;:</strong> Chrome may pause new unsigned <code>.exe</code> downloads. In Chrome&rsquo;s top bar, click the Downloads icon &rarr; select <em>&ldquo;Download suspicious file&rdquo;</em> (or <em>&ldquo;Keep anyway&rdquo;</em>) to let it finish. Alternatively, use the <strong>Download as .ZIP</strong> button above, which Chrome downloads without blocking.
+                </li>
+                <li>
+                  <strong className="text-fg-primary">File Explorer &ldquo;Cannot open file&rdquo;:</strong> If the file shows with a <code>.crdownload</code> extension, Chrome paused it before finishing. Resume or keep it in Chrome first, or use the <code>.ZIP</code> download.
+                </li>
+                <li>
+                  <strong className="text-fg-primary">Windows SmartScreen:</strong> If Windows displays <em>&ldquo;Windows protected your PC&rdquo;</em>, click <em>&ldquo;More info&rdquo;</em> &rarr; <em>&ldquo;Run anyway&rdquo;</em>.
+                </li>
+              </ul>
             </div>
 
             {/* Linux alternative */}

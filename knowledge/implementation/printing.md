@@ -129,3 +129,64 @@ Not implemented; non-ASCII script prints as `?`. The seam is in place:
   pointing the console's download at the released installer.
 - Paper-out and cover-open detection (`DLE EOT`) — needs verification on the RP 3230 first.
 - Hardware acceptance of the RP 3230 (blocked on the network issue in the checklist).
+
+## Virtual Printing & Printer Emulator (Development & Testing)
+
+FlowDineOS includes an isolated virtual printing environment for end-to-end software pipeline validation without physical printer hardware (such as the TVS-E RP 3230).
+
+### Architecture
+
+```
+FlowDineOS Cloud ── Secure Print Queue ──HTTPS claim── Virtual Print Agent ──In-Memory/Loopback── VirtualPrinterAdapter ──ESC/POS Decoding── 80mm Thermal Preview
+```
+
+The virtual printer does **not** replace the production physical printing architecture. The physical printing path (`Cloud` → `Print Queue` → `Print Agent` → `Restaurant LAN` → `Physical ESC/POS Printer`) remains unmodified and fully supported.
+
+The virtual printer operates as an additional testing adapter implementing the identical `Transport` interface (`connect()`, `disconnect()`, `print()`, `send()`, `testConnection()`, `probe()`, `getStatus()`).
+
+### Production Safety & Fail-Closed Guard
+
+- **Safe By Default:** Virtual printing is disabled in production by default.
+- **Environment Flags:**
+  - `VIRTUAL_PRINTING_ENABLED="true"`: Enables the virtual printer interface and adapter in non-production environments (`NODE_ENV !== "production"`).
+  - `ALLOW_VIRTUAL_PRINTING_IN_PRODUCTION="true"`: Explicit override required if tested in a controlled production environment. Without this explicit variable, production fails closed and throws `Virtual printing is not available`.
+- **Tenant Isolation:** Virtual printers and agent tokens are strictly scoped to the authenticated tenant. Tenant A cannot access, control, or preview tickets for Tenant B.
+
+### Virtual Printer Configuration
+
+- **Printer Name:** FlowDineOS Virtual Kitchen Printer
+- **Model:** Virtual ESC/POS Printer
+- **Profile:** `VIRTUAL_ESCPOS` (80 mm / 48 columns, partial cut, QR, barcode, bitmap support)
+- **Address Format:** `virtual:<tenantId>:<station>` (e.g., `virtual:tenant_123:kitchen`)
+- **Protocol:** `VIRTUAL`
+- **Output:** Decodes genuine ESC/POS commands (`ESC @`, `ESC a`, `GS !`, `GS V`, `ESC d`) into structured lines and renders an authentic 80 mm thermal paper preview.
+
+### Developer CLI & Commands
+
+1. **Start Virtual Agent:**
+   ```bash
+   npm run agent:virtual
+   # Or with explicit pairing code:
+   npx tsx print-agent/src/virtual-agent.ts pair <PAIRING_CODE>
+   npx tsx print-agent/src/virtual-agent.ts run
+   ```
+2. **Access Virtual Console UI:**
+   Navigate to `/restaurant/printing/virtual` (accessible via "Virtual Console" button on Printing dashboard when enabled).
+3. **Simulate Failures:**
+   Use the UI or adapter methods to toggle failure modes:
+   - `NORMAL`: Printer operates normally.
+   - `OFFLINE`: Simulates disconnected hardware (`PRINTER_UNREACHABLE`). Triggers exponential backoff retry.
+   - `TIMEOUT`: Simulates hung socket (`CONNECTION_TIMEOUT`).
+   - `REFUSED`: Simulates port closed (`CONNECTION_REFUSED`).
+   - `SLOW`: Adds a 4-second delay before accepting bytes.
+   - `PRINT_FAILED`: Simulates mid-stream error (`DELIVERY_UNKNOWN`).
+4. **Run Automated Tests:**
+   ```bash
+   npx vitest run tests/unit/print-agent/virtual-printer.test.ts
+   ```
+   Covers all 18 end-to-end scenarios (A through R): pairing, heartbeats, presence status, printer registration, test connection, test ticket, KOT pipeline, thermal preview rendering, retry on failure, recovery on reconnection, duplicate print idempotency, multi-tenant isolation, unauthorized rejection, and multi-printer queue independence.
+5. **Disable Virtual Printing:**
+   Remove `VIRTUAL_PRINTING_ENABLED` or set `VIRTUAL_PRINTING_ENABLED="false"`. The UI tab disappears and route handlers immediately return 403 Forbidden.
+
+> [!IMPORTANT]
+> The virtual printer verifies the software pipeline (UI → Queue → Agent Claim → ESC/POS Encoding → Ack). It does **not** claim physical hardware verification. Final hardware acceptance requires the physical TVS-E RP 3230 printer test.

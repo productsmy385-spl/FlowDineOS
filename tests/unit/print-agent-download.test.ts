@@ -55,6 +55,29 @@ describe("Print Agent Download route handler (RH-PRINT-08)", () => {
     expect(bytes.subarray(0, 2).toString("hex")).toBe("1f8b");
   });
 
+  it("serves FlowDineOS-Print-Agent-Setup.zip when requested via windows-zip or format=zip", async () => {
+    vi.spyOn(guards, "requireTenant").mockResolvedValue({
+      tenantId: "t1",
+      userId: "u1",
+      role: "TENANT_ADMIN",
+      permissions: ["print_agent:manage"],
+      requestId: "req-zip",
+    } as never);
+
+    const reqZip = new NextRequest("https://app.flowdineos.test/api/v1/printing/agent-download/windows?format=zip");
+    const responseZip = await GET(reqZip, { params: Promise.resolve({ platform: "windows" }) });
+
+    expect(responseZip.status).toBe(200);
+    expect(responseZip.headers.get("content-type")).toBe("application/zip");
+    expect(responseZip.headers.get("content-disposition")).toBe('attachment; filename="FlowDineOS-Print-Agent-Setup.zip"');
+
+    const arrayBuf = await responseZip.arrayBuffer();
+    const bytes = Buffer.from(arrayBuf);
+    expect(bytes.length).toBeGreaterThan(1_000_000);
+    // Check ZIP magic bytes "PK" (0x50, 0x4B)
+    expect(bytes.subarray(0, 2).toString("latin1")).toBe("PK");
+  });
+
   it("refuses unauthorized requests without valid session", async () => {
     vi.spyOn(guards, "requireTenant").mockRejectedValueOnce(new UnauthenticatedError());
 

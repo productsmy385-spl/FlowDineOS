@@ -38,6 +38,11 @@ const distSetup = path.join(distWindowsDir, "FlowDineOS-Print-Agent-Setup.exe");
 if (existsSync(bundledSetup) && !existsSync(distSetup)) {
   copyFileSync(bundledSetup, distSetup);
 }
+const bundledSetupZip = path.join(here, "packaging", "windows", "bin", "FlowDineOS-Print-Agent-Setup.zip");
+const distSetupZip = path.join(distWindowsDir, "FlowDineOS-Print-Agent-Setup.zip");
+if (existsSync(bundledSetupZip) && !existsSync(distSetupZip)) {
+  copyFileSync(bundledSetupZip, distSetupZip);
+}
 if (existsSync(distSetup)) {
   const setupBytes = readFileSync(distSetup);
   const setupSum = createHash("sha256").update(setupBytes).digest("hex");

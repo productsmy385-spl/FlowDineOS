@@ -28,6 +28,7 @@
     "agent:build": "node print-agent/build.mjs",
     "agent:build:windows": "node print-agent/packaging/windows/build-windows.mjs",
     "agent:dev": "tsx --tsconfig tsconfig.json print-agent/src/main.ts",
+    "agent:virtual": "tsx --tsconfig tsconfig.json print-agent/src/virtual-agent.ts",
     "printer:simulator": "tsx tools/printer-simulator/cli.ts"
   },
   "prisma": {

@@ -42,3 +42,6 @@ next-env.d.ts
 # Local embedded PostgreSQL data (npm run db:local)
 /.local/
 npm-audit.json
+
+# Local virtual printing test state
+/.flowdineos/
