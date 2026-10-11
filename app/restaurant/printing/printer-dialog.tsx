@@ -6,6 +6,7 @@ import { Dialog } from "@/components/ui/dialog";
 import { Select, TextField } from "@/components/ui/inputs";
 import type { PrinterDto } from "@/lib/services/printing";
 import { DEFAULT_PRINTER_PROFILE, PRINTER_PROFILES, PRINTER_PROFILE_KEYS, isPrinterProfileKey, type PrinterProfileKey } from "@/lib/print/profiles";
+import { MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 import { createPrinterAction, updatePrinterAction } from "./actions";
 
 /**
@@ -45,6 +46,10 @@ type FormState = {
   kitchenSectionId: string;
   printAgentId: string;
   profile: string;
+  autoPrintKot: boolean;
+  kotCopies: number;
+  autoPrintReceipt: boolean;
+  receiptCopies: number;
 };
 
 /** Values for a new printer found by a LAN scan (ADR-015): its address and the agent that found it. */
@@ -60,7 +65,49 @@ function stateOf(printer: PrinterDto | null, preset?: PrinterPreset): FormState 
     kitchenSectionId: printer?.kitchenSectionId ?? "",
     printAgentId: printer?.printAgentId ?? preset?.printAgentId ?? "",
     profile: printer?.profile ?? DEFAULT_PRINTER_PROFILE,
+    autoPrintKot: printer?.autoPrintKot ?? true,
+    kotCopies: printer?.kotCopies ?? 1,
+    autoPrintReceipt: printer?.autoPrintReceipt ?? true,
+    receiptCopies: printer?.receiptCopies ?? 2,
   };
+}
+
+function CopyStepper({
+  value,
+  min = MIN_PRINT_COPIES,
+  max = MAX_PRINT_COPIES,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (val: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <button
+        type="button"
+        disabled={disabled || value <= min}
+        onClick={() => onChange(Math.max(min, value - 1))}
+        className="size-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-fg-primary hover:bg-bg-subtle disabled:opacity-40 disabled:cursor-not-allowed font-bold text-base transition-colors"
+        aria-label="Decrease copies"
+      >
+        −
+      </button>
+      <span className="w-8 text-center font-semibold tabular-nums text-fg-primary">{value}</span>
+      <button
+        type="button"
+        disabled={disabled || value >= max}
+        onClick={() => onChange(Math.min(max, value + 1))}
+        className="size-8 rounded-lg border border-border-subtle bg-bg-surface flex items-center justify-center text-fg-primary hover:bg-bg-subtle disabled:opacity-40 disabled:cursor-not-allowed font-bold text-base transition-colors"
+        aria-label="Increase copies"
+      >
+        +
+      </button>
+    </div>
+  );
 }
 
 export function PrinterDialog({
@@ -108,6 +155,10 @@ export function PrinterDialog({
       kitchenSectionId: form.kitchenSectionId || null,
       printAgentId: form.printAgentId || null,
       profile: (isPrinterProfileKey(form.profile) ? form.profile : DEFAULT_PRINTER_PROFILE) as PrinterProfileKey,
+      autoPrintKot: form.autoPrintKot,
+      kotCopies: Number(form.kotCopies),
+      autoPrintReceipt: form.autoPrintReceipt,
+      receiptCopies: Number(form.receiptCopies),
     };
     const result = printer ? await updatePrinterAction({ printerId: printer.id, ...shared }) : await createPrinterAction(shared);
     setPending(false);
@@ -220,6 +271,106 @@ export function PrinterDialog({
           error={fieldErrors.printAgentId?.[0]}
           help="Only the assigned agent can collect this printer's jobs."
         />
+
+        {/* ─── Printing Preferences (Configurable KOT and Receipt Copies) ─── */}
+        <div className="rounded-2xl border border-border-subtle bg-bg-surface/50 p-4 flex flex-col gap-4">
+          <div>
+            <h3 className="text-subheading font-bold text-fg-primary">Printing Preferences</h3>
+            <p className="text-caption text-fg-secondary">
+              Configure automatic print triggers and default copy counts for this printer.
+            </p>
+          </div>
+
+          {/* Kitchen Order Tickets */}
+          <div className="flex flex-col gap-2.5 rounded-xl border border-border-subtle bg-bg-surface p-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-body font-semibold text-fg-primary block">Kitchen Order Tickets</span>
+                <span className="text-caption text-fg-secondary">
+                  Automatic printing:{" "}
+                  <span className={form.autoPrintKot ? "font-medium text-status-success" : "font-medium text-fg-secondary"}>
+                    {form.autoPrintKot ? "Enabled" : "Disabled"}
+                  </span>
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.autoPrintKot}
+                onClick={() => set("autoPrintKot", !form.autoPrintKot)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-action-primary/30 ${
+                  form.autoPrintKot ? "bg-action-primary" : "bg-bg-subtle border border-border-subtle"
+                }`}
+                aria-label="Toggle automatic KOT printing"
+              >
+                <span
+                  className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${
+                    form.autoPrintKot ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
+              <span className="text-body text-fg-secondary">Default copies</span>
+              <CopyStepper
+                value={form.kotCopies}
+                onChange={(val) => set("kotCopies", val)}
+              />
+            </div>
+            {fieldErrors.kotCopies?.[0] && (
+              <p className="text-caption text-status-danger">{fieldErrors.kotCopies[0]}</p>
+            )}
+            <p className="text-caption text-fg-secondary">
+              KOT copies controls how many kitchen tickets are printed per applicable print request.
+            </p>
+          </div>
+
+          {/* Customer Receipts */}
+          <div className="flex flex-col gap-2.5 rounded-xl border border-border-subtle bg-bg-surface p-3.5">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="text-body font-semibold text-fg-primary block">Customer Receipts</span>
+                <span className="text-caption text-fg-secondary">
+                  Automatic printing:{" "}
+                  <span className={form.autoPrintReceipt ? "font-medium text-status-success" : "font-medium text-fg-secondary"}>
+                    {form.autoPrintReceipt ? "Enabled" : "Disabled"}
+                  </span>
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={form.autoPrintReceipt}
+                onClick={() => set("autoPrintReceipt", !form.autoPrintReceipt)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-action-primary/30 ${
+                  form.autoPrintReceipt ? "bg-action-primary" : "bg-bg-subtle border border-border-subtle"
+                }`}
+                aria-label="Toggle automatic receipt printing"
+              >
+                <span
+                  className={`inline-block size-4 transform rounded-full bg-white shadow transition-transform ${
+                    form.autoPrintReceipt ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-border-subtle">
+              <span className="text-body text-fg-secondary">Default copies</span>
+              <CopyStepper
+                value={form.receiptCopies}
+                onChange={(val) => set("receiptCopies", val)}
+              />
+            </div>
+            {fieldErrors.receiptCopies?.[0] && (
+              <p className="text-caption text-status-danger">{fieldErrors.receiptCopies[0]}</p>
+            )}
+            <p className="text-caption text-fg-secondary">
+              Receipt copies controls how many receipt copies are printed after successful payment.
+            </p>
+          </div>
+        </div>
       </div>
     </Dialog>
   );

@@ -204,6 +204,37 @@ function textField(max: number, label: string, options: { newlines?: boolean } =
 
 // ─── SA-WEB-01 theme (website:update) ───
 
+export const TEXT_COLOR_KEYS = [
+  "headingColor",
+  "sectionHeadingColor",
+  "bodyTextColor",
+  "mutedTextColor",
+  "navigationTextColor",
+  "linkColor",
+  "buttonTextColor",
+  "priceColor",
+  "footerTextColor",
+  "heroHeadingColor",
+  "heroDescriptionColor",
+] as const;
+export type TextColorKey = (typeof TEXT_COLOR_KEYS)[number];
+
+export const websiteTextColorsSchema = strictObject({
+  headingColor: clearable(hexColour("Main heading colour")),
+  sectionHeadingColor: clearable(hexColour("Section heading colour")),
+  bodyTextColor: clearable(hexColour("Body text colour")),
+  mutedTextColor: clearable(hexColour("Secondary text colour")),
+  navigationTextColor: clearable(hexColour("Navigation text colour")),
+  linkColor: clearable(hexColour("Link colour")),
+  buttonTextColor: clearable(hexColour("Button text colour")),
+  priceColor: clearable(hexColour("Price colour")),
+  footerTextColor: clearable(hexColour("Footer text colour")),
+  heroHeadingColor: clearable(hexColour("Hero heading colour")),
+  heroDescriptionColor: clearable(hexColour("Hero description colour")),
+});
+export type WebsiteTextColorsInput = z.input<typeof websiteTextColorsSchema>;
+export type WebsiteTextColorsData = z.output<typeof websiteTextColorsSchema>;
+
 export const updateWebsiteThemeSchema = strictObject({
   preset: z.enum(WEBSITE_THEME_PRESETS, { errorMap: () => ({ message: "Choose one of the available themes" }) }),
   surfaceMode: z.enum(WEBSITE_SURFACE_MODES, { errorMap: () => ({ message: "Choose a dark or light website" }) }),
@@ -227,6 +258,7 @@ export const updateWebsiteThemeSchema = strictObject({
     .max(16, "Up to 16 brand colours")
     .refine((list) => new Set(list.map((c) => c.name.toLowerCase())).size === list.length, "Each colour needs a different name")
     .optional(),
+  textColors: websiteTextColorsSchema.optional(),
   menuStyle: z.enum(["RING", "GRID"]).optional(),
   dailyStyle: z.enum(["STRIP", "GRID"]).optional(),
 }).superRefine((value, ctx) => {
@@ -256,6 +288,7 @@ export type UpdateWebsiteThemeInput = {
   gradientFromHex?: string | null;
   gradientToHex?: string | null;
   brandColors?: { name: string; hex: string }[];
+  textColors?: WebsiteTextColorsInput;
   menuStyle?: "RING" | "GRID";
   dailyStyle?: "STRIP" | "GRID";
 };

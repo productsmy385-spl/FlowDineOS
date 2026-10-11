@@ -69,11 +69,11 @@ function Hero({ section, view }: SectionProps) {
           {section.customHeadline && section.headline !== site.restaurant.name ? (
             <p className="text-label uppercase opacity-80">{site.restaurant.name}</p>
           ) : null}
-          <h1 id="top-title" className="break-words text-display-xl">
+          <h1 id="top-title" className="break-words text-display-xl" style={{ color: "var(--website-hero-heading-color)" }}>
             {heading}
           </h1>
-          {tagline ? <p className="text-body-public opacity-90">{tagline}</p> : null}
-          {body ? <p className="max-w-prose text-body-public whitespace-pre-line opacity-90">{body}</p> : null}
+          {tagline ? <p className="text-body-public opacity-90" style={{ color: "var(--website-hero-description-color)" }}>{tagline}</p> : null}
+          {body ? <p className="max-w-prose text-body-public whitespace-pre-line opacity-90" style={{ color: "var(--website-hero-description-color)" }}>{body}</p> : null}
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <HeroStatus openNow={site.openNow} />
             {cta ? <SiteCta label={cta.label} href={cta.href} /> : fallbackCta ? <SiteCta label="See the menu" href={fallbackCta} /> : null}
@@ -183,7 +183,7 @@ function About({ section, view }: SectionProps) {
         <div className="flex flex-col gap-4">
           <SectionHeading id={`${anchor}-title`} title={section.headline} />
           {body ? (
-            <p className="max-w-prose text-body-public text-fg-secondary whitespace-pre-line">{body}</p>
+            <p className="max-w-prose text-body-public whitespace-pre-line" style={{ color: "var(--website-body-text-color)" }}>{body}</p>
           ) : (
             <SectionEmpty icon={Info}>This restaurant has not written an introduction yet.</SectionEmpty>
           )}
@@ -201,7 +201,7 @@ function InfoSection({ section, view }: SectionProps) {
     <Band section={section}>
       <SectionHeading id={`${anchor}-title`} title={section.headline} />
       {section.body ? (
-        <p className="max-w-prose text-body-public text-fg-secondary whitespace-pre-line">{section.body}</p>
+        <p className="max-w-prose text-body-public whitespace-pre-line" style={{ color: "var(--website-body-text-color)" }}>{section.body}</p>
       ) : (
         <SectionEmpty icon={Info}>{view.site.restaurant.name} has not added anything here yet.</SectionEmpty>
       )}
@@ -258,7 +258,7 @@ function Location({ section, view }: SectionProps) {
       ) : (
         <div className="flex flex-col items-start gap-4 rounded-2xl border border-border-subtle bg-card p-5">
           {restaurant.address ? (
-            <p className="flex min-w-0 items-start gap-2 text-body-public">
+            <p className="flex min-w-0 items-start gap-2 text-body-public" style={{ color: "var(--website-body-text-color)" }}>
               <Icon icon={MapPin} size={20} className="mt-0.5 text-fg-accent" />
               <span className="min-w-0 break-words">{restaurant.address}</span>
             </p>
@@ -294,6 +294,7 @@ function Contact({ section, view }: SectionProps) {
                 href={row.href}
                 {...(row.external ? { target: "_blank", rel: "noopener noreferrer" } : {})}
                 className="flex min-h-11 min-w-0 items-center gap-3 rounded-xl border border-border-subtle bg-card px-4 py-3 text-body-public hover:border-border-strong"
+                style={{ color: "var(--website-body-text-color)" }}
               >
                 <Icon icon={row.icon} size={20} className="text-fg-accent" />
                 {/* An email address or a long URL has no spaces to wrap at: break it rather than widen the page. */}

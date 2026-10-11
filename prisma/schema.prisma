@@ -439,6 +439,7 @@ model Restaurant {
   gstin            String?   @db.VarChar(15)
   // Brand Kit (RASOIOS-ADR-021): named colours in the tenant's own order, fonts from an allow-list, extra logos, voice.
   brandColors      Json      @default("[]") @map("brand_colors") @db.JsonB
+  websiteTextColors Json     @default("{}") @map("website_text_colors") @db.JsonB
   headingFont      String?   @map("heading_font") @db.VarChar(40)
   bodyFont         String?   @map("body_font") @db.VarChar(40)
   accentFont       String?   @map("accent_font") @db.VarChar(40)
@@ -1124,6 +1125,10 @@ model Printer {
   healthReportedAt  DateTime?         @map("health_reported_at") @db.Timestamptz(6)
   /// Capability profile key (lib/print/profiles.ts), e.g. GENERIC_ESCPOS or TVS_RP3230.
   profile           String            @default("GENERIC_ESCPOS") @db.VarChar(40)
+  autoPrintKot      Boolean           @default(true) @map("auto_print_kot")
+  kotCopies         Int               @default(1) @map("kot_copies") @db.SmallInt
+  autoPrintReceipt  Boolean           @default(true) @map("auto_print_receipt")
+  receiptCopies     Int               @default(2) @map("receipt_copies") @db.SmallInt
   /// Hidden from the printer list; only an inactive printer can be archived. The row and its jobs stay.
   archivedAt        DateTime?         @map("archived_at") @db.Timestamptz(6)
   lastDeliveredAt   DateTime?         @map("last_delivered_at") @db.Timestamptz(6)
@@ -1262,6 +1267,11 @@ model PrintJob {
   failedAt          DateTime?      @map("failed_at") @db.Timestamptz(6)
   lastErrorCode     String?        @map("last_error_code") @db.VarChar(40)
   lastErrorMessage  String?        @map("last_error_message") @db.VarChar(500)
+  copyIndex         Int?           @map("copy_index") @db.SmallInt
+  copyCount         Int?           @map("copy_count") @db.SmallInt
+  copyLabel         String?        @map("copy_label") @db.VarChar(40)
+  paymentReference  String?        @map("payment_reference") @db.VarChar(64)
+  trigger           String?        @db.VarChar(20)
   requestedByUserId String?        @map("requested_by_user_id") @db.Uuid
   // Removed from the history view (RASOIOS-ADR-022): finished jobs only; the row and its audit stay.
   archivedAt        DateTime?      @map("archived_at") @db.Timestamptz(6)

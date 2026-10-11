@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit/write";
 import { db } from "@/lib/db/prisma";
 import { NotFoundError } from "@/lib/errors";
 import { SLUG_PATTERN } from "@/lib/validation/core";
-import { WEBSITE_SECTION_DEFAULTS, WEBSITE_SECTION_KEYS, type WebsiteSectionKeyName } from "@/lib/validation/website";
+import { TEXT_COLOR_KEYS, WEBSITE_SECTION_DEFAULTS, WEBSITE_SECTION_KEYS, type TextColorKey, type WebsiteSectionKeyName } from "@/lib/validation/website";
 import { instantDto } from "./dto";
 import { mapErrors } from "./errors";
 import { required, tenantScope } from "./scope";
@@ -35,6 +35,7 @@ const THEME_SELECT = {
   gradientFromHex: true,
   gradientToHex: true,
   brandColors: true,
+  websiteTextColors: true,
   menuStyle: true,
   dailyStyle: true,
   tagline: true,
@@ -52,6 +53,8 @@ const THEME_SELECT = {
 type ThemeRow = Prisma.RestaurantGetPayload<{ select: typeof THEME_SELECT }>;
 type ThemeColumn = Exclude<keyof ThemeRow, "id" | "updatedAt">;
 
+export type WebsiteTextColors = Partial<Record<TextColorKey, string | null>>;
+
 /** The stored theme of a restaurant. `brandAccentHex` is the theme accent (ADR-013 §6, migration 0002). */
 export type WebsiteThemeRow = {
   preset: WebsiteThemePreset;
@@ -63,6 +66,7 @@ export type WebsiteThemeRow = {
   gradientToHex: string | null;
   /** The restaurant's own named colours, in its order (RASOIOS-ADR-021 §7). */
   brandColors: BrandColour[];
+  textColors: WebsiteTextColors;
   menuStyle: MenuStyle;
   dailyStyle: DailyStyle;
 };
@@ -76,6 +80,20 @@ function brandColoursOf(value: Prisma.JsonValue): BrandColour[] {
     const e = entry as { name?: unknown; hex?: unknown } | null;
     return e && typeof e.name === "string" && typeof e.hex === "string" && /^#[0-9A-Fa-f]{6}$/.test(e.hex) ? [{ name: e.name, hex: e.hex.toUpperCase() }] : [];
   });
+}
+
+/** Parses stored text colors, ignoring any invalid or malformed hex. */
+export function textColorsOf(value: Prisma.JsonValue | null | undefined): WebsiteTextColors {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const obj = value as Record<string, unknown>;
+  const result: WebsiteTextColors = {};
+  for (const key of TEXT_COLOR_KEYS) {
+    const val = obj[key];
+    if (typeof val === "string" && /^#[0-9A-Fa-f]{6}$/.test(val)) {
+      result[key] = val.toUpperCase();
+    }
+  }
+  return result;
 }
 
 export type WebsiteIdentityRow = {
@@ -130,6 +148,7 @@ function toTheme(row: ThemeRow): WebsiteThemeRow {
     gradientFromHex: row.gradientFromHex,
     gradientToHex: row.gradientToHex,
     brandColors: brandColoursOf(row.brandColors),
+    textColors: textColorsOf(row.websiteTextColors),
     menuStyle: row.menuStyle,
     dailyStyle: row.dailyStyle,
   };
@@ -226,7 +245,7 @@ export async function getPublicWebsite(slug: string, audience: "website" | "tabl
 
 // ─── Writes ───
 
-type Patch = Partial<Record<ThemeColumn, string | boolean | null | BrandColour[]>>;
+type Patch = Partial<Record<ThemeColumn, string | boolean | null | BrandColour[] | WebsiteTextColors>>;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 const pick = (row: ThemeRow, columns: ThemeColumn[]) => Object.fromEntries(columns.map((c) => [c, row[c]]));
@@ -251,7 +270,7 @@ async function patchWebsite(ctx: TenantContext, patch: Patch, action: "restauran
 /** SA-WEB-01 — preset, surface mode and colours (`restaurant.theme_updated`). Colours are already contrast-checked. */
 export function updateWebsiteTheme(
   ctx: TenantContext,
-  theme: Omit<WebsiteThemeRow, "brandColors" | "menuStyle" | "dailyStyle"> & Partial<Pick<WebsiteThemeRow, "brandColors" | "menuStyle" | "dailyStyle">>,
+  theme: Omit<WebsiteThemeRow, "brandColors" | "textColors" | "menuStyle" | "dailyStyle"> & Partial<Pick<WebsiteThemeRow, "brandColors" | "textColors" | "menuStyle" | "dailyStyle">>,
 ): Promise<WebsiteConfigDto> {
   return patchWebsite(
     ctx,
@@ -264,6 +283,7 @@ export function updateWebsiteTheme(
       gradientFromHex: theme.gradientFromHex,
       gradientToHex: theme.gradientToHex,
       brandColors: theme.brandColors,
+      websiteTextColors: theme.textColors ? (Object.fromEntries(Object.entries(theme.textColors).filter(([, v]) => typeof v === "string" && v !== "")) as WebsiteTextColors) : undefined,
       menuStyle: theme.menuStyle,
       dailyStyle: theme.dailyStyle,
     },

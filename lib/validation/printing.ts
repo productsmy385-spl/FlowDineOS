@@ -11,6 +11,7 @@ import { PrintJobStatus, PrintJobType, PrinterConnection, PrinterHealth, Printer
 import { z } from "zod";
 import { isPrivateIpv4, isPrivateLanAddress, USB_ADDRESS_PATTERN } from "@/lib/print/address";
 import { PRINTER_PROFILE_KEYS, type PrinterProfileKey } from "@/lib/print/profiles";
+import { MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 import { boundedText, optionalText, strictObject, uuidParam } from "./core";
 
 // ─── Printer addresses (SC-PRINT-06) — shared with the local agent via lib/print/address.ts ───
@@ -58,6 +59,22 @@ export const createPrinterSchema = strictObject({
   kitchenSectionId: uuidParam.nullish().transform((value) => value ?? null),
   printAgentId: uuidParam.nullish().transform((value) => value ?? null),
   profile: profileField.optional(),
+  autoPrintKot: z.boolean().optional().default(true),
+  kotCopies: z
+    .number()
+    .int({ message: "KOT copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional()
+    .default(1),
+  autoPrintReceipt: z.boolean().optional().default(true),
+  receiptCopies: z
+    .number()
+    .int({ message: "Receipt copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional()
+    .default(2),
 }).superRefine((value, ctx) => {
   const issue = connectionAddressIssue(value.connectionType, value.connectionAddress);
   if (issue) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["connectionAddress"], message: issue });
@@ -76,6 +93,20 @@ export const updatePrinterSchema = strictObject({
   kitchenSectionId: uuidParam.nullable().optional(),
   printAgentId: uuidParam.nullable().optional(),
   profile: profileField.optional(),
+  autoPrintKot: z.boolean().optional(),
+  kotCopies: z
+    .number()
+    .int({ message: "KOT copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional(),
+  autoPrintReceipt: z.boolean().optional(),
+  receiptCopies: z
+    .number()
+    .int({ message: "Receipt copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional(),
 }).superRefine((value, ctx) => {
   if (value.connectionAddress === undefined) return;
   if (value.connectionType === undefined) {
@@ -128,10 +159,26 @@ export const archivePrintJobsSchema = z.union([
 ]);
 export type ArchivePrintJobsInput = z.input<typeof archivePrintJobsSchema>;
 
-export const printReceiptSchema = strictObject({ orderId: uuidParam });
+export const printReceiptSchema = strictObject({
+  orderId: uuidParam,
+  copies: z
+    .number()
+    .int({ message: "Copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional(),
+});
 export type PrintReceiptInput = z.input<typeof printReceiptSchema>;
 
-export const reprintKotSchema = strictObject({ kotId: uuidParam });
+export const reprintKotSchema = strictObject({
+  kotId: uuidParam,
+  copies: z
+    .number()
+    .int({ message: "Copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional(),
+});
 export type ReprintKotInput = z.input<typeof reprintKotSchema>;
 
 // ─── Agents (SA-AGT-01, SA-AGT-02) ───

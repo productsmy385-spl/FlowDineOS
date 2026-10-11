@@ -35,20 +35,20 @@ export function MenuItemCard({ item, formatting }: { item: PublicMenuItemData; f
       <SiteImage src={item.imageUrl} alt={item.name} displayWidth={400} fallbackIcon={menuIconFor(item.iconKey) ?? UtensilsCrossed} className="aspect-[4/3] w-full" />
       <div className="flex flex-1 flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="min-w-0 break-words text-subheading">{item.name}</h3>
-          <p className="text-numeric text-subheading text-fg-accent whitespace-nowrap">
-            {price.from ? <span className="text-caption text-fg-secondary">from </span> : null}
+          <h3 className="min-w-0 break-words text-subheading" style={{ color: "var(--website-heading-color)" }}>{item.name}</h3>
+          <p className="text-numeric text-subheading whitespace-nowrap" style={{ color: "var(--website-price-color)" }}>
+            {price.from ? <span className="text-caption" style={{ color: "var(--website-muted-text-color)" }}>from </span> : null}
             {price.amount}
           </p>
         </div>
-        {item.description ? <p className="break-words text-body text-fg-secondary">{item.description}</p> : null}
+        {item.description ? <p className="break-words text-body" style={{ color: "var(--website-muted-text-color)" }}>{item.description}</p> : null}
         {item.variants.length > 0 ? (
-          <p className="text-caption text-fg-secondary">
+          <p className="text-caption" style={{ color: "var(--website-muted-text-color)" }}>
             {item.variants.map((variant) => `${variant.name} ${formatMoney(variant.price, formatting.currencyCode, formatting.locale)}`).join(" · ")}
           </p>
         ) : null}
         {item.addOns.length > 0 ? (
-          <p className="text-caption text-fg-secondary">
+          <p className="text-caption" style={{ color: "var(--website-muted-text-color)" }}>
             Add: {item.addOns.map((addOn) => `${addOn.name} ${formatMoney(addOn.price, formatting.currencyCode, formatting.locale)}`).join(" · ")}
           </p>
         ) : null}
@@ -81,10 +81,10 @@ export function CategoryBlock({ category, formatting }: { category: PublicCatego
   return (
     <section aria-labelledby={headingId} id={`menu-${category.id}`} className="flex scroll-mt-24 flex-col gap-4">
       <div className="flex flex-col gap-1">
-        <h3 id={headingId} className="break-words text-heading">
+        <h3 id={headingId} className="break-words text-heading" style={{ color: "var(--website-section-heading-color)" }}>
           {category.name}
         </h3>
-        {category.description ? <p className="text-body text-fg-secondary">{category.description}</p> : null}
+        {category.description ? <p className="text-body" style={{ color: "var(--website-muted-text-color)" }}>{category.description}</p> : null}
       </div>
       {category.items.length === 0 ? (
         <SectionEmpty icon={UtensilsCrossed}>No dishes are published in {category.name} yet.</SectionEmpty>

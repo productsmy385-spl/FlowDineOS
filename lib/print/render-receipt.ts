@@ -51,7 +51,26 @@ export type ReceiptDocumentInput = {
   ledger: readonly ReceiptDocumentLedgerEntry[];
   footer: string | null;
   isReprint?: boolean;
+  copyLabel?: string | null;
+  copyIndex?: number;
+  copyCount?: number;
 };
+
+/**
+ * Returns the standard label for a copy when multiple copies are printed:
+ * - 1 copy: null (standard receipt)
+ * - 2 copies: "CUSTOMER COPY" (copy 1), "RESTAURANT COPY" (copy 2)
+ * - 3+ copies: "CUSTOMER COPY", "RESTAURANT COPY", "COPY 3", etc.
+ */
+export function receiptCopyLabel(copyIndex: number, totalCopies: number): string | null {
+  if (totalCopies <= 1) return null;
+  if (totalCopies === 2) {
+    return copyIndex === 1 ? "CUSTOMER COPY" : "RESTAURANT COPY";
+  }
+  if (copyIndex === 1) return "CUSTOMER COPY";
+  if (copyIndex === 2) return "RESTAURANT COPY";
+  return `COPY ${copyIndex}`;
+}
 
 const ORDER_TYPE_LABELS: Readonly<Record<OrderType, string>> = { DINE_IN: "Dine-in", TAKEAWAY: "Takeaway", DELIVERY: "Delivery" };
 const METHOD_LABELS: Readonly<Record<PaymentMethod, string>> = { CASH: "Cash", CARD: "Card", UPI: "UPI" };
@@ -72,6 +91,7 @@ export function renderReceiptDocument(input: ReceiptDocumentInput): PrintDocumen
   if (input.gstin) blocks.push({ type: "text", text: `GSTIN ${sanitizeLine(input.gstin, 15)}`, align: "center" });
 
   blocks.push({ type: "divider", style: "solid" });
+  if (input.copyLabel) blocks.push({ type: "text", text: `*** ${input.copyLabel} ***`, align: "center", bold: true });
   if (input.isReprint) blocks.push({ type: "text", text: "*** REPRINT ***", align: "center", bold: true });
   blocks.push(row("Receipt", sanitizeLine(input.orderNumber, 24)));
   blocks.push(row("Date", printableTimestamp(input.createdAt, input.timeZone)));
@@ -119,5 +139,12 @@ export function renderReceiptDocument(input: ReceiptDocumentInput): PrintDocumen
   blocks.push({ type: "spacer", lines: 2 });
   blocks.push({ type: "cut" });
 
-  return assertPrintable({ version: 1, widthMm, blocks });
+  return assertPrintable({
+    version: 1,
+    widthMm,
+    blocks,
+    copyIndex: input.copyIndex,
+    copyCount: input.copyCount,
+    copyLabel: input.copyLabel ?? undefined,
+  });
 }

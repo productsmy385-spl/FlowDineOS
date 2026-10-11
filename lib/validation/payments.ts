@@ -10,6 +10,7 @@
 import { PaymentMethod, TransactionStatus, TransactionType } from "@prisma/client";
 import { z } from "zod";
 import { zodMoney } from "@/lib/money";
+import { MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 import { boundedText, businessDateParam, optionalText, strictObject } from "./core";
 
 /** Card slip / UPI reference: 4–64 letters, digits or dashes (data-model E19). */
@@ -36,6 +37,14 @@ export const recordPaymentSchema = strictObject({
   /** CASH only: the cash handed over. Change is computed on the server. */
   amountTendered: zodMoney({ positive: true }).optional(),
   reference: paymentReference.optional(),
+  /** Optional print confirmation: staff can choose whether to print and how many copies for this payment only. */
+  printReceipt: z.boolean().optional(),
+  receiptCopies: z
+    .number()
+    .int({ message: "Receipt copies must be an integer" })
+    .min(MIN_PRINT_COPIES, { message: `Minimum ${MIN_PRINT_COPIES} copy` })
+    .max(MAX_PRINT_COPIES, { message: `Maximum ${MAX_PRINT_COPIES} copies` })
+    .optional(),
 });
 
 /** SA-TXN-02 — refund (part of) a successful payment. `amount` defaults to the payment's refundable remainder. */

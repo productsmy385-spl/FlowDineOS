@@ -53,10 +53,17 @@ export function agentVersionAtLeast(version: string | null | undefined, minimum:
   return true;
 }
 
+/** System limits on printable copies to prevent accidental print floods. */
+export const MIN_PRINT_COPIES = 1;
+export const MAX_PRINT_COPIES = 10;
+
 export type PrintDocument = {
   version: 1;
   widthMm: PaperWidthMm;
   blocks: PrintBlock[];
+  copyIndex?: number;
+  copyCount?: number;
+  copyLabel?: string;
 };
 
 const alignSchema = z.enum(["left", "center", "right"]);
@@ -85,6 +92,9 @@ export const printDocumentSchema = z
     version: z.literal(1),
     widthMm: z.union([z.literal(58), z.literal(80)]),
     blocks: z.array(printBlockSchema).min(1).max(4000),
+    copyIndex: z.number().int().min(1).optional(),
+    copyCount: z.number().int().min(1).optional(),
+    copyLabel: z.string().max(40).optional(),
   })
   .strict();
 

@@ -41,6 +41,11 @@ export type PrintJobDto = {
   maxAttempts: number;
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
+  copyIndex: number | null;
+  copyCount: number | null;
+  copyLabel: string | null;
+  paymentReference: string | null;
+  trigger: string | null;
   createdAt: string;
   updatedAt: string;
   printedAt: string | null;
@@ -71,6 +76,10 @@ export type PrinterDto = {
   printAgentStatus: PrintAgentStatus | null;
   /** Capability profile key (lib/print/profiles.ts). */
   profile: string;
+  autoPrintKot: boolean;
+  kotCopies: number;
+  autoPrintReceipt: boolean;
+  receiptCopies: number;
   archivedAt: string | null;
   lastDeliveredAt: string | null;
   lastFailedAt: string | null;
@@ -102,6 +111,11 @@ const JOB_SELECT = {
   maxAttempts: true,
   lastErrorCode: true,
   lastErrorMessage: true,
+  copyIndex: true,
+  copyCount: true,
+  copyLabel: true,
+  paymentReference: true,
+  trigger: true,
   createdAt: true,
   updatedAt: true,
   printedAt: true,
@@ -126,6 +140,11 @@ function toJobDto(row: JobRow): PrintJobDto {
     maxAttempts: row.maxAttempts,
     lastErrorCode: row.lastErrorCode,
     lastErrorMessage: row.lastErrorMessage,
+    copyIndex: row.copyIndex,
+    copyCount: row.copyCount,
+    copyLabel: row.copyLabel,
+    paymentReference: row.paymentReference,
+    trigger: row.trigger,
     createdAt: instantDto(row.createdAt),
     updatedAt: instantDto(row.updatedAt),
     printedAt: nullableInstantDto(row.printedAt),
@@ -153,6 +172,10 @@ const PRINTER_SELECT = {
   kitchenSection: { select: { name: true } },
   printAgent: { select: { name: true, status: true } },
   profile: true,
+  autoPrintKot: true,
+  kotCopies: true,
+  autoPrintReceipt: true,
+  receiptCopies: true,
   archivedAt: true,
   lastDeliveredAt: true,
   lastFailedAt: true,
@@ -181,6 +204,10 @@ function toPrinterDto(row: PrinterRow): PrinterRowDto {
     printAgentName: row.printAgent?.name ?? null,
     printAgentStatus: row.printAgent?.status ?? null,
     profile: row.profile,
+    autoPrintKot: row.autoPrintKot,
+    kotCopies: row.kotCopies,
+    autoPrintReceipt: row.autoPrintReceipt,
+    receiptCopies: row.receiptCopies,
     archivedAt: nullableInstantDto(row.archivedAt),
     lastDeliveredAt: nullableInstantDto(row.lastDeliveredAt),
     lastFailedAt: nullableInstantDto(row.lastFailedAt),
@@ -344,9 +371,25 @@ export async function printingProfile(client: Tx, ctx: TenantContext): Promise<P
 const KOT_PURPOSES: PrinterPurpose[] = [PrinterPurpose.KOT, PrinterPurpose.KOT_AND_RECEIPT];
 const RECEIPT_PURPOSES: PrinterPurpose[] = [PrinterPurpose.RECEIPT, PrinterPurpose.KOT_AND_RECEIPT];
 
-export type PrinterTarget = { id: string; name: string; paperWidthMm: number };
+export type PrinterTarget = {
+  id: string;
+  name: string;
+  paperWidthMm: number;
+  autoPrintKot: boolean;
+  kotCopies: number;
+  autoPrintReceipt: boolean;
+  receiptCopies: number;
+};
 
-const TARGET_SELECT = { id: true, name: true, paperWidthMm: true } satisfies Prisma.PrinterSelect;
+const TARGET_SELECT = {
+  id: true,
+  name: true,
+  paperWidthMm: true,
+  autoPrintKot: true,
+  kotCopies: true,
+  autoPrintReceipt: true,
+  receiptCopies: true,
+} satisfies Prisma.PrinterSelect;
 
 /**
  * The printer a section's KOT goes to: the section's own active KOT printer, else an active KOT printer with no
@@ -396,6 +439,11 @@ export type NewPrintJob = {
   isReprint?: boolean;
   requestedByUserId?: string | null;
   maxAttempts?: number;
+  copyIndex?: number | null;
+  copyCount?: number | null;
+  copyLabel?: string | null;
+  paymentReference?: string | null;
+  trigger?: string | null;
 };
 
 export type CreatedPrintJob = { id: string; created: boolean };
@@ -407,7 +455,9 @@ export type CreatedPrintJob = { id: string; created: boolean };
  */
 export async function createPrintJob(client: Tx, ctx: TenantContext, job: NewPrintJob): Promise<CreatedPrintJob> {
   const inserted = await client.$queryRaw<Array<{ id: string }>>`
-    INSERT INTO print_jobs (tenant_id, printer_id, job_type, order_id, kot_ticket_id, dedupe_key, is_reprint, payload, status, attempt_count, max_attempts, next_attempt_at, requested_by_user_id, created_at, updated_at)
+    INSERT INTO print_jobs (
+      tenant_id, printer_id, job_type, order_id, kot_ticket_id, dedupe_key, is_reprint, payload, status, attempt_count, max_attempts, next_attempt_at, requested_by_user_id, copy_index, copy_count, copy_label, payment_reference, trigger, created_at, updated_at
+    )
     VALUES (
       ${ctx.tenantId}::uuid,
       ${job.printerId}::uuid,
@@ -422,6 +472,11 @@ export async function createPrintJob(client: Tx, ctx: TenantContext, job: NewPri
       ${job.maxAttempts ?? RETRY_POLICIES[job.jobType].maxAttempts},
       now(),
       ${job.requestedByUserId ?? null}::uuid,
+      ${job.copyIndex ?? null},
+      ${job.copyCount ?? null},
+      ${job.copyLabel ?? null},
+      ${job.paymentReference ?? null},
+      ${job.trigger ?? null},
       now(),
       now()
     )
@@ -749,6 +804,10 @@ export type NewPrinter = {
   kitchenSectionId: string | null;
   printAgentId: string | null;
   profile?: string;
+  autoPrintKot?: boolean;
+  kotCopies?: number;
+  autoPrintReceipt?: boolean;
+  receiptCopies?: number;
 };
 
 export async function kitchenSectionExists(client: Tx, ctx: TenantContext, kitchenSectionId: string): Promise<boolean> {

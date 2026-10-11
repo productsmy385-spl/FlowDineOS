@@ -206,7 +206,14 @@ export async function recordPayment(ctx: TenantContext, input: RecordPaymentData
     // after the payment has committed, only when it settles the bill, and never for a replayed submit — a double click
     // replays the same payment, and the job is keyed to that payment, so it cannot print twice.
     if (!result.replayed && result.paymentStatus === PaymentStatus.PAID) {
-      return { ...result, receipt: await queueReceiptForPayment(ctx, result.orderId, result.transactionId) };
+      return {
+        ...result,
+        receipt: await queueReceiptForPayment(ctx, result.orderId, result.transactionId, {
+          copies: input.receiptCopies,
+          printReceipt: input.printReceipt,
+          reference: input.reference,
+        }),
+      };
     }
     return result;
   } catch (error) {

@@ -12,9 +12,17 @@ import { Form, FormField, SubmitButton } from "@/components/ui/form";
 import { ImageUploader } from "@/components/ui/image-uploader";
 import { RadioGroup, Switch, TextArea, TextField, TextInput } from "@/components/ui/inputs";
 import { cn } from "@/lib/ui/cn";
+import { contrastRatio } from "@/lib/ui/contrast";
 import type { ActionResult } from "@/lib/http/action";
-import type { WebsiteSectionKeyName, WebsiteSurfaceModeName, WebsiteThemePresetName } from "@/lib/validation/website";
+import {
+  TEXT_COLOR_KEYS,
+  type TextColorKey,
+  type WebsiteSectionKeyName,
+  type WebsiteSurfaceModeName,
+  type WebsiteThemePresetName,
+} from "@/lib/validation/website";
 import { SitePreview, type PreviewPalette } from "./site-preview";
+import type { ResolvedTextColors } from "@/lib/services/website-theme";
 import { updateBrandingAction } from "../settings/website-actions";
 import { saveWebsiteSectionsAction, updateWebsiteIdentityAction, updateWebsiteThemeAction } from "./actions";
 
@@ -23,8 +31,8 @@ import { saveWebsiteSectionsAction, updateWebsiteIdentityAction, updateWebsiteTh
  *
  * Four tabs, one live preview, and one rule: **every control is wired to a real Server Action, and nothing here
  * reports success until the server has confirmed it.** The action result replaces the on-screen state, so what the
- * form shows afterwards is what was stored. Field errors — including the contrast rejection, which names the measured
- * ratio — are rendered against the field they belong to by the shared form system.
+ * form shows afterwards is what was stored. Field errors — including contrast warnings — are rendered against the
+ * field they belong to by the shared form system.
  *
  * A role without `website:update` sees the same screen read-only; the server refuses the write regardless
  * (SC-RBAC-08).
@@ -55,11 +63,21 @@ export type EditorSettings = {
     accentHex: string | null;
     gradientFromHex: string | null;
     gradientToHex: string | null;
+    textColors?: Partial<Record<TextColorKey, string>> | null;
     brandColors: BrandColour[];
     menuStyle: "RING" | "GRID";
     dailyStyle: "STRIP" | "GRID";
   };
-  resolvedTheme: { primary: string; secondary: string; accent: string; gradientFrom: string; gradientTo: string; surface: string; onSurface: string };
+  resolvedTheme: {
+    primary: string;
+    secondary: string;
+    accent: string;
+    gradientFrom: string;
+    gradientTo: string;
+    surface: string;
+    onSurface: string;
+    textColors: ResolvedTextColors;
+  };
   identity: {
     tagline: string | null;
     logoUrl: string | null;
@@ -95,6 +113,8 @@ type ColourDraft = {
   useGradient: boolean;
   gradientFromHex: string;
   gradientToHex: string;
+  textColors: ResolvedTextColors;
+  customTextColors: Record<TextColorKey, boolean>;
   brandColors: BrandColour[];
   menuStyle: "RING" | "GRID";
   dailyStyle: "STRIP" | "GRID";
@@ -102,8 +122,50 @@ type ColourDraft = {
 
 type BrandColour = { name: string; hex: string };
 
+export function computeDefaultTextColors(
+  surfaceMode: WebsiteSurfaceModeName,
+  palette: PreviewPalette,
+): ResolvedTextColors {
+  const isDark = surfaceMode === "DARK";
+  const onGradient =
+    Math.min(contrastRatio(palette.gradientFrom, "#FFFFFF"), contrastRatio(palette.gradientTo, "#FFFFFF")) >=
+    Math.min(contrastRatio(palette.gradientFrom, "#0B0B0F"), contrastRatio(palette.gradientTo, "#0B0B0F"))
+      ? "#FFFFFF"
+      : "#0B0B0F";
+  const onPrimary =
+    contrastRatio(palette.primary, "#FFFFFF") >= contrastRatio(palette.primary, "#0B0B0F") ? "#FFFFFF" : "#0B0B0F";
+
+  return {
+    headingColor: isDark ? "#F5F5F7" : "#17211B",
+    sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
+    bodyTextColor: isDark ? "#DEE8E3" : "#405044",
+    mutedTextColor: isDark ? "#93A69D" : "#667366",
+    navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+    linkColor: palette.primary,
+    buttonTextColor: onPrimary,
+    priceColor: palette.primary,
+    footerTextColor: isDark ? "#93A69D" : "#405044",
+    heroHeadingColor: onGradient,
+    heroDescriptionColor: onGradient,
+  };
+}
+
 function colourDraft(settings: EditorSettings): ColourDraft {
   const { theme, resolvedTheme } = settings;
+  const customTextColors: Record<TextColorKey, boolean> = {
+    headingColor: Boolean(theme.textColors?.headingColor),
+    sectionHeadingColor: Boolean(theme.textColors?.sectionHeadingColor),
+    bodyTextColor: Boolean(theme.textColors?.bodyTextColor),
+    mutedTextColor: Boolean(theme.textColors?.mutedTextColor),
+    navigationTextColor: Boolean(theme.textColors?.navigationTextColor),
+    linkColor: Boolean(theme.textColors?.linkColor),
+    buttonTextColor: Boolean(theme.textColors?.buttonTextColor),
+    priceColor: Boolean(theme.textColors?.priceColor),
+    footerTextColor: Boolean(theme.textColors?.footerTextColor),
+    heroHeadingColor: Boolean(theme.textColors?.heroHeadingColor),
+    heroDescriptionColor: Boolean(theme.textColors?.heroDescriptionColor),
+  };
+
   return {
     preset: theme.preset,
     surfaceMode: theme.surfaceMode,
@@ -113,6 +175,8 @@ function colourDraft(settings: EditorSettings): ColourDraft {
     useGradient: theme.gradientFromHex !== null && theme.gradientToHex !== null,
     gradientFromHex: theme.gradientFromHex ?? resolvedTheme.gradientFrom,
     gradientToHex: theme.gradientToHex ?? resolvedTheme.gradientTo,
+    textColors: { ...resolvedTheme.textColors },
+    customTextColors,
     brandColors: theme.brandColors.map((colour) => ({ ...colour })),
     menuStyle: theme.menuStyle,
     dailyStyle: theme.dailyStyle,
@@ -180,6 +244,86 @@ function ColourField({
   );
 }
 
+/** A text colour setting pair with colour picker, HEX input, and Reset to default option. */
+function TextColourField({
+  name,
+  label,
+  help,
+  value,
+  defaultHex,
+  isCustom,
+  onChange,
+  onReset,
+  disabled,
+}: {
+  name: string;
+  label: string;
+  help?: string;
+  value: string;
+  defaultHex: string;
+  isCustom: boolean;
+  onChange: (value: string) => void;
+  onReset: () => void;
+  disabled: boolean;
+}) {
+  return (
+    <FormField name={name} label={label} help={help}>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-3">
+          <input
+            type="color"
+            aria-label={`${label} swatch`}
+            value={HEX.test(value) ? value : "#000000"}
+            disabled={disabled}
+            onChange={(event) => onChange(event.target.value.toUpperCase())}
+            className="h-10 w-12 shrink-0 cursor-pointer rounded-xl border border-border-strong bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
+          />
+          <TextInput
+            value={value}
+            disabled={disabled}
+            inputMode="text"
+            spellCheck={false}
+            onChange={(event) => onChange(event.target.value.toUpperCase())}
+          />
+        </div>
+        <div className="flex items-center justify-between text-caption">
+          <span className="text-fg-secondary">
+            {isCustom ? "Custom" : `Default: ${defaultHex}`}
+          </span>
+          {isCustom && !disabled && (
+            <button
+              type="button"
+              onClick={onReset}
+              className="text-label text-fg-accent hover:underline"
+              aria-label={`Reset ${label} to default`}
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
+      </div>
+    </FormField>
+  );
+}
+
+const TEXT_COLOUR_FIELDS: Array<{
+  key: TextColorKey;
+  label: string;
+  help?: string;
+}> = [
+  { key: "headingColor", label: "Main heading", help: "Restaurant name and main headlines." },
+  { key: "sectionHeadingColor", label: "Section headings", help: "Headings for categories, hours, and about." },
+  { key: "bodyTextColor", label: "Body text", help: "Descriptions and general paragraph copy." },
+  { key: "mutedTextColor", label: "Secondary text", help: "Muted subtitles, dietary notes, and hours details." },
+  { key: "navigationTextColor", label: "Navigation text", help: "Header menu links." },
+  { key: "linkColor", label: "Links", help: "Hyperlinks and map links." },
+  { key: "buttonTextColor", label: "Button text", help: "Text on buttons and calls to action." },
+  { key: "priceColor", label: "Prices", help: "Menu item price tags." },
+  { key: "footerTextColor", label: "Footer text", help: "Footer information and copyright text." },
+  { key: "heroHeadingColor", label: "Hero heading", help: "Heading displayed on the hero banner." },
+  { key: "heroDescriptionColor", label: "Hero description", help: "Tagline and text on the hero banner." },
+];
+
 // ─── Editor ───
 
 export function WebsiteEditor({ settings, reference, site }: { settings: EditorSettings; reference: EditorReference; site: EditorSite }) {
@@ -216,11 +360,30 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
       menuStyle: draft.menuStyle,
       dailyStyle: draft.dailyStyle,
     };
+    const textColorsToSave: Partial<Record<TextColorKey, string>> = {};
+    for (const key of TEXT_COLOR_KEYS) {
+      if (draft.customTextColors[key]) {
+        textColorsToSave[key] = draft.textColors[key];
+      }
+    }
     return saved(
       updateWebsiteThemeAction(
         draft.preset === "CUSTOM"
-          ? { preset: draft.preset, surfaceMode: draft.surfaceMode, primaryHex: draft.primaryHex, secondaryHex: draft.secondaryHex, accentHex: draft.accentHex, ...gradient }
-          : { preset: draft.preset, surfaceMode: draft.surfaceMode, ...gradient },
+          ? {
+              preset: draft.preset,
+              surfaceMode: draft.surfaceMode,
+              primaryHex: draft.primaryHex,
+              secondaryHex: draft.secondaryHex,
+              accentHex: draft.accentHex,
+              textColors: textColorsToSave,
+              ...gradient,
+            }
+          : {
+              preset: draft.preset,
+              surfaceMode: draft.surfaceMode,
+              textColors: textColorsToSave,
+              ...gradient,
+            },
       ),
     );
   };
@@ -282,6 +445,54 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   const updateSection = (key: WebsiteSectionKeyName, patch: Partial<EditorSection>) =>
     setSections((current) => current.map((section) => (section.key === key ? { ...section, ...patch } : section)));
 
+  function updateCustomPalette(patch: Partial<Pick<ColourDraft, "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex">>) {
+    setColours((current) => {
+      const updated = { ...current, ...patch };
+      const nextPalette = draftPalette(updated, reference);
+      const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
+      const nextTextColors = { ...updated.textColors };
+      for (const k of TEXT_COLOR_KEYS) {
+        if (!updated.customTextColors[k]) {
+          nextTextColors[k] = defaults[k];
+        }
+      }
+      return {
+        ...updated,
+        textColors: nextTextColors,
+      };
+    });
+  }
+
+  function updateTextColor(key: TextColorKey, hex: string) {
+    setColours((current) => ({
+      ...current,
+      customTextColors: {
+        ...current.customTextColors,
+        [key]: true,
+      },
+      textColors: {
+        ...current.textColors,
+        [key]: hex,
+      },
+    }));
+  }
+
+  function resetTextColor(key: TextColorKey) {
+    const currentPalette = draftPalette(colours, reference);
+    const defaults = computeDefaultTextColors(colours.surfaceMode, currentPalette);
+    setColours((current) => ({
+      ...current,
+      customTextColors: {
+        ...current.customTextColors,
+        [key]: false,
+      },
+      textColors: {
+        ...current.textColors,
+        [key]: defaults[key],
+      },
+    }));
+  }
+
   const previewInput = {
     preset: colours.preset,
     surfaceMode: colours.surfaceMode,
@@ -293,6 +504,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     tagline: identity.tagline,
     ctaLabel: sections.find((section) => section.key === "HERO")?.ctaLabel ?? null,
     sectionLabels: sections.filter((section) => section.enabled || section.alwaysEnabled).map((section) => section.headline || section.defaultHeadline),
+    textColors: colours.textColors,
   };
 
   const tabs = [
@@ -305,7 +517,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
           <Card>
             <CardHeader>
               <CardTitle>Colours</CardTitle>
-              <CardDescription>Pick a ready-made palette or choose your own. Colours that would be unreadable on your website background are refused.</CardDescription>
+              <CardDescription>Pick a ready-made palette or choose your own. Check contrast and customize individual text colours below.</CardDescription>
             </CardHeader>
             <CardContent>
               <RadioGroup
@@ -313,7 +525,30 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 label="Palette"
                 disabled={disabled}
                 value={colours.preset}
-                onValueChange={(value) => setColours((current) => ({ ...current, preset: value as WebsiteThemePresetName }))}
+                onValueChange={(value) => {
+                  const nextPreset = value as WebsiteThemePresetName;
+                  setColours((current) => {
+                    const nextBase =
+                      nextPreset === "CUSTOM"
+                        ? { primary: current.primaryHex, secondary: current.secondaryHex, accent: current.accentHex, gradientFrom: current.primaryHex, gradientTo: current.secondaryHex }
+                        : reference.presetPalettes[nextPreset][current.surfaceMode];
+                    const nextPalette = current.useGradient
+                      ? { ...nextBase, gradientFrom: current.gradientFromHex, gradientTo: current.gradientToHex }
+                      : nextBase;
+                    const defaults = computeDefaultTextColors(current.surfaceMode, nextPalette);
+                    const nextTextColors = { ...current.textColors };
+                    for (const k of TEXT_COLOR_KEYS) {
+                      if (!current.customTextColors[k]) {
+                        nextTextColors[k] = defaults[k];
+                      }
+                    }
+                    return {
+                      ...current,
+                      preset: nextPreset,
+                      textColors: nextTextColors,
+                    };
+                  });
+                }}
                 options={(Object.keys(PRESET_LABELS) as WebsiteThemePresetName[]).map((preset) => ({
                   value: preset,
                   label: PRESET_LABELS[preset],
@@ -329,7 +564,30 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 orientation="horizontal"
                 disabled={disabled}
                 value={colours.surfaceMode}
-                onValueChange={(value) => setColours((current) => ({ ...current, surfaceMode: value as WebsiteSurfaceModeName }))}
+                onValueChange={(value) => {
+                  const nextMode = value as WebsiteSurfaceModeName;
+                  setColours((current) => {
+                    const nextBase =
+                      current.preset === "CUSTOM"
+                        ? { primary: current.primaryHex, secondary: current.secondaryHex, accent: current.accentHex, gradientFrom: current.primaryHex, gradientTo: current.secondaryHex }
+                        : reference.presetPalettes[current.preset][nextMode];
+                    const nextPalette = current.useGradient
+                      ? { ...nextBase, gradientFrom: current.gradientFromHex, gradientTo: current.gradientToHex }
+                      : nextBase;
+                    const defaults = computeDefaultTextColors(nextMode, nextPalette);
+                    const nextTextColors = { ...current.textColors };
+                    for (const k of TEXT_COLOR_KEYS) {
+                      if (!current.customTextColors[k]) {
+                        nextTextColors[k] = defaults[k];
+                      }
+                    }
+                    return {
+                      ...current,
+                      surfaceMode: nextMode,
+                      textColors: nextTextColors,
+                    };
+                  });
+                }}
                 options={[
                   { value: "DARK", label: "Dark" },
                   { value: "LIGHT", label: "Light" },
@@ -343,21 +601,21 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                     help="Buttons, prices and links."
                     value={colours.primaryHex}
                     disabled={disabled}
-                    onChange={(value) => setColours((current) => ({ ...current, primaryHex: value }))}
+                    onChange={(value) => updateCustomPalette({ primaryHex: value })}
                   />
                   <ColourField
                     name="secondaryHex"
                     label="Secondary colour"
                     value={colours.secondaryHex}
                     disabled={disabled}
-                    onChange={(value) => setColours((current) => ({ ...current, secondaryHex: value }))}
+                    onChange={(value) => updateCustomPalette({ secondaryHex: value })}
                   />
                   <ColourField
                     name="accentHex"
                     label="Accent colour"
                     value={colours.accentHex}
                     disabled={disabled}
-                    onChange={(value) => setColours((current) => ({ ...current, accentHex: value }))}
+                    onChange={(value) => updateCustomPalette({ accentHex: value })}
                   />
                 </div>
               )}
@@ -367,7 +625,21 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 help="Off keeps the gradient that comes with the palette."
                 checked={colours.useGradient}
                 disabled={disabled}
-                onChange={(event) => setColours((current) => ({ ...current, useGradient: event.target.checked }))}
+                onChange={(event) =>
+                  setColours((current) => {
+                    const nextUse = event.target.checked;
+                    const updated = { ...current, useGradient: nextUse };
+                    const nextPalette = draftPalette(updated, reference);
+                    const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
+                    const nextTextColors = { ...updated.textColors };
+                    for (const k of TEXT_COLOR_KEYS) {
+                      if (!updated.customTextColors[k]) {
+                        nextTextColors[k] = defaults[k];
+                      }
+                    }
+                    return { ...updated, textColors: nextTextColors };
+                  })
+                }
               />
               {colours.useGradient && (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -376,14 +648,14 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                     label="Gradient start"
                     value={colours.gradientFromHex}
                     disabled={disabled}
-                    onChange={(value) => setColours((current) => ({ ...current, gradientFromHex: value }))}
+                    onChange={(value) => updateCustomPalette({ gradientFromHex: value })}
                   />
                   <ColourField
                     name="gradientToHex"
                     label="Gradient end"
                     value={colours.gradientToHex}
                     disabled={disabled}
-                    onChange={(value) => setColours((current) => ({ ...current, gradientToHex: value }))}
+                    onChange={(value) => updateCustomPalette({ gradientToHex: value })}
                   />
                 </div>
               )}
@@ -415,8 +687,38 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                   { value: "GRID", label: "Cards", description: "Today's dishes as a grid." },
                 ]}
               />
+
+              {/* Text Colours Section */}
+              <div className="flex flex-col gap-4 border-t border-border-subtle pt-6">
+                <div>
+                  <h3 className="text-subheading font-semibold text-fg-primary">Text Colours</h3>
+                  <p className="text-caption text-fg-secondary">Customize text colours throughout your public restaurant website.</p>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {TEXT_COLOUR_FIELDS.map(({ key, label, help }) => {
+                    const defaults = computeDefaultTextColors(colours.surfaceMode, palette);
+                    const defaultHex = defaults[key];
+                    const isCustom = colours.customTextColors[key];
+                    return (
+                      <TextColourField
+                        key={key}
+                        name={`textColors.${key}`}
+                        label={label}
+                        help={help}
+                        value={colours.textColors[key]}
+                        defaultHex={defaultHex}
+                        isCustom={isCustom}
+                        disabled={disabled}
+                        onChange={(hex) => updateTextColor(key, hex)}
+                        onReset={() => resetTextColor(key)}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
               {!disabled && (
-                <div className="flex justify-end">
+                <div className="flex justify-end pt-4">
                   <SubmitButton>Save colours</SubmitButton>
                 </div>
               )}

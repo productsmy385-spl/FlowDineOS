@@ -15,7 +15,7 @@ import {
   type WebsiteSectionRow,
   type WebsiteThemeRow,
 } from "@/lib/data/website";
-import { ConflictError, ValidationError } from "@/lib/errors";
+import { ConflictError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { assertOwnedImageUrls, imageUrlsBeforeSave, releaseUnusedImages } from "@/lib/services/media";
 import { getPublicRestaurantBySlug, type PublicRestaurantData } from "@/lib/services/public-restaurant";
@@ -157,8 +157,27 @@ export function themeContrastIssues(palette: Palette, surfaceMode: WebsiteSurfac
 
 // ─── Resolution ───
 
-/** The colour part of a stored theme — all `resolveTheme` needs. */
-export type ThemePaletteRow = Pick<WebsiteThemeRow, "preset" | "surfaceMode" | "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex">;
+export type ResolvedTextColors = {
+  headingColor: string;
+  sectionHeadingColor: string;
+  bodyTextColor: string;
+  mutedTextColor: string;
+  navigationTextColor: string;
+  linkColor: string;
+  buttonTextColor: string;
+  priceColor: string;
+  footerTextColor: string;
+  heroHeadingColor: string;
+  heroDescriptionColor: string;
+};
+
+/** Stored theme row fields needed to resolve the palette and text colours. */
+export type ThemePaletteRow = Pick<
+  WebsiteThemeRow,
+  "preset" | "surfaceMode" | "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex"
+> & {
+  textColors?: WebsiteThemeRow["textColors"];
+};
 
 export type ResolvedTheme = {
   preset: WebsiteThemePresetName;
@@ -174,7 +193,30 @@ export type ResolvedTheme = {
   onSecondary: string;
   onAccent: string;
   onGradient: string;
+  textColors: ResolvedTextColors;
 };
+
+/** Sensible theme-derived text defaults for a given background surface mode and palette. */
+export function defaultTextColors(
+  surfaceMode: WebsiteSurfaceModeName,
+  palette: Palette,
+  onGradient: string,
+): ResolvedTextColors {
+  const isDark = surfaceMode === "DARK";
+  return {
+    headingColor: isDark ? "#F5F5F7" : "#17211B",
+    sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
+    bodyTextColor: isDark ? "#DEE8E3" : "#405044",
+    mutedTextColor: isDark ? "#93A69D" : "#667366",
+    navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+    linkColor: palette.primary,
+    buttonTextColor: onColourFor(palette.primary),
+    priceColor: palette.primary,
+    footerTextColor: isDark ? "#93A69D" : "#405044",
+    heroHeadingColor: onGradient,
+    heroDescriptionColor: onGradient,
+  };
+}
 
 /**
  * Stored theme → the palette the public page renders. A preset ignores any stored colours (the preset defines them);
@@ -203,6 +245,21 @@ export function resolveTheme(theme: ThemePaletteRow): ResolvedTheme {
       ? WHITE
       : BLACK;
 
+  const defaultTexts = defaultTextColors(surfaceMode, palette, onGradient);
+  const textColors: ResolvedTextColors = {
+    headingColor: theme.textColors?.headingColor ?? defaultTexts.headingColor,
+    sectionHeadingColor: theme.textColors?.sectionHeadingColor ?? defaultTexts.sectionHeadingColor,
+    bodyTextColor: theme.textColors?.bodyTextColor ?? defaultTexts.bodyTextColor,
+    mutedTextColor: theme.textColors?.mutedTextColor ?? defaultTexts.mutedTextColor,
+    navigationTextColor: theme.textColors?.navigationTextColor ?? defaultTexts.navigationTextColor,
+    linkColor: theme.textColors?.linkColor ?? defaultTexts.linkColor,
+    buttonTextColor: theme.textColors?.buttonTextColor ?? defaultTexts.buttonTextColor,
+    priceColor: theme.textColors?.priceColor ?? defaultTexts.priceColor,
+    footerTextColor: theme.textColors?.footerTextColor ?? defaultTexts.footerTextColor,
+    heroHeadingColor: theme.textColors?.heroHeadingColor ?? defaultTexts.heroHeadingColor,
+    heroDescriptionColor: theme.textColors?.heroDescriptionColor ?? defaultTexts.heroDescriptionColor,
+  };
+
   return {
     preset,
     surfaceMode,
@@ -213,6 +270,7 @@ export function resolveTheme(theme: ThemePaletteRow): ResolvedTheme {
     onSecondary: onColourFor(palette.secondary),
     onAccent: onColourFor(palette.accent),
     onGradient,
+    textColors,
   };
 }
 
@@ -233,6 +291,17 @@ export function themeCssVariables(theme: ResolvedTheme): Record<string, string> 
     "--site-on-gradient": theme.onGradient,
     "--site-surface": theme.surface,
     "--site-on-surface": theme.onSurface,
+    "--website-heading-color": theme.textColors.headingColor,
+    "--website-section-heading-color": theme.textColors.sectionHeadingColor,
+    "--website-body-text-color": theme.textColors.bodyTextColor,
+    "--website-muted-text-color": theme.textColors.mutedTextColor,
+    "--website-navigation-text-color": theme.textColors.navigationTextColor,
+    "--website-link-color": theme.textColors.linkColor,
+    "--website-button-text-color": theme.textColors.buttonTextColor,
+    "--website-price-color": theme.textColors.priceColor,
+    "--website-footer-text-color": theme.textColors.footerTextColor,
+    "--website-hero-heading-color": theme.textColors.heroHeadingColor,
+    "--website-hero-description-color": theme.textColors.heroDescriptionColor,
   };
 }
 
@@ -284,6 +353,7 @@ export function resolveSections(rows: readonly WebsiteSectionRow[]): ResolvedSec
 export type WebsiteSettingsView = {
   theme: WebsiteThemeRow;
   resolvedTheme: ResolvedTheme;
+  contrastIssues: Record<string, string[]>;
   cssVariables: Record<string, string>;
   identity: WebsiteIdentityRow;
   /** Every section with its stored or default configuration — the editor shows all eleven, enabled or not. */
@@ -315,9 +385,18 @@ function editorSections(rows: readonly WebsiteSectionRow[]): WebsiteSettingsView
 
 function toView(ctx: TenantContext, config: WebsiteConfigDto): WebsiteSettingsView {
   const resolvedTheme = resolveTheme(config.theme);
+  const palette: Palette = {
+    primary: resolvedTheme.primary,
+    secondary: resolvedTheme.secondary,
+    accent: resolvedTheme.accent,
+    gradientFrom: resolvedTheme.gradientFrom,
+    gradientTo: resolvedTheme.gradientTo,
+  };
+  const contrastIssues = themeContrastIssues(palette, resolvedTheme.surfaceMode);
   return {
     theme: config.theme,
     resolvedTheme,
+    contrastIssues,
     cssVariables: themeCssVariables(resolvedTheme),
     identity: config.identity,
     sections: editorSections(config.sections),
@@ -347,8 +426,8 @@ async function revalidatePublicSite(ctx: TenantContext): Promise<void> {
 }
 
 /**
- * SA-WEB-01 — preset or custom colours and the surface mode. The palette is resolved first, then contrast-checked;
- * a failure throws before any write, so a rejected theme leaves the stored one exactly as it was.
+ * SA-WEB-01 — preset or custom colours and the surface mode.
+ * Contrast warnings are computed and reported to the view, but valid colours are not rejected.
  */
 export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeData): Promise<WebsiteSettingsView> {
   const custom = input.preset === "CUSTOM";
@@ -364,9 +443,6 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
       }
     : { ...base!, gradientFrom: input.gradientFromHex ?? base!.gradientFrom, gradientTo: input.gradientToHex ?? base!.gradientTo };
 
-  const issues = themeContrastIssues(palette, input.surfaceMode);
-  if (Object.keys(issues).length > 0) throw new ValidationError("Choose colours that stay readable on the website background.", issues);
-
   // A preset owns its colours: the custom columns are cleared so the stored row can never disagree with the preset
   // (and the database CHECK that binds CUSTOM to its three colours keeps holding).
   const stored: ThemePaletteRow = custom
@@ -378,6 +454,7 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
         accentHex: palette.accent,
         gradientFromHex: input.gradientFromHex ?? null,
         gradientToHex: input.gradientToHex ?? null,
+        textColors: input.textColors,
       }
     : {
         preset: input.preset,
@@ -387,10 +464,17 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
         accentHex: null,
         gradientFromHex: input.gradientFromHex ?? null,
         gradientToHex: input.gradientToHex ?? null,
+        textColors: input.textColors,
       };
 
   // Named brand colours and the menu presentation travel with the theme; left out, they stay as they are.
-  const config = await updateWebsiteTheme(ctx, { ...stored, brandColors: input.brandColors, menuStyle: input.menuStyle, dailyStyle: input.dailyStyle });
+  const config = await updateWebsiteTheme(ctx, {
+    ...stored,
+    brandColors: input.brandColors,
+    textColors: input.textColors,
+    menuStyle: input.menuStyle,
+    dailyStyle: input.dailyStyle,
+  });
   await revalidatePublicSite(ctx);
   return toView(ctx, config);
 }

@@ -58,7 +58,14 @@ afterEach(async () => {
     void tenantId;
     void createdAt;
     void updatedAt;
-    await db.restaurant.update({ where: { id }, data: { ...columns, brandColors: columns.brandColors as Prisma.InputJsonValue } });
+    await db.restaurant.update({
+      where: { id },
+      data: {
+        ...columns,
+        brandColors: columns.brandColors as Prisma.InputJsonValue,
+        websiteTextColors: (columns.websiteTextColors ?? {}) as Prisma.InputJsonValue,
+      },
+    });
   }
 });
 

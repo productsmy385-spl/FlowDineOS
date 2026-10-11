@@ -34,7 +34,20 @@ export type KotDocumentInput = {
   notes: string | null;
   items: readonly KotDocumentItem[];
   isReprint?: boolean;
+  copyLabel?: string | null;
+  copyIndex?: number;
+  copyCount?: number;
 };
+
+/**
+ * Returns the label for a KOT copy when multiple copies are printed:
+ * - 1 copy: null (standard ticket)
+ * - 2+ copies: "COPY 1 OF 2", "COPY 2 OF 2", etc.
+ */
+export function kotCopyLabel(copyIndex: number, totalCopies: number): string | null {
+  if (totalCopies <= 1) return null;
+  return `COPY ${copyIndex} OF ${totalCopies}`;
+}
 
 const ORDER_TYPE_LABELS: Readonly<Record<OrderType, string>> = {
   DINE_IN: "Dine-in",
@@ -55,6 +68,7 @@ export function renderKotDocument(input: KotDocumentInput): PrintDocument {
     { type: "text", text: sanitizeLine(input.kotNumber, 16), align: "center", bold: true, size: "double" },
   ];
 
+  if (input.copyLabel) blocks.push({ type: "text", text: `*** ${input.copyLabel} ***`, align: "center", bold: true });
   if (input.isReprint) blocks.push({ type: "text", text: "*** REPRINT ***", align: "center", bold: true });
   if (input.priority === "HIGH") blocks.push({ type: "text", text: "*** RUSH ***", align: "center", bold: true });
 
@@ -85,5 +99,12 @@ export function renderKotDocument(input: KotDocumentInput): PrintDocument {
   blocks.push({ type: "spacer", lines: 2 });
   blocks.push({ type: "cut" });
 
-  return assertPrintable({ version: 1, widthMm, blocks });
+  return assertPrintable({
+    version: 1,
+    widthMm,
+    blocks,
+    copyIndex: input.copyIndex,
+    copyCount: input.copyCount,
+    copyLabel: input.copyLabel ?? undefined,
+  });
 }

@@ -319,8 +319,41 @@ export function PrintingConsoleView({
           } satisfies DataTableColumn<PrintJobDto>,
         ]
       : []),
-    { key: "type", header: "Job", primary: true, text: (job) => `${JOB_TYPE_LABELS[job.jobType]}${job.isReprint ? " (reprint)" : ""}` },
-    { key: "reference", header: "Ticket / order", text: jobReference },
+    {
+      key: "type",
+      header: "Job",
+      primary: true,
+      cell: (job) => (
+        <span className="flex flex-col gap-0.5">
+          <span className="text-label text-fg-primary">
+            {JOB_TYPE_LABELS[job.jobType]}
+            {job.isReprint ? " (reprint)" : ""}
+          </span>
+          {job.copyLabel ? (
+            <span className="text-caption font-semibold text-fg-accent">{job.copyLabel}</span>
+          ) : job.copyCount && job.copyCount > 1 ? (
+            <span className="text-caption text-fg-secondary">
+              Copy {job.copyIndex ?? 1} of {job.copyCount}
+            </span>
+          ) : null}
+        </span>
+      ),
+      text: (job) =>
+        `${JOB_TYPE_LABELS[job.jobType]}${job.isReprint ? " (reprint)" : ""}${job.copyLabel ? ` (${job.copyLabel})` : ""}`,
+    },
+    {
+      key: "reference",
+      header: "Ticket / order",
+      cell: (job) => (
+        <span className="flex flex-col gap-0.5">
+          <span className="tabular-nums font-medium text-fg-primary">{jobReference(job)}</span>
+          {job.paymentReference ? (
+            <span className="text-caption text-fg-secondary">Ref: {job.paymentReference}</span>
+          ) : null}
+        </span>
+      ),
+      text: (job) => `${jobReference(job)}${job.paymentReference ? ` (Ref: ${job.paymentReference})` : ""}`,
+    },
     { key: "printer", header: "Printer", truncate: true, text: (job) => job.printer.name },
     {
       key: "status",

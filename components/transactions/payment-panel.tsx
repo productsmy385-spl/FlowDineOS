@@ -3,8 +3,9 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { BadgeCheck, Undo2, Wallet } from "lucide-react";
+import { BadgeCheck, Minus, Plus, Printer, Undo2, Wallet } from "lucide-react";
 import { createRefundAction, recordPaymentAction } from "@/app/restaurant/transactions/actions";
+import { printReceiptAction } from "@/app/restaurant/printing/actions";
 import { updateOrderStatusAction } from "@/app/restaurant/orders/actions";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import { useToast } from "@/components/ui/toast";
 type ReceiptStatus = "QUEUED" | "NO_PRINTER" | "FAILED" | "NOT_REQUESTED";
 import type { TransactionListItem } from "@/lib/data/transactions";
 import type { ActionResult } from "@/lib/http/action";
+import { MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 import { moneyDifference } from "@/lib/ui/decimal-input";
 import { formatMoney } from "@/lib/ui/format";
 import { useIdempotencyKey } from "@/lib/ui/use-idempotency-key";
@@ -60,6 +62,8 @@ export function PaymentPanel({ orderId, orderNumber, currencyCode, paidAmount, r
   const [paying, setPaying] = React.useState(false);
   const [refunding, setRefunding] = React.useState<TransactionListItem | null>(null);
   const [completing, setCompleting] = React.useState(false);
+  const [failedPrintInfo, setFailedPrintInfo] = React.useState<{ orderId: string; copies: number } | null>(null);
+  const [retryingPrint, setRetryingPrint] = React.useState(false);
 
   const money = (amount: string | null) => (amount === null ? "—" : formatMoney(amount, currencyCode));
   const settled = balanceDue !== null && balanceDue === "0.00";
@@ -74,6 +78,19 @@ export function PaymentPanel({ orderId, orderNumber, currencyCode, paidAmount, r
       router.refresh();
     } else {
       toast.error(result.error.message);
+    }
+  }
+
+  async function retryPrintReceipt() {
+    if (!failedPrintInfo) return;
+    setRetryingPrint(true);
+    const result = await printReceiptAction({ orderId: failedPrintInfo.orderId, copies: failedPrintInfo.copies });
+    setRetryingPrint(false);
+    if (result.ok) {
+      toast.success("Receipt sent to the printer.");
+      setFailedPrintInfo(null);
+    } else {
+      toast.error(result.error.message || "Receipt printing failed. Please verify printer connection.");
     }
   }
 
@@ -92,6 +109,28 @@ export function PaymentPanel({ orderId, orderNumber, currencyCode, paidAmount, r
         <div>
           <StatusBadge domain="payment" status={paymentStatus} />
         </div>
+      )}
+
+      {failedPrintInfo && (
+        <Alert tone="warning" title="Payment recorded successfully, but receipt printing failed.">
+          <div className="flex flex-col gap-2 mt-2">
+            <p className="text-caption text-fg-secondary">
+              The payment has been safely recorded in the ledger. You can retry sending the receipt to the printer without recording the payment again.
+            </p>
+            <div>
+              <Button
+                variant="secondary"
+                size="sm"
+                icon={Printer}
+                loading={retryingPrint}
+                loadingLabel="Sending receipt…"
+                onClick={retryPrintReceipt}
+              >
+                Retry printing receipt
+              </Button>
+            </div>
+          </div>
+        </Alert>
       )}
 
       {can.recordPayment && !settled && (
@@ -148,14 +187,23 @@ export function PaymentPanel({ orderId, orderNumber, currencyCode, paidAmount, r
         orderId={orderId}
         currencyCode={currencyCode}
         balanceDue={balanceDue ?? "0.00"}
-        onDone={(receipt) => {
+        onDone={(receipt, copies) => {
           setPaying(false);
           // Say what happened to the receipt, honestly: "sent to the printer" is the most the server knows; the print
           // agent's own report is what marks it printed (owner brief 2026-10-06 §15–20).
-          if (receipt === "QUEUED") toast.success("Payment recorded. Receipt sent to the printer.");
-          else if (receipt === "NO_PRINTER") toast.success("Payment recorded. No receipt printer is set up, so nothing was printed.");
-          else if (receipt === "FAILED") toast.error("Payment recorded, but the receipt could not be queued. Print it from the order.");
-          else toast.success("Payment recorded.");
+          if (receipt === "QUEUED") {
+            setFailedPrintInfo(null);
+            toast.success("Payment recorded. Receipt sent to the printer.");
+          } else if (receipt === "NO_PRINTER") {
+            setFailedPrintInfo(null);
+            toast.success("Payment recorded. No receipt printer is set up, so nothing was printed.");
+          } else if (receipt === "FAILED") {
+            setFailedPrintInfo({ orderId, copies });
+            toast.error("Payment recorded successfully, but receipt printing failed.");
+          } else {
+            setFailedPrintInfo(null);
+            toast.success("Payment recorded.");
+          }
           router.refresh();
         }}
       />
@@ -197,18 +245,22 @@ function RecordPaymentDialog({
   orderId: string;
   currencyCode: string;
   balanceDue: string;
-  onDone: (receipt: ReceiptStatus) => void;
+  onDone: (receipt: ReceiptStatus, copies: number) => void;
 }) {
   const idempotency = useIdempotencyKey();
   const [method, setMethod] = React.useState<string>("CASH");
   const [amount, setAmount] = React.useState<string | null>(balanceDue);
   const [tendered, setTendered] = React.useState<string | null>(null);
+  const [printReceipt, setPrintReceipt] = React.useState(true);
+  const [receiptCopies, setReceiptCopies] = React.useState(2);
 
   React.useEffect(() => {
     if (open) {
       setMethod("CASH");
       setAmount(balanceDue);
       setTendered(null);
+      setPrintReceipt(true);
+      setReceiptCopies(2);
     }
   }, [open, balanceDue]);
 
@@ -222,6 +274,8 @@ function RecordPaymentDialog({
           const chosen = String(formData.get("method") ?? "CASH");
           const reference = String(formData.get("reference") ?? "").trim();
           const tenderedValue = String(formData.get("amountTendered") ?? "").trim();
+          const shouldPrint = printReceipt && formData.get("submitAction") !== "record_only";
+
           return recordPaymentAction({
             orderId,
             idempotencyKey: idempotency.current(),
@@ -229,11 +283,13 @@ function RecordPaymentDialog({
             amount: String(formData.get("amount") ?? "").trim(),
             ...(chosen === "CASH" && tenderedValue !== "" ? { amountTendered: tenderedValue } : {}),
             ...(reference === "" ? {} : { reference }),
+            printReceipt: shouldPrint,
+            receiptCopies: shouldPrint ? receiptCopies : undefined,
           });
         }}
         onSuccess={(data) => {
           idempotency.reset();
-          onDone((data as { receipt?: { status: ReceiptStatus } } | null)?.receipt?.status ?? "NOT_REQUESTED");
+          onDone((data as { receipt?: { status: ReceiptStatus } } | null)?.receipt?.status ?? "NOT_REQUESTED", receiptCopies);
         }}
       >
         <RadioGroup
@@ -268,11 +324,119 @@ function RecordPaymentDialog({
           />
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
+        {/* Receipt Printing Section */}
+        <div className="rounded-xl border border-border-subtle bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-label text-fg-primary block font-medium">Receipt printing</span>
+              <span className="text-caption text-fg-secondary block">
+                Print receipt after recording payment
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                role="switch"
+                aria-checked={printReceipt}
+                onClick={() => setPrintReceipt(!printReceipt)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  printReceipt ? "bg-action-primary" : "bg-border-strong"
+                }`}
+              >
+                <span
+                  className={`inline-block size-4 transform rounded-full bg-canvas transition-transform ${
+                    printReceipt ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+              <span className="text-caption font-semibold text-fg-primary">
+                {printReceipt ? "Yes" : "No"}
+              </span>
+            </div>
+          </div>
+
+          {printReceipt && (
+            <div className="space-y-3 pt-2 border-t border-border-subtle">
+              <div className="flex items-center justify-between">
+                <label className="text-caption font-medium text-fg-secondary">
+                  Number of receipt copies
+                </label>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={receiptCopies <= MIN_PRINT_COPIES}
+                    onClick={() => setReceiptCopies((c) => Math.max(MIN_PRINT_COPIES, c - 1))}
+                    aria-label="Decrease copies"
+                  >
+                    <Minus className="size-3.5" />
+                  </Button>
+                  <span className="min-w-6 text-center text-label tabular-nums font-bold text-fg-primary">
+                    {receiptCopies}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={receiptCopies >= MAX_PRINT_COPIES}
+                    onClick={() => setReceiptCopies((c) => Math.min(MAX_PRINT_COPIES, c + 1))}
+                    aria-label="Increase copies"
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              {/* Dynamic copy breakdown */}
+              <div className="rounded-lg bg-raised p-2.5 text-caption space-y-1">
+                <div className="font-medium text-fg-primary">Receipt Copies</div>
+                {receiptCopies === 1 ? (
+                  <div className="text-fg-secondary">Standard receipt: 1</div>
+                ) : receiptCopies === 2 ? (
+                  <div className="flex justify-between text-fg-secondary">
+                    <span>Customer copy: 1</span>
+                    <span>Restaurant copy: 1</span>
+                    <span className="font-semibold text-fg-primary">Total: 2</span>
+                  </div>
+                ) : (
+                  <div className="space-y-0.5 text-fg-secondary">
+                    <div className="flex justify-between">
+                      <span>Customer copy: 1</span>
+                      <span>Restaurant copy: 1</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Additional copies: {receiptCopies - 2}</span>
+                      <span className="font-semibold text-fg-primary">Total: {receiptCopies}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
           <Button variant="secondary" onClick={onClose}>
             Cancel
           </Button>
-          <SubmitButton loadingLabel="Recording…">Record payment</SubmitButton>
+          {printReceipt && (
+            <SubmitButton
+              variant="secondary"
+              name="submitAction"
+              value="record_only"
+              loadingLabel="Recording…"
+            >
+              Record without printing
+            </SubmitButton>
+          )}
+          <SubmitButton
+            name="submitAction"
+            value="record_and_print"
+            loadingLabel={printReceipt ? "Recording & printing…" : "Recording…"}
+          >
+            {printReceipt ? "Confirm payment and print" : "Confirm payment"}
+          </SubmitButton>
         </div>
       </Form>
     </Dialog>

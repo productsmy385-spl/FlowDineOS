@@ -59,7 +59,7 @@ export function siteThemeStyle(theme: SiteTheme, cssVariables: Readonly<Record<s
     ...cssVariables,
     "--surface": channels(theme.surface),
     "--text": channels(theme.onSurface),
-    "--text-accent": channels(theme.primary),
+    "--text-accent": channels(theme.accent),
     "--primary": channels(theme.primary),
     "--on-primary": channels(theme.onPrimary),
     "--primary-hover": channels(theme.primary),

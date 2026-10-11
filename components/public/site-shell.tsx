@@ -82,7 +82,7 @@ function SiteHeader({ view }: { view: SiteView }) {
       <div className="mx-auto flex h-header w-full max-w-public items-center gap-3 px-4 md:px-6">
         <a href={view.homeHref} className="flex min-w-0 flex-1 items-center gap-3 xl:max-w-xs xl:flex-none">
           <BrandMark name={site.restaurant.name} logoUrl={site.identity.logoUrl} />
-          <span className="line-clamp-2 min-w-0 break-words font-display text-subheading leading-tight md:text-heading">{site.restaurant.name}</span>
+          <span className="line-clamp-2 min-w-0 break-words font-display text-subheading leading-tight md:text-heading" style={{ color: "var(--website-heading-color)" }}>{site.restaurant.name}</span>
         </a>
 
         {inline.length > 0 ? (
@@ -92,7 +92,8 @@ function SiteHeader({ view }: { view: SiteView }) {
                 <li key={link.href}>
                   <a
                     href={link.href}
-                    className="relative inline-flex h-10 items-center whitespace-nowrap rounded-xl px-3 text-nav text-fg-secondary transition-colors duration-fast ease-standard after:absolute after:inset-x-3 after:bottom-1 after:h-0.5 after:origin-left after:scale-x-0 after:rounded-full after:bg-action-primary after:transition-transform after:duration-fast hover:text-fg-primary motion-safe:hover:after:scale-x-100"
+                    className="relative inline-flex h-10 items-center whitespace-nowrap rounded-xl px-3 text-nav transition-colors duration-fast ease-standard after:absolute after:inset-x-3 after:bottom-1 after:h-0.5 after:origin-left after:scale-x-0 after:rounded-full after:bg-action-primary after:transition-transform after:duration-fast hover:opacity-80 motion-safe:hover:after:scale-x-100"
+                    style={{ color: "var(--website-navigation-text-color)" }}
                   >
                     {link.label}
                   </a>
@@ -145,21 +146,21 @@ function SiteFooter({ view }: { view: SiteView }) {
   return (
     <footer className="border-t border-border-subtle">
       <div className="mx-auto flex w-full max-w-public flex-col gap-3 px-4 py-8 md:px-6">
-        <p className="font-display text-heading">{site.restaurant.name}</p>
-        {site.identity.tagline ? <p className="text-body text-fg-secondary">{site.identity.tagline}</p> : null}
-        {site.restaurant.address ? <p className="break-words text-body text-fg-secondary">{site.restaurant.address}</p> : null}
+        <p className="font-display text-heading" style={{ color: "var(--website-heading-color)" }}>{site.restaurant.name}</p>
+        {site.identity.tagline ? <p className="text-body" style={{ color: "var(--website-footer-text-color)" }}>{site.identity.tagline}</p> : null}
+        {site.restaurant.address ? <p className="break-words text-body" style={{ color: "var(--website-footer-text-color)" }}>{site.restaurant.address}</p> : null}
         {links.length > 0 ? (
           <ul className="flex list-none flex-wrap gap-4 p-0">
             {links.map((href) => (
               <li key={href}>
-                <a href={href} target="_blank" rel="noopener noreferrer" className="text-label text-fg-accent hover:underline">
+                <a href={href} target="_blank" rel="noopener noreferrer" className="text-label hover:underline" style={{ color: "var(--website-link-color)" }}>
                   {linkLabel(href)}
                 </a>
               </li>
             ))}
           </ul>
         ) : null}
-        <p className="text-caption text-fg-secondary">
+        <p className="text-caption" style={{ color: "var(--website-footer-text-color)" }}>
           {site.restaurant.name} · {site.timezone}
         </p>
       </div>

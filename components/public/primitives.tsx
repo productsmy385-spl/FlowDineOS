@@ -16,10 +16,10 @@ import { MENU_ICONS, isMenuIconKey } from "@/lib/ui/icons";
 export function SectionHeading({ id, title, lead }: { id?: string; title: string; lead?: string | null }) {
   return (
     <div className="flex flex-col gap-2">
-      <h2 id={id} className="break-words text-display-m">
+      <h2 id={id} className="break-words text-display-m" style={{ color: "var(--website-section-heading-color)" }}>
         {title}
       </h2>
-      {lead ? <p className="max-w-prose whitespace-pre-line break-words text-body-public text-fg-secondary">{lead}</p> : null}
+      {lead ? <p className="max-w-prose whitespace-pre-line break-words text-body-public text-fg-secondary" style={{ color: "var(--website-muted-text-color)" }}>{lead}</p> : null}
     </div>
   );
 }
@@ -119,13 +119,13 @@ export function SiteCta({ label, href, className }: { label: string; href: strin
   );
   if (href.startsWith("/") || href.startsWith("#")) {
     return (
-      <Link href={href} className={classes}>
+      <Link href={href} className={classes} style={{ color: "var(--website-button-text-color)" }}>
         {label}
       </Link>
     );
   }
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={classes}>
+    <a href={href} target="_blank" rel="noopener noreferrer" className={classes} style={{ color: "var(--website-button-text-color)" }}>
       {label}
     </a>
   );

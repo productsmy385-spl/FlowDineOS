@@ -68,12 +68,12 @@ import { required } from "@/lib/data/scope";
 import { withTx, type Tx } from "@/lib/data/tx";
 import { AppError, ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { renderKotDocument } from "@/lib/print/render-kot";
-import { renderReceiptDocument } from "@/lib/print/render-receipt";
+import { renderKotDocument, kotCopyLabel } from "@/lib/print/render-kot";
+import { renderReceiptDocument, receiptCopyLabel } from "@/lib/print/render-receipt";
 import { describePrintError, isPrintErrorCode, type PrintErrorCode } from "@/lib/print/error-codes";
 import { profileOf } from "@/lib/print/profiles";
 import { renderTestDocument } from "@/lib/print/render-test";
-import { AGENT_VERSION_WITH_CODES, agentVersionAtLeast } from "@/lib/print/types";
+import { AGENT_VERSION_WITH_CODES, agentVersionAtLeast, MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 import { consume } from "@/lib/security/rate-limit";
 import { now } from "@/lib/time/clock";
 import { PAIRING_ALPHABET, PAIRING_CODE_LENGTH, connectionAddressIssue, discoveredPrinterSchema, type AgentDiscoveryReport, type DiscoveredPrinter } from "@/lib/validation/printing";
@@ -221,7 +221,15 @@ export async function pollPrintJobs(ctx: TenantContext, input: { since?: Date; s
 
 // ─── KOT producers (S1-P16-T003, REQ-PRINT-001, REQ-KOT-007) ───
 
-async function buildKotDocument(tx: Tx, ctx: TenantContext, kotId: string, printer: PrinterTarget, restaurantName: string, isReprint: boolean) {
+async function buildKotDocument(
+  tx: Tx,
+  ctx: TenantContext,
+  kotId: string,
+  printer: PrinterTarget,
+  restaurantName: string,
+  isReprint: boolean,
+  copyMeta?: { copyIndex?: number; copyCount?: number; copyLabel?: string | null }
+) {
   const ticket = required(await findKitchenTicket(tx, ctx, kotId), "KOT");
   return {
     ticket,
@@ -245,16 +253,22 @@ async function buildKotDocument(tx: Tx, ctx: TenantContext, kotId: string, print
         instructions: item.instructionsSnapshot,
       })),
       isReprint,
+      copyIndex: copyMeta?.copyIndex,
+      copyCount: copyMeta?.copyCount,
+      copyLabel: copyMeta?.copyLabel,
     }),
   };
 }
 
 /**
- * S1-P16-T003 — queues one KOT job per freshly generated ticket, **inside the order's acceptance transaction**, so a
- * ticket and its print job commit together or not at all. Skipped entirely when the restaurant has auto-print off;
- * skipped per ticket when no KOT printer serves that section (architecture.md §6.2) — the ticket then reads
- * `printStatus: NONE` on the board rather than pretending a printer exists. Dedupe key `KOT:{kotId}:v1` makes a
- * retried acceptance a no-op (SC-PRINT-05).
+ * S1-P16-T003 — queues KOT jobs per freshly generated ticket, **inside the order's acceptance transaction**, so a
+ * ticket and its print jobs commit together or not at all. Skipped entirely when the restaurant has auto-print off or
+ * the printer has auto-print disabled; skipped per ticket when no KOT printer serves that section (architecture.md §6.2) —
+ * the ticket then reads `printStatus: NONE` on the board rather than pretending a printer exists.
+ *
+ * Configurable copy count is loaded per printer (defaults to 1). When copies = 1, uses dedupeKey `KOT:{kotId}:v1`.
+ * When copies > 1, each copy has an identifiable dedupeKey `KOT:{kotId}:v1:c{copyIndex}` to ensure retried acceptances
+ * remain idempotent (SC-PRINT-05) and retries never duplicate acknowledged copies.
  */
 export async function enqueueKotPrintJobs(tx: Tx, ctx: TenantContext, kotIds: readonly string[]): Promise<string[]> {
   if (kotIds.length === 0) return [];
@@ -266,18 +280,51 @@ export async function enqueueKotPrintJobs(tx: Tx, ctx: TenantContext, kotIds: re
     const ticket = required(await findKitchenTicket(tx, ctx, kotId), "KOT");
     const printer = await resolveKotPrinter(tx, ctx, ticket.kitchenSection?.id ?? null);
     if (!printer) continue;
+    if (!printer.autoPrintKot) continue;
 
-    const { document } = await buildKotDocument(tx, ctx, kotId, printer, profile.name, false);
-    const { id, created } = await createPrintJob(tx, ctx, {
-      printerId: printer.id,
-      jobType: PrintJobType.KOT,
-      dedupeKey: `KOT:${kotId}:v1`,
-      payload: document,
-      kotTicketId: kotId,
-      orderId: null,
-      requestedByUserId: ctx.userId,
-    });
-    if (created) queued.push(id);
+    const copyCount = Math.max(1, Math.min(MAX_PRINT_COPIES, printer.kotCopies || 1));
+    for (let copyIndex = 1; copyIndex <= copyCount; copyIndex++) {
+      const copyLabel = kotCopyLabel(copyIndex, copyCount);
+      const { document } = await buildKotDocument(tx, ctx, kotId, printer, profile.name, false, {
+        copyIndex,
+        copyCount,
+        copyLabel,
+      });
+
+      const dedupeKey = copyCount === 1 ? `KOT:${kotId}:v1` : `KOT:${kotId}:v1:c${copyIndex}`;
+      const { id, created } = await createPrintJob(tx, ctx, {
+        printerId: printer.id,
+        jobType: PrintJobType.KOT,
+        dedupeKey,
+        payload: document,
+        kotTicketId: kotId,
+        orderId: null,
+        requestedByUserId: ctx.userId,
+        copyIndex,
+        copyCount,
+        copyLabel,
+        trigger: "automatic",
+      });
+
+      if (created) {
+        queued.push(id);
+        await audit(tx, ctx, {
+          action: "print_job.created",
+          resourceType: "print_job",
+          resourceId: id,
+          after: {
+            jobType: PrintJobType.KOT,
+            printerId: printer.id,
+            kotTicketId: kotId,
+            kotNumber: ticket.kotNumber,
+            copyCount,
+            copyIndex,
+            copyLabel,
+            trigger: "automatic",
+          },
+        });
+      }
+    }
   }
   if (queued.length > 0) {
     logger.info("print_job.kot_queued", { requestId: ctx.requestId, tenantId: ctx.tenantId, count: queued.length });
@@ -286,11 +333,10 @@ export async function enqueueKotPrintJobs(tx: Tx, ctx: TenantContext, kotIds: re
 }
 
 /**
- * SA-KOT-02 — an explicit reprint: a new job with `is_reprint = true` and dedupe key `KOT:{id}:reprint:{n}`. A
- * reprint never changes what the board says about the ticket, because `printStatusFor` reads the newest *non*-reprint
- * job (lib/data/kot.ts). Rate limited to 10/min per user.
+ * SA-KOT-02 — an explicit reprint: a new job with `is_reprint = true` and dedupe key `KOT:{id}:reprint:{n}`.
+ * Supports configurable/optional copy counts while preserving sequence numbering and copy identity.
  */
-export async function reprintKot(ctx: TenantContext, kotId: string): Promise<PrintJobDto> {
+export async function reprintKot(ctx: TenantContext, kotId: string, options?: { copies?: number }): Promise<PrintJobDto> {
   await enforceRateLimit("kot.reprint", `${ctx.tenantId}:${ctx.userId}`, REPRINT_RATE_LIMIT, "Too many reprints. Wait a moment and try again.");
 
   const job = await withTx(ctx, async (tx) => {
@@ -299,25 +345,49 @@ export async function reprintKot(ctx: TenantContext, kotId: string): Promise<Pri
     if (!printer) throw new ValidationError("No kitchen printer is set up for this station.", undefined, "NO_PRINTER_CONFIGURED");
 
     const profile = await printingProfile(tx, ctx);
-    const { document } = await buildKotDocument(tx, ctx, kotId, printer, profile.name, true);
+    const copyCount = options?.copies
+      ? Math.max(1, Math.min(MAX_PRINT_COPIES, options.copies))
+      : Math.max(1, printer.kotCopies || 1);
     const sequence = (await countKotReprints(tx, ctx, kotId)) + 1;
-    const { id } = await createPrintJob(tx, ctx, {
-      printerId: printer.id,
-      jobType: PrintJobType.KOT,
-      dedupeKey: `KOT:${kotId}:reprint:${sequence}`,
-      payload: document,
-      kotTicketId: kotId,
-      isReprint: true,
-      requestedByUserId: ctx.userId,
-    });
+    let firstJob: PrintJobDto | null = null;
 
-    await audit(tx, ctx, {
-      action: "kot.reprint_requested",
-      resourceType: "kot_ticket",
-      resourceId: kotId,
-      after: { printJobId: id, printerId: printer.id, kotNumber: ticket.kotNumber, sequence },
-    });
-    return getPrintJob(tx, ctx, id);
+    for (let copyIndex = 1; copyIndex <= copyCount; copyIndex++) {
+      const copyLabel = kotCopyLabel(copyIndex, copyCount);
+      const { document } = await buildKotDocument(tx, ctx, kotId, printer, profile.name, true, {
+        copyIndex,
+        copyCount,
+        copyLabel,
+      });
+
+      const dedupeKey = copyCount === 1 ? `KOT:${kotId}:reprint:${sequence}` : `KOT:${kotId}:reprint:${sequence}:c${copyIndex}`;
+      const { id, created } = await createPrintJob(tx, ctx, {
+        printerId: printer.id,
+        jobType: PrintJobType.KOT,
+        dedupeKey,
+        payload: document,
+        kotTicketId: kotId,
+        isReprint: true,
+        requestedByUserId: ctx.userId,
+        copyIndex,
+        copyCount,
+        copyLabel,
+        trigger: "manual",
+      });
+
+      if (created) {
+        await audit(tx, ctx, {
+          action: "kot.reprint_requested",
+          resourceType: "kot_ticket",
+          resourceId: kotId,
+          after: { printJobId: id, printerId: printer.id, kotNumber: ticket.kotNumber, sequence, copyCount, copyIndex, copyLabel },
+        });
+      }
+
+      if (copyIndex === 1) {
+        firstJob = await getPrintJob(tx, ctx, id);
+      }
+    }
+    return firstJob!;
   });
 
   logger.info("kot.reprint_requested", { requestId: ctx.requestId, tenantId: ctx.tenantId, kotId, printJobId: job.id });
@@ -327,101 +397,197 @@ export async function reprintKot(ctx: TenantContext, kotId: string): Promise<Pri
 // ─── Receipt and test producers (SA-PRN-06, SA-PRN-04) ───
 
 /** SA-PRN-06 — queues the thermal receipt of an order on a RECEIPT-capable printer. */
-export async function printReceipt(ctx: TenantContext, orderId: string): Promise<PrintJobDto> {
-  const job = await queueReceipt(ctx, orderId, "manual");
-  if (!job) throw new ValidationError("No receipt printer is set up.", undefined, "NO_PRINTER_CONFIGURED");
-  return job;
+export async function printReceipt(ctx: TenantContext, orderId: string, options?: { copies?: number }): Promise<PrintJobDto> {
+  const outcome = await queueReceipt(ctx, orderId, "manual", { requestedCopies: options?.copies, trigger: "manual" });
+  if (outcome.noPrinter || outcome.jobs.length === 0) {
+    throw new ValidationError("No receipt printer is set up.", undefined, "NO_PRINTER_CONFIGURED");
+  }
+  return outcome.jobs[0];
 }
 
 /** What happened to the receipt a payment asked for. "QUEUED" means handed to the print agent, not printed. */
 export type ReceiptQueueOutcome =
-  | { status: "QUEUED"; printJobId: string }
+  | { status: "QUEUED"; printJobId: string; printJobIds?: string[]; copiesQueued?: number }
   | { status: "NO_PRINTER" }
-  | { status: "FAILED" }
+  | { status: "FAILED"; error?: string }
   | { status: "NOT_REQUESTED" };
 
 /**
- * The receipt a completed payment prints (owner brief 2026-10-06 §15–17: customer pays, cashier records it, the
- * receipt prints on the restaurant's own printer).
+ * The receipt a completed payment prints.
  *
- * Keyed to the payment, `RECEIPT:PAYMENT:<transactionId>`, so the same payment can never queue a second receipt —
- * `createPrintJob` inserts with ON CONFLICT DO NOTHING on (tenant_id, dedupe_key). Never throws: the payment has
- * already committed and is the thing that matters, so a missing printer or a queue failure is reported back to the
- * cashier, not turned into a failed payment. "QUEUED" is all this can honestly say — the agent's confirmation is what
- * marks the job PRINTED.
+ * Keyed to the payment, `RECEIPT:PAYMENT:<transactionId>` (or `:c<index>` for multi-copy), so the same payment can never
+ * queue duplicate receipts — `createPrintJob` inserts with ON CONFLICT DO NOTHING on (tenant_id, dedupe_key).
+ *
+ * Never throws: the payment has already committed and is decoupled from printing, so a printer failure is reported
+ * back to the cashier without rolling back or duplicating the payment.
  */
-export async function queueReceiptForPayment(ctx: TenantContext, orderId: string, transactionId: string): Promise<ReceiptQueueOutcome> {
+export async function queueReceiptForPayment(
+  ctx: TenantContext,
+  orderId: string,
+  transactionId: string,
+  options?: { copies?: number; printReceipt?: boolean; reference?: string }
+): Promise<ReceiptQueueOutcome> {
+  if (options?.printReceipt === false) {
+    return { status: "NOT_REQUESTED" };
+  }
   try {
-    const job = await queueReceipt(ctx, orderId, `RECEIPT:PAYMENT:${transactionId}`);
-    return job ? { status: "QUEUED", printJobId: job.id } : { status: "NO_PRINTER" };
+    if (options?.printReceipt === undefined) {
+      const printer = await withTx(ctx, (tx) => resolveReceiptPrinter(tx, ctx));
+      if (!printer) return { status: "NO_PRINTER" };
+      if (!printer.autoPrintReceipt) return { status: "NOT_REQUESTED" };
+    }
+
+    const outcome = await queueReceipt(ctx, orderId, `RECEIPT:PAYMENT:${transactionId}`, {
+      requestedCopies: options?.copies,
+      trigger: "automatic",
+      paymentReference: options?.reference,
+      paymentTransactionId: transactionId,
+    });
+
+    if (outcome.noPrinter) return { status: "NO_PRINTER" };
+    if (outcome.jobs.length === 0) return { status: "NOT_REQUESTED" };
+
+    return {
+      status: "QUEUED",
+      printJobId: outcome.jobs[0].id,
+      printJobIds: outcome.jobs.map((j) => j.id),
+      copiesQueued: outcome.jobs.length,
+    };
   } catch (error) {
     logger.error("receipt.auto_print_failed", { requestId: ctx.requestId, tenantId: ctx.tenantId, orderId, transactionId, error: String(error) });
-    return { status: "FAILED" };
+    return { status: "FAILED", error: "Payment recorded successfully, but receipt printing failed." };
   }
 }
 
+export type QueueReceiptOutcome = {
+  jobs: PrintJobDto[];
+  noPrinter: boolean;
+};
+
 /**
- * Renders and queues one receipt. `dedupe` is either "manual" — a cashier asking again gets a new copy each time
- * (`RECEIPT:<order>:v<n>`) — or a fixed key, which makes the call idempotent. Returns null when the restaurant has no
- * receipt printer.
+ * Renders and queues receipt copies.
+ * - If `requestedCopies` is specified, it overrides printer defaults for this print only.
+ * - Otherwise, printer.receiptCopies (default 2) is used.
+ * - 2 copies are labelled "CUSTOMER COPY" and "RESTAURANT COPY".
+ * - 1 copy is standard without restaurant-only label.
+ * - Each copy receives an identifiable dedupeKey and metadata row.
  */
-async function queueReceipt(ctx: TenantContext, orderId: string, dedupe: "manual" | string): Promise<PrintJobDto | null> {
+async function queueReceipt(
+  ctx: TenantContext,
+  orderId: string,
+  dedupe: "manual" | string,
+  options?: {
+    requestedCopies?: number;
+    trigger?: "automatic" | "manual";
+    paymentReference?: string;
+    paymentTransactionId?: string;
+  }
+): Promise<QueueReceiptOutcome> {
   const receipt = required(await getReceipt(ctx, orderId), "Order");
 
-  const job = await withTx(ctx, async (tx) => {
+  const result = await withTx(ctx, async (tx) => {
     const printer = await resolveReceiptPrinter(tx, ctx);
-    if (!printer) return null;
+    if (!printer) return { jobs: [] as PrintJobDto[], noPrinter: true };
     const profile = await printingProfile(tx, ctx);
 
-    const document = renderReceiptDocument({
-      widthMm: printer.paperWidthMm,
-      restaurantName: receipt.restaurant.name,
-      addressLines: profile.addressLines,
-      phone: receipt.restaurant.contactPhone,
-      gstin: profile.gstin,
-      orderNumber: receipt.orderNumber,
-      orderType: receipt.orderType as Parameters<typeof renderReceiptDocument>[0]["orderType"],
-      tableLabel: receipt.tableLabel,
-      createdAt: new Date(receipt.createdAt),
-      timeZone: receipt.timezone,
-      currencyCode: receipt.currencyCode,
-      customerName: receipt.customerName,
-      items: receipt.items.map((item) => ({
-        quantity: item.quantity,
-        label: item.name,
-        taxRate: item.taxRate,
-        lineSubtotal: item.lineSubtotal,
-        lineTax: item.lineTax,
-        lineTotal: item.lineTotal,
-      })),
-      totals: receipt.totals,
-      ledger: receipt.ledger.map((entry) => ({ type: entry.type, method: entry.method, amount: entry.amount, amountTendered: entry.amountTendered, changeDue: entry.changeDue })),
-      footer: profile.receiptFooter,
-    });
+    const copyCount = options?.requestedCopies
+      ? Math.max(MIN_PRINT_COPIES, Math.min(MAX_PRINT_COPIES, options.requestedCopies))
+      : Math.max(MIN_PRINT_COPIES, printer.receiptCopies ?? 2);
 
-    const dedupeKey = dedupe === "manual" ? `RECEIPT:${orderId}:v${(await countReceiptJobs(tx, ctx, orderId)) + 1}` : dedupe;
-    const { id, created } = await createPrintJob(tx, ctx, {
-      printerId: printer.id,
-      jobType: PrintJobType.RECEIPT,
-      dedupeKey,
-      payload: document,
-      orderId,
-      requestedByUserId: ctx.userId,
-    });
-    // An already-queued receipt for the same key is returned as it is, and audited once — when it was created.
-    if (created) {
-      await audit(tx, ctx, {
-        action: "print_job.created",
-        resourceType: "print_job",
-        resourceId: id,
-        after: { jobType: PrintJobType.RECEIPT, printerId: printer.id, orderId, orderNumber: receipt.orderNumber, trigger: dedupe === "manual" ? "manual" : "payment" },
+    const baseSeq = dedupe === "manual" ? (await countReceiptJobs(tx, ctx, orderId)) + 1 : 1;
+    const trigger = options?.trigger ?? (dedupe === "manual" ? "manual" : "automatic");
+    const jobs: PrintJobDto[] = [];
+
+    for (let copyIndex = 1; copyIndex <= copyCount; copyIndex++) {
+      const copyLabel = receiptCopyLabel(copyIndex, copyCount);
+      const document = renderReceiptDocument({
+        widthMm: printer.paperWidthMm,
+        restaurantName: receipt.restaurant.name,
+        addressLines: profile.addressLines,
+        phone: receipt.restaurant.contactPhone,
+        gstin: profile.gstin,
+        orderNumber: receipt.orderNumber,
+        orderType: receipt.orderType as Parameters<typeof renderReceiptDocument>[0]["orderType"],
+        tableLabel: receipt.tableLabel,
+        createdAt: new Date(receipt.createdAt),
+        timeZone: receipt.timezone,
+        currencyCode: receipt.currencyCode,
+        customerName: receipt.customerName,
+        items: receipt.items.map((item) => ({
+          quantity: item.quantity,
+          label: item.name,
+          taxRate: item.taxRate,
+          lineSubtotal: item.lineSubtotal,
+          lineTax: item.lineTax,
+          lineTotal: item.lineTotal,
+        })),
+        totals: receipt.totals,
+        ledger: receipt.ledger.map((entry) => ({
+          type: entry.type,
+          method: entry.method,
+          amount: entry.amount,
+          amountTendered: entry.amountTendered,
+          changeDue: entry.changeDue,
+        })),
+        footer: profile.receiptFooter,
+        copyLabel,
+        copyIndex,
+        copyCount,
       });
+
+      const dedupeKey =
+        dedupe === "manual"
+          ? (copyCount === 1 ? `RECEIPT:${orderId}:v${baseSeq}` : `RECEIPT:${orderId}:v${baseSeq}:c${copyIndex}`)
+          : (copyCount === 1 ? dedupe : `${dedupe}:c${copyIndex}`);
+
+      const { id, created } = await createPrintJob(tx, ctx, {
+        printerId: printer.id,
+        jobType: PrintJobType.RECEIPT,
+        dedupeKey,
+        payload: document,
+        orderId,
+        requestedByUserId: ctx.userId,
+        copyIndex,
+        copyCount,
+        copyLabel,
+        paymentReference: options?.paymentReference ?? null,
+        trigger,
+      });
+
+      if (created) {
+        await audit(tx, ctx, {
+          action: "print_job.created",
+          resourceType: "print_job",
+          resourceId: id,
+          after: {
+            jobType: PrintJobType.RECEIPT,
+            printerId: printer.id,
+            orderId,
+            orderNumber: receipt.orderNumber,
+            trigger,
+            copyCount,
+            copyIndex,
+            copyLabel,
+            paymentReference: options?.paymentReference ?? null,
+          },
+        });
+      }
+      jobs.push(await getPrintJob(tx, ctx, id));
     }
-    return getPrintJob(tx, ctx, id);
+
+    return { jobs, noPrinter: false };
   });
 
-  if (job) logger.info("print_job.created", { requestId: ctx.requestId, tenantId: ctx.tenantId, printJobId: job.id, jobType: job.jobType });
-  return job;
+  if (result.jobs.length > 0) {
+    logger.info("print_job.created", {
+      requestId: ctx.requestId,
+      tenantId: ctx.tenantId,
+      orderId,
+      count: result.jobs.length,
+      jobType: PrintJobType.RECEIPT,
+    });
+  }
+  return result;
 }
 
 /** SA-PRN-04 — a server-built test page for one of the caller's active printers. Rate limited to 6/min per printer. */
@@ -507,6 +673,11 @@ export type CreatePrinterData = {
   paperWidthMm: number;
   kitchenSectionId: string | null;
   printAgentId: string | null;
+  profile?: string;
+  autoPrintKot?: boolean;
+  kotCopies?: number;
+  autoPrintReceipt?: boolean;
+  receiptCopies?: number;
 };
 
 async function assertRelationsOwned(
@@ -522,12 +693,30 @@ async function assertRelationsOwned(
 export async function createPrinter(ctx: TenantContext, data: CreatePrinterData): Promise<PrinterDto> {
   const printer = await withTx(ctx, async (tx) => {
     await assertRelationsOwned(tx, ctx, data);
-    const created = await insertPrinter(tx, ctx, data);
+    const created = await insertPrinter(tx, ctx, {
+      ...data,
+      autoPrintKot: data.autoPrintKot ?? true,
+      kotCopies: data.kotCopies ?? 1,
+      autoPrintReceipt: data.autoPrintReceipt ?? true,
+      receiptCopies: data.receiptCopies ?? 2,
+    });
     await audit(tx, ctx, {
       action: "printer.created",
       resourceType: "printer",
       resourceId: created.id,
-      after: { name: created.name, purpose: created.purpose, connectionType: created.connectionType, paperWidthMm: created.paperWidthMm, kitchenSectionId: created.kitchenSectionId, printAgentId: created.printAgentId, profile: created.profile },
+      after: {
+        name: created.name,
+        purpose: created.purpose,
+        connectionType: created.connectionType,
+        paperWidthMm: created.paperWidthMm,
+        kitchenSectionId: created.kitchenSectionId,
+        printAgentId: created.printAgentId,
+        profile: created.profile,
+        autoPrintKot: created.autoPrintKot,
+        kotCopies: created.kotCopies,
+        autoPrintReceipt: created.autoPrintReceipt,
+        receiptCopies: created.receiptCopies,
+      },
     });
     return created;
   });
@@ -554,8 +743,32 @@ export async function updatePrinter(ctx: TenantContext, input: UpdatePrinterData
       action: "printer.updated",
       resourceType: "printer",
       resourceId: printerId,
-      before: { name: existing.name, purpose: existing.purpose, connectionType: existing.connectionType, paperWidthMm: existing.paperWidthMm, kitchenSectionId: existing.kitchenSectionId, printAgentId: existing.printAgentId, profile: existing.profile },
-      after: { name: updated.name, purpose: updated.purpose, connectionType: updated.connectionType, paperWidthMm: updated.paperWidthMm, kitchenSectionId: updated.kitchenSectionId, printAgentId: updated.printAgentId, profile: updated.profile },
+      before: {
+        name: existing.name,
+        purpose: existing.purpose,
+        connectionType: existing.connectionType,
+        paperWidthMm: existing.paperWidthMm,
+        kitchenSectionId: existing.kitchenSectionId,
+        printAgentId: existing.printAgentId,
+        profile: existing.profile,
+        autoPrintKot: existing.autoPrintKot,
+        kotCopies: existing.kotCopies,
+        autoPrintReceipt: existing.autoPrintReceipt,
+        receiptCopies: existing.receiptCopies,
+      },
+      after: {
+        name: updated.name,
+        purpose: updated.purpose,
+        connectionType: updated.connectionType,
+        paperWidthMm: updated.paperWidthMm,
+        kitchenSectionId: updated.kitchenSectionId,
+        printAgentId: updated.printAgentId,
+        profile: updated.profile,
+        autoPrintKot: updated.autoPrintKot,
+        kotCopies: updated.kotCopies,
+        autoPrintReceipt: updated.autoPrintReceipt,
+        receiptCopies: updated.receiptCopies,
+      },
     });
     return updated;
   });

@@ -151,15 +151,15 @@ export const archivePrintJobsAction = action(async (input: ArchivePrintJobsInput
 export const printReceiptAction = action(async (input: PrintReceiptInput) => {
   const ctx = await requireTenant("print_job:retry");
   requirePermission(ctx, "transaction:read");
-  const { orderId } = parseInput(printReceiptSchema, input);
-  return printReceipt(ctx, orderId);
+  const { orderId, copies } = parseInput(printReceiptSchema, input);
+  return printReceipt(ctx, orderId, { copies });
 });
 
 /** SA-KOT-02 reprint a kitchen ticket — `kot:reprint`. The ticket's own print status is unchanged. */
 export const reprintKotAction = action(async (input: ReprintKotInput) => {
   const ctx = await requireTenant("kot:reprint");
-  const { kotId } = parseInput(reprintKotSchema, input);
-  return reprintKot(ctx, kotId);
+  const { kotId, copies } = parseInput(reprintKotSchema, input);
+  return reprintKot(ctx, kotId, { copies });
 });
 
 // ─── Agents (SA-AGT-01, SA-AGT-02) ───

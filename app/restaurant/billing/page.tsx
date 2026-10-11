@@ -14,11 +14,15 @@ import { Input } from "@/components/ui/input";
 import {
   CreditCard,
   DollarSign,
+  Minus,
+  Plus,
   QrCode,
   Receipt,
   Printer,
   RefreshCw,
 } from "lucide-react";
+import { printReceiptAction } from "../printing/actions";
+import { MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
 
 type OrderData = BillableOrderDto;
 type TransactionData = TransactionListItem;
@@ -40,6 +44,10 @@ export default function StaffBillingPage() {
   const [txRef, setTxRef] = useState("");
   /** One UUID per settlement attempt: a double submit or a retry after a lost response replays, never double-charges. */
   const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [printReceipt, setPrintReceipt] = useState(true);
+  const [receiptCopies, setReceiptCopies] = useState(2);
+  const [retryPrintOrder, setRetryPrintOrder] = useState<{ orderId: string; copies: number } | null>(null);
+  const [isRetryingPrint, setIsRetryingPrint] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -93,14 +101,16 @@ export default function StaffBillingPage() {
   const tenderedNum = parseFloat(amountTendered) || 0;
   const changeDue = Math.max(0, tenderedNum - orderTotal);
 
-  async function handleSettlePayment(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSettlePayment(e?: React.FormEvent, overridePrint?: boolean) {
+    if (e) e.preventDefault();
     if (!selectedOrder) return;
 
     if (paymentMethod === PaymentMethod.CASH && tenderedNum < orderTotal) {
       setErrorMsg(`Amount tendered (${money(tenderedNum.toFixed(2))}) is less than the amount due (${money(selectedOrder.balance)})`);
       return;
     }
+
+    const shouldPrint = overridePrint !== undefined ? overridePrint : printReceipt;
 
     setIsProcessing(true);
     setErrorMsg(null);
@@ -114,10 +124,22 @@ export default function StaffBillingPage() {
         amount: selectedOrder.balance,
         reference: txRef.trim() || undefined,
         amountTendered: paymentMethod === PaymentMethod.CASH ? amountTendered.trim() : undefined,
+        printReceipt: shouldPrint,
+        receiptCopies: shouldPrint ? receiptCopies : undefined,
       });
 
       if (res.ok) {
-        setSuccessMsg(`Payment of ${money(res.data.amount)} recorded successfully for ${selectedOrder.orderNumber}!`);
+        if (res.data.receipt?.status === "FAILED") {
+          setErrorMsg("Payment recorded successfully, but receipt printing failed.");
+          setRetryPrintOrder({ orderId: selectedOrder.id, copies: receiptCopies });
+        } else if (res.data.receipt?.status === "QUEUED") {
+          setSuccessMsg(`Payment of ${money(res.data.amount)} recorded. Receipt sent to the printer.`);
+          setRetryPrintOrder(null);
+        } else {
+          setSuccessMsg(`Payment of ${money(res.data.amount)} recorded successfully for ${selectedOrder.orderNumber}!`);
+          setRetryPrintOrder(null);
+        }
+
         // Open receipt pop-up
         window.open(`/restaurant/billing/receipt/${selectedOrder.id}`, "_blank");
         setSelectedOrder(null);
@@ -132,6 +154,25 @@ export default function StaffBillingPage() {
       setErrorMsg(err.message || "Failed to process payment");
     } finally {
       setIsProcessing(false);
+    }
+  }
+
+  async function handleRetryPrintReceipt() {
+    if (!retryPrintOrder) return;
+    setIsRetryingPrint(true);
+    try {
+      const res = await printReceiptAction({ orderId: retryPrintOrder.orderId, copies: retryPrintOrder.copies });
+      if (res.ok) {
+        setSuccessMsg("Receipt sent to printer.");
+        setRetryPrintOrder(null);
+        setErrorMsg(null);
+      } else {
+        setErrorMsg(res.error.message || "Receipt printing failed. Please check printer connection.");
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to retry receipt printing");
+    } finally {
+      setIsRetryingPrint(false);
     }
   }
 
@@ -199,6 +240,24 @@ export default function StaffBillingPage() {
           <button onClick={() => setSuccessMsg(null)} className="text-status-success hover:text-fg-primary">
             ✕
           </button>
+        </div>
+      )}
+
+      {retryPrintOrder && (
+        <div className="p-4 bg-status-warning/20 border border-status-warning/40 rounded-xl text-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <span className="font-semibold text-fg-primary block">Payment recorded successfully, but receipt printing failed.</span>
+            <span className="text-xs text-fg-secondary">The payment is safely recorded. You can retry sending the receipt to the printer without charging again.</span>
+          </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={handleRetryPrintReceipt}
+            disabled={isRetryingPrint}
+          >
+            <Printer className="w-4 h-4 mr-2" />
+            {isRetryingPrint ? "Sending..." : "Retry printing receipt"}
+          </Button>
         </div>
       )}
 
@@ -290,6 +349,8 @@ export default function StaffBillingPage() {
                         setSelectedOrder(order);
                         setAmountTendered(order.balance);
                         setIdempotencyKey(crypto.randomUUID());
+                        setPrintReceipt(true);
+                        setReceiptCopies(2);
                       }}
                     >
                       Pay {money(order.balance, order.currencyCode)}
@@ -449,7 +510,98 @@ export default function StaffBillingPage() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
+              {/* Receipt Printing Preferences */}
+              <div className="p-4 bg-card border border-border-subtle rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-semibold text-fg-primary block">Receipt Printing</span>
+                    <span className="text-caption text-fg-secondary block">
+                      Print receipt after recording payment
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={printReceipt}
+                      onClick={() => setPrintReceipt(!printReceipt)}
+                      className={`relative inline-flex h-5 w-10 items-center rounded-full transition-colors ${
+                        printReceipt ? "bg-action-primary" : "bg-border-strong"
+                      }`}
+                    >
+                      <span
+                        className={`inline-block size-3.5 transform rounded-full bg-canvas transition-transform ${
+                          printReceipt ? "translate-x-5" : "translate-x-1"
+                        }`}
+                      />
+                    </button>
+                    <span className="text-xs font-semibold text-fg-primary">
+                      {printReceipt ? "Yes" : "No"}
+                    </span>
+                  </div>
+                </div>
+
+                {printReceipt && (
+                  <div className="space-y-3 pt-2 border-t border-border-subtle">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs text-fg-secondary">Number of receipt copies</label>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={receiptCopies <= MIN_PRINT_COPIES}
+                          onClick={() => setReceiptCopies((c) => Math.max(MIN_PRINT_COPIES, c - 1))}
+                          aria-label="Decrease copies"
+                          className="h-7 w-7 p-0"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </Button>
+                        <span className="min-w-6 text-center text-xs tabular-nums font-bold text-fg-primary">
+                          {receiptCopies}
+                        </span>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          disabled={receiptCopies >= MAX_PRINT_COPIES}
+                          onClick={() => setReceiptCopies((c) => Math.min(MAX_PRINT_COPIES, c + 1))}
+                          aria-label="Increase copies"
+                          className="h-7 w-7 p-0"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg bg-raised p-2 text-xs space-y-1">
+                      <div className="font-semibold text-fg-primary text-caption">Receipt Copies</div>
+                      {receiptCopies === 1 ? (
+                        <div className="text-fg-secondary">Standard receipt: 1</div>
+                      ) : receiptCopies === 2 ? (
+                        <div className="flex justify-between text-fg-secondary">
+                          <span>Customer copy: 1</span>
+                          <span>Restaurant copy: 1</span>
+                          <span className="font-semibold text-fg-primary">Total: 2</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5 text-fg-secondary">
+                          <div className="flex justify-between">
+                            <span>Customer copy: 1</span>
+                            <span>Restaurant copy: 1</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Additional copies: {receiptCopies - 2}</span>
+                            <span className="font-semibold text-fg-primary">Total: {receiptCopies}</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
                 <Button
                   type="button"
                   variant="secondary"
@@ -457,13 +609,27 @@ export default function StaffBillingPage() {
                 >
                   Cancel
                 </Button>
+                {printReceipt && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={isProcessing}
+                    onClick={() => handleSettlePayment(undefined, false)}
+                  >
+                    Record without printing
+                  </Button>
+                )}
                 <Button
                   type="submit"
                   disabled={isProcessing}
                   variant="primary"
                   className="bg-status-success hover:bg-status-success py-2.5 px-6 font-bold"
                 >
-                  {isProcessing ? "Processing..." : `Complete Settlement — ${money(selectedOrder.balance)}`}
+                  {isProcessing
+                    ? "Processing..."
+                    : printReceipt
+                    ? `Confirm payment and print — ${money(selectedOrder.balance)}`
+                    : `Confirm payment — ${money(selectedOrder.balance)}`}
                 </Button>
               </div>
             </form>
