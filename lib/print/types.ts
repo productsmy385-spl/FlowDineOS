@@ -42,6 +42,8 @@ export type PrintBlock =
 
 /** The first agent version that prints `qr` and `barcode` blocks. */
 export const AGENT_VERSION_WITH_CODES = "0.2.0";
+/** The latest available agent version. */
+export const LATEST_AGENT_VERSION = "0.2.0";
 
 /** True when `version` (e.g. "0.10.1") is at least `minimum`. Unknown or malformed versions are false. */
 export function agentVersionAtLeast(version: string | null | undefined, minimum: string): boolean {
@@ -121,3 +123,19 @@ export function assertPrintable(document: PrintDocument): PrintDocument {
 export function parsePrintDocument(payload: unknown): PrintDocument {
   return printDocumentSchema.parse(payload) as PrintDocument;
 }
+
+/**
+ * Strips copy metadata (copyIndex, copyCount, copyLabel) from a PrintDocument before wire delivery.
+ * Existing field agents validate incoming JSON against their local version schema.
+ * Preserving clean `{ version, widthMm, blocks }` ensures full backward compatibility with older
+ * or field-installed print agent binaries that use `.strict()` validation.
+ */
+export function toWirePrintDocument(document: unknown): PrintDocument {
+  const parsed = parsePrintDocument(document);
+  return {
+    version: 1,
+    widthMm: parsed.widthMm,
+    blocks: parsed.blocks,
+  };
+}
+

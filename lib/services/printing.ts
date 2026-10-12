@@ -73,7 +73,7 @@ import { renderReceiptDocument, receiptCopyLabel } from "@/lib/print/render-rece
 import { describePrintError, isPrintErrorCode, type PrintErrorCode } from "@/lib/print/error-codes";
 import { profileOf } from "@/lib/print/profiles";
 import { renderTestDocument } from "@/lib/print/render-test";
-import { AGENT_VERSION_WITH_CODES, agentVersionAtLeast, MIN_PRINT_COPIES, MAX_PRINT_COPIES } from "@/lib/print/types";
+import { AGENT_VERSION_WITH_CODES, agentVersionAtLeast, MIN_PRINT_COPIES, MAX_PRINT_COPIES, toWirePrintDocument } from "@/lib/print/types";
 import { consume } from "@/lib/security/rate-limit";
 import { now } from "@/lib/time/clock";
 import { PAIRING_ALPHABET, PAIRING_CODE_LENGTH, connectionAddressIssue, discoveredPrinterSchema, type AgentDiscoveryReport, type DiscoveredPrinter } from "@/lib/validation/printing";
@@ -940,15 +940,19 @@ export async function claimPrintJobs(
 ): Promise<{ jobs: ClaimedJob[]; discovery: { discoveryId: string } | null; checks: Array<{ checkId: string; printerId: string }> }> {
   const at = now();
   const jobs = await claimJobs(ctx, max, at);
+  const wireJobs = jobs.map((job) => ({
+    ...job,
+    payload: toWirePrintDocument(job.payload),
+  }));
   const discoveryId = await takeRequestedDiscovery(ctx, new Date(at.getTime() - DISCOVERY_PICKUP_MS), at);
   // Connection tests ride on the same poll (printing audit 2026-10-08): the agent connects locally, never the cloud.
   const checks = await takeRequestedChecks(ctx, new Date(at.getTime() - CHECK_PICKUP_MS), at);
   if (discoveryId) logger.info("printer.discovery_started", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, discoveryId });
   for (const check of checks) logger.info("printer.test_started", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, printerId: check.printerId, checkId: check.checkId });
-  if (jobs.length > 0) {
-    logger.info("print_job.claimed", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, count: jobs.length });
+  if (wireJobs.length > 0) {
+    logger.info("print_job.claimed", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: ctx.agentId, count: wireJobs.length });
   }
-  return { jobs, discovery: discoveryId ? { discoveryId } : null, checks };
+  return { jobs: wireJobs, discovery: discoveryId ? { discoveryId } : null, checks };
 }
 
 /**

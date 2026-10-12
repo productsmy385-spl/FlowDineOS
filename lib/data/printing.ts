@@ -5,7 +5,7 @@ import { db } from "@/lib/db/prisma";
 import { ConflictError } from "@/lib/errors";
 import { canonicalPrintErrorCode } from "@/lib/print/error-codes";
 import { LEASE_MS, RETRY_POLICIES, displayStatus, outcomeOfFailure, type PrintJobDisplayStatus } from "@/lib/print/state-machine";
-import type { PrintDocument } from "@/lib/print/types";
+import { toWirePrintDocument, type PrintDocument } from "@/lib/print/types";
 import { instantDto, nullableInstantDto } from "./dto";
 import { mapErrors } from "./errors";
 import { required, tenantKey, tenantScope } from "./scope";
@@ -454,6 +454,7 @@ export type CreatedPrintJob = { id: string; created: boolean };
  * order's acceptance transaction — so the insert is `ON CONFLICT DO NOTHING` and the loser reads the winner's row.
  */
 export async function createPrintJob(client: Tx, ctx: TenantContext, job: NewPrintJob): Promise<CreatedPrintJob> {
+  const wirePayload = toWirePrintDocument(job.payload);
   const inserted = await client.$queryRaw<Array<{ id: string }>>`
     INSERT INTO print_jobs (
       tenant_id, printer_id, job_type, order_id, kot_ticket_id, dedupe_key, is_reprint, payload, status, attempt_count, max_attempts, next_attempt_at, requested_by_user_id, copy_index, copy_count, copy_label, payment_reference, trigger, created_at, updated_at
@@ -466,7 +467,7 @@ export async function createPrintJob(client: Tx, ctx: TenantContext, job: NewPri
       ${job.kotTicketId ?? null}::uuid,
       ${job.dedupeKey},
       ${job.isReprint ?? false},
-      ${JSON.stringify(job.payload)}::jsonb,
+      ${JSON.stringify(wirePayload)}::jsonb,
       'PENDING'::print_job_status,
       0,
       ${job.maxAttempts ?? RETRY_POLICIES[job.jobType].maxAttempts},
@@ -752,15 +753,17 @@ export type RetryOutcome = { before: { status: PrintJobStatus; attemptCount: num
 /** Puts one FAILED job back in the queue, due immediately, with attempts reset (ADR-007 §4, S1-P16-T007). */
 export async function retryJob(client: Tx, ctx: TenantContext, jobId: string, at: Date): Promise<RetryOutcome> {
   const existing = required(
-    await client.printJob.findUnique({ where: tenantKey(ctx, jobId), select: { status: true, attemptCount: true, lastErrorCode: true, jobType: true } }),
+    await client.printJob.findUnique({ where: tenantKey(ctx, jobId), select: { status: true, attemptCount: true, lastErrorCode: true, jobType: true, payload: true } }),
     "Print job",
   );
   if (existing.status !== PrintJobStatus.FAILED) throw new ConflictError("Only failed print jobs can be retried.", "NOT_FAILED");
 
+  const cleanPayload = toWirePrintDocument(existing.payload);
   const { count } = await client.printJob.updateMany({
     where: tenantScope(ctx, { id: jobId, status: PrintJobStatus.FAILED }),
     data: {
       status: PrintJobStatus.PENDING,
+      payload: cleanPayload as unknown as Prisma.InputJsonValue,
       attemptCount: 0,
       // A manual retry restarts the automatic retry window and takes the job type's current policy (2026-10-08).
       retryWindowStartedAt: at,

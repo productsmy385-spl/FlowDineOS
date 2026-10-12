@@ -347,9 +347,14 @@ export class PrintAgentRunner {
     try {
       // Encoded for this printer's capability profile (cut type, code page, QR/barcode support).
       bytes = encodeDocument(parsePrintDocument(job.payload), { profile: profileOf(printer.profile) });
-    } catch {
-      logger.error("job.invalid_payload", ctx);
-      await this.acknowledge(job, { result: "FAILED", errorCode: "ESC_POS_RENDER_FAILED", errorMessage: "The agent could not turn this ticket into printer commands." });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.error("job.invalid_payload", { ...ctx, error: detail });
+      await this.acknowledge(job, {
+        result: "FAILED",
+        errorCode: "ESC_POS_RENDER_FAILED",
+        errorMessage: `The agent could not turn this ticket into printer commands: ${detail}`.slice(0, 500),
+      });
       return;
     }
 

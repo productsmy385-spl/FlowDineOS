@@ -108,7 +108,7 @@ export const PRINT_ERRORS: Readonly<Record<PrintErrorCode, Entry>> = {
   },
   ESC_POS_RENDER_FAILED: {
     technical: "The agent could not turn this ticket into printer commands.",
-    user: () => "This ticket could not be prepared for printing. Update the print agent, then retry.",
+    user: () => "This ticket could not be prepared for printing. Retry the print job from the console.",
     retryable: false,
     offline: false,
   },

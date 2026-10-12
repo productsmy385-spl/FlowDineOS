@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { PrintJobType, PrinterHealth } from "@prisma/client";
-import { Archive, ArchiveRestore, Ban, CircleDashed, Pencil, Plus, PrinterCheck, Radar, RefreshCw, Trash2, TriangleAlert, WifiOff } from "lucide-react";
+import { Archive, ArchiveRestore, Ban, ChevronDown, ChevronUp, CircleDashed, Download, Pencil, Plus, PrinterCheck, Radar, RefreshCw, ShieldCheck, Trash2, TriangleAlert, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import type { PrintJobDto, PrinterDto, PrintingConsole, PrintingConsoleAgent } f
 import { describePrintError } from "@/lib/print/error-codes";
 import { profileOf } from "@/lib/print/profiles";
 import type { PrintJobDisplayStatus } from "@/lib/print/state-machine";
+import { agentVersionAtLeast, LATEST_AGENT_VERSION } from "@/lib/print/types";
 import { formatInZone } from "@/lib/ui/format";
 import { DOMAIN_ICONS, type Tone } from "@/lib/ui/icons";
 import { usePolling } from "@/lib/ui/use-polling";
@@ -149,6 +150,34 @@ export function PrintingConsoleView({
   const [showArchived, setShowArchived] = React.useState(false);
   const [showPairings, setShowPairings] = React.useState(false);
   const [nowMs, setNowMs] = React.useState(() => Date.now());
+  const [downloadingAgent, setDownloadingAgent] = React.useState(false);
+  const [showUpgradeGuide, setShowUpgradeGuide] = React.useState(false);
+
+  const downloadLatestInstaller = async () => {
+    if (downloadingAgent) return;
+    setDownloadingAgent(true);
+    try {
+      const res = await fetch("/api/v1/printing/agent-download/windows");
+      if (!res.ok) {
+        toast.error("Download failed. Please try again.");
+        return;
+      }
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = "FlowDineOS-Print-Agent-Setup.exe";
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(link);
+      toast.success("Downloading FlowDineOS-Print-Agent-Setup.exe");
+    } catch {
+      toast.error("Failed to download installer");
+    } finally {
+      setDownloadingAgent(false);
+    }
+  };
 
   // Retry countdowns tick every 5 s; nothing else depends on it.
   React.useEffect(() => {
@@ -638,14 +667,71 @@ export function PrintingConsoleView({
 
   const agentsTab = (
     <div className="flex flex-col gap-4">
-      {can.manageAgents && (
-        <div className="flex justify-end">
-          <Button variant="primary" onClick={() => setPairing(true)}>
-            <Icon icon={Plus} size={18} />
-            Pair agent
-          </Button>
+      {/* Agent Software & Version Management Panel (ADR-007, S1-P17) */}
+      <Card className="flex flex-col gap-4 border-border-subtle bg-card p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-subheading font-medium text-fg-primary">FlowDineOS Print Agent Software</h3>
+              <Badge tone="success">Latest release v{LATEST_AGENT_VERSION}</Badge>
+            </div>
+            <p className="mt-1 text-caption text-fg-secondary">
+              The print agent runs on your restaurant PC, securely claiming print jobs and communicating directly with thermal printers over ESC/POS.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => void downloadLatestInstaller()}
+              loading={downloadingAgent}
+              loadingLabel="Downloading…"
+            >
+              <Icon icon={Download} size={16} />
+              Download latest installer
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setShowUpgradeGuide(!showUpgradeGuide)}
+            >
+              <Icon icon={showUpgradeGuide ? ChevronUp : ChevronDown} size={16} />
+              {showUpgradeGuide ? "Hide instructions" : "Upgrade instructions"}
+            </Button>
+            {can.manageAgents && (
+              <Button variant="primary" onClick={() => setPairing(true)}>
+                <Icon icon={Plus} size={18} />
+                Pair agent
+              </Button>
+            )}
+          </div>
         </div>
-      )}
+
+        {showUpgradeGuide && (
+          <div className="rounded-xl border border-border-subtle bg-canvas/60 p-4 text-caption text-fg-secondary">
+            <h4 className="mb-2.5 font-medium text-fg-primary flex items-center gap-1.5">
+              <Icon icon={ShieldCheck} size={16} className="text-fg-accent" />
+              Safe Agent Upgrade Process (Preserves pairing & configuration)
+            </h4>
+            <ol className="list-decimal space-y-2 pl-4 text-body text-fg-secondary">
+              <li>
+                <strong className="text-fg-primary">Stop existing service before replacing binaries:</strong> Open Terminal or Command Prompt as Administrator and run:
+                <code className="mt-1 block rounded bg-card border border-border-subtle px-2.5 py-1 font-mono text-xs text-fg-primary">net stop FlowDineOS.PrintAgent.Service</code>
+                (or close any running foreground agent window to prevent file-lock errors).
+              </li>
+              <li>
+                <strong className="text-fg-primary">Install updated binaries:</strong> Run the downloaded installer <code className="rounded bg-card border border-border-subtle px-1.5 py-0.5 font-mono text-xs text-fg-primary">FlowDineOS-Print-Agent-Setup.exe</code> as Administrator. Your pairing credentials and printer configurations in <code className="rounded bg-card border border-border-subtle px-1.5 py-0.5 font-mono text-xs text-fg-primary">%ProgramData%\FlowDineOS\PrintAgent</code> are safely preserved.
+              </li>
+              <li>
+                <strong className="text-fg-primary">Restart service:</strong> The installer automatically launches the updated agent. If needed, start it manually:
+                <code className="mt-1 block rounded bg-card border border-border-subtle px-2.5 py-1 font-mono text-xs text-fg-primary">net start FlowDineOS.PrintAgent.Service</code>
+              </li>
+              <li>
+                <strong className="text-fg-primary">Verify status & heartbeat:</strong> Within 60 seconds, the agent status below will update to <strong className="text-status-success">ONLINE</strong> showing the updated version.
+              </li>
+            </ol>
+          </div>
+        )}
+      </Card>
+
       {stalePairings.length > 0 ? (
         <div className="flex flex-col gap-2 rounded-2xl border border-border-subtle bg-card p-3 md:flex-row md:items-center md:justify-between">
           <label className="flex items-center gap-2 text-label text-fg-secondary">
@@ -659,6 +745,7 @@ export function PrintingConsoleView({
           ) : null}
         </div>
       ) : null}
+
       {agents.length === 0 ? (
         <Card>
           <EmptyState
@@ -669,43 +756,72 @@ export function PrintingConsoleView({
         </Card>
       ) : (
         <ul className="flex flex-col gap-3">
-          {shownAgents.map((agent) => (
-            <li key={agent.id}>
-              <Card className="flex-row items-center gap-4">
-                <IconTile
-                  icon={agent.presenceStatus === "ONLINE" ? DOMAIN_ICONS.agentOnline : DOMAIN_ICONS.agentOffline}
-                  tone={agent.presenceStatus === "ONLINE" ? "success" : agent.presenceStatus === "RECONNECTING" ? "warning" : "neutral"}
-                  label=""
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-subheading text-fg-primary">{agent.name}</p>
-                  <p className="text-caption text-fg-secondary">
-                    {agent.status === "PENDING_PAIRING"
-                      ? "Waiting to be paired"
-                      : agent.presenceStatus === "RECONNECTING"
-                        ? `Reconnecting · last seen ${formatInZone(agent.lastSeenAt!, timezone, "datetime", "en-GB")}`
-                        : agent.lastSeenAt
-                          ? `Last seen ${formatInZone(agent.lastSeenAt, timezone, "datetime", "en-GB")}`
-                          : "Never connected"}
-                    {agent.agentVersion ? ` · v${agent.agentVersion}` : ""}
-                    {agent.osInfo ? ` · ${agent.osInfo}` : ""}
-                    {agent.tokenPrefix ? ` · token ${agent.tokenPrefix}…` : ""}
-                  </p>
-                  {agent.status === "ACTIVE" ? (
-                    <p className="text-caption text-fg-secondary">
-                      Printers: {printers.filter((printer) => printer.printAgentId === agent.id && printer.isActive).map((printer) => printer.name).join(", ") || "none assigned"}
+          {shownAgents.map((agent) => {
+            const isUpToDate = Boolean(agent.agentVersion && agentVersionAtLeast(agent.agentVersion, LATEST_AGENT_VERSION));
+            const isOutdated = Boolean(agent.agentVersion && !isUpToDate);
+
+            return (
+              <li key={agent.id}>
+                <Card className="flex-row items-center gap-4">
+                  <IconTile
+                    icon={agent.presenceStatus === "ONLINE" ? DOMAIN_ICONS.agentOnline : DOMAIN_ICONS.agentOffline}
+                    tone={agent.presenceStatus === "ONLINE" ? "success" : agent.presenceStatus === "RECONNECTING" ? "warning" : "neutral"}
+                    label=""
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-subheading text-fg-primary">{agent.name}</p>
+                      {agent.agentVersion ? (
+                        isUpToDate ? (
+                          <Badge tone="success">v{agent.agentVersion} · Up to date</Badge>
+                        ) : (
+                          <Badge tone="warning">v{agent.agentVersion} · Update recommended</Badge>
+                        )
+                      ) : (
+                        <Badge tone="neutral">Version unknown</Badge>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-caption text-fg-secondary">
+                      {agent.status === "PENDING_PAIRING"
+                        ? "Waiting to be paired"
+                        : agent.presenceStatus === "RECONNECTING"
+                          ? `Reconnecting · last seen ${formatInZone(agent.lastSeenAt!, timezone, "datetime", "en-GB")}`
+                          : agent.lastSeenAt
+                            ? `Last seen ${formatInZone(agent.lastSeenAt, timezone, "datetime", "en-GB")}`
+                            : "Never connected"}
+                      {agent.osInfo ? ` · ${agent.osInfo}` : ""}
+                      {agent.tokenPrefix ? ` · token ${agent.tokenPrefix}…` : ""}
                     </p>
-                  ) : null}
-                </div>
-                <StatusBadge domain="agent" status={agent.status === "REVOKED" ? "REVOKED" : (agent.presenceStatus ?? (agent.online ? "ONLINE" : "OFFLINE"))} />
-                {can.manageAgents && agent.status !== "REVOKED" && (
-                  <Button size="sm" variant="ghost" onClick={() => setRevoking(agent)}>
-                    Revoke
-                  </Button>
-                )}
-              </Card>
-            </li>
-          ))}
+                    {agent.status === "ACTIVE" ? (
+                      <p className="mt-0.5 text-caption text-fg-secondary">
+                        Printers: {printers.filter((printer) => printer.printAgentId === agent.id && printer.isActive).map((printer) => printer.name).join(", ") || "none assigned"}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge domain="agent" status={agent.status === "REVOKED" ? "REVOKED" : (agent.presenceStatus ?? (agent.online ? "ONLINE" : "OFFLINE"))} />
+                    {isOutdated && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void downloadLatestInstaller()}
+                        loading={downloadingAgent}
+                        loadingLabel="Downloading…"
+                      >
+                        <Icon icon={Download} size={16} />
+                        Download update
+                      </Button>
+                    )}
+                    {can.manageAgents && agent.status !== "REVOKED" && (
+                      <Button size="sm" variant="ghost" onClick={() => setRevoking(agent)}>
+                        Revoke
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
