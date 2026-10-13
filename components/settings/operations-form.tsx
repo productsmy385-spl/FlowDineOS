@@ -53,6 +53,7 @@ export function OperationsForm({
       { term: "Country", value: restaurant.countryCode },
       { term: "New orders default to", value: ORDER_TYPE_LABEL[restaurant.defaultOrderType] },
       { term: "Kitchen ticket", value: restaurant.autoPrintKot ? "Prints automatically" : "Printed by hand" },
+      { term: "Simplified order workflow", value: restaurant.simplifiedWorkflow ? "On" : "Off" },
       { term: "Receipt footer", value: restaurant.receiptFooter ?? "None" },
       { term: "GSTIN", value: restaurant.gstin ?? "Not set" },
     ];
@@ -76,6 +77,7 @@ export function OperationsForm({
             countryCode: text("countryCode"),
             defaultOrderType: text("defaultOrderType") as (typeof ORDER_TYPES)[number],
             autoPrintKot: formData.get("autoPrintKot") === "on",
+            simplifiedWorkflow: formData.get("simplifiedWorkflow") === "on",
             receiptFooter: text("receiptFooter"),
             gstin: text("gstin"),
           });
@@ -154,6 +156,13 @@ export function OperationsForm({
             help="When an order is accepted, its ticket is queued for the kitchen printer without anyone pressing print."
           />
         </div>
+
+        <Switch
+          name="simplifiedWorkflow"
+          label="Simplified Order Workflow"
+          defaultChecked={restaurant.simplifiedWorkflow}
+          help="Automatically advance accepted orders after 10 minutes and simplify payment recording and receipt printing. The timer replaces the kitchen's Preparing and Ready taps: an order shows Ready 10 minutes after it is accepted, whether or not the food is."
+        />
 
         <TextArea
           name="receiptFooter"

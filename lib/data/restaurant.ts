@@ -53,6 +53,7 @@ const SETTINGS_SELECT = {
   seoDescription: true,
   defaultOrderType: true,
   autoPrintKot: true,
+  simplifiedWorkflow: true,
   receiptFooter: true,
   gstin: true,
   updatedAt: true,
@@ -149,6 +150,12 @@ export async function getRestaurantSettingsSnapshot(ctx: TenantContext): Promise
     ]);
     return { restaurant: toSettingsDto(row), hours, slug: required(tenant, "Restaurant").slug, currencyLocked, websiteReadiness: readiness };
   });
+}
+
+/** Whether the caller's restaurant runs the simplified order workflow (owner brief 2026-10-13). */
+export async function isSimplifiedWorkflowOn(ctx: TenantContext): Promise<boolean> {
+  const row = await mapErrors("Restaurant", () => db.restaurant.findUnique({ where: { tenantId: ctx.tenantId }, select: { simplifiedWorkflow: true } }));
+  return row?.simplifiedWorkflow ?? false;
 }
 
 /** The public website slug of the caller's tenant (for `revalidatePath('/r/{slug}')`). */

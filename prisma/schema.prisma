@@ -435,6 +435,9 @@ model Restaurant {
   seoDescription   String?   @map("seo_description") @db.VarChar(160)
   defaultOrderType OrderType @default(DINE_IN) @map("default_order_type")
   autoPrintKot     Boolean   @default(true) @map("auto_print_kot")
+  /// Simplified order workflow (owner brief 2026-10-13): accepted orders become READY 10 minutes after acceptance
+  /// without kitchen taps, and the Orders board takes payment and completes in one step. Off keeps the manual flow.
+  simplifiedWorkflow Boolean @default(false) @map("simplified_workflow")
   receiptFooter    String?   @map("receipt_footer") @db.VarChar(280)
   gstin            String?   @db.VarChar(15)
   // Brand Kit (RASOIOS-ADR-021): named colours in the tenant's own order, fonts from an allow-list, extra logos, voice.

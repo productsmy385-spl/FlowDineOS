@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { OrderBoard } from "@/components/orders/order-board";
 import { requireTenantPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
+import { isSimplifiedWorkflowOn } from "@/lib/data/restaurant";
 import { allowedOrderTransitions, getOrderBoard } from "@/lib/services/orders";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,9 @@ export default async function OrdersPage() {
   const ctx = await requireTenantPage("order:read");
   const board = await getOrderBoard(ctx, {});
   const canCreate = hasPermission(ctx, "order:create");
+  // Record Payment on the board belongs to the simplified order workflow; with it off the board is unchanged.
+  const canRecordPayment =
+    hasPermission(ctx, "payment:record") && hasPermission(ctx, "transaction:read") && (await isSimplifiedWorkflowOn(ctx));
 
   return (
     <div className="flex flex-col gap-6">
@@ -33,7 +37,7 @@ export default async function OrdersPage() {
           ) : undefined
         }
       />
-      <OrderBoard initial={board} transitions={allowedOrderTransitions(ctx)} timezone={ctx.restaurant.timezone} canCreate={canCreate} />
+      <OrderBoard initial={board} transitions={allowedOrderTransitions(ctx)} timezone={ctx.restaurant.timezone} canCreate={canCreate} canRecordPayment={canRecordPayment} />
     </div>
   );
 }

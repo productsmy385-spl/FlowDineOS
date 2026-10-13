@@ -20,8 +20,10 @@ import { usePolling } from "@/lib/ui/use-polling";
 import { updateOrderStatusAction } from "@/app/restaurant/orders/actions";
 import { CancelOrderDialog } from "./cancel-order-dialog";
 import { CardRail } from "@/components/visual/card-rail";
+import { Wallet } from "lucide-react";
 import { OrderCard } from "./order-card";
 import { ORDER_TYPE_LABELS, TRANSITION_LABELS, type TransitionTarget } from "./order-labels";
+import { RecordPaymentDialog } from "./record-payment-dialog";
 
 /**
  * Live order board (S1-P12-T008; frontend.md §5.3, api.md LD-ORD-01 / RH-ORD-01 / SA-ORD-02).
@@ -69,11 +71,14 @@ export function OrderBoard({
   transitions,
   timezone,
   canCreate,
+  canRecordPayment = false,
 }: {
   initial: OrderBoardPage;
   transitions: Record<OrderStatus, TransitionTarget[]>;
   timezone: string;
   canCreate: boolean;
+  /** Simplified order workflow on and the caller may record payments: active unpaid cards get Record Payment. */
+  canRecordPayment?: boolean;
 }) {
   const session = useConsoleSession();
   const locale = localeForCountry(session?.activeTenant.countryCode);
@@ -86,6 +91,7 @@ export function OrderBoard({
   const [pendingId, setPendingId] = React.useState<string | null>(null);
   const [cancelling, setCancelling] = React.useState<OrderBoardItem | null>(null);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
+  const [paying, setPaying] = React.useState<string | null>(null);
   const [announcement, setAnnouncement] = React.useState("");
   const knownIds = React.useRef(new Set(initial.items.map((order) => order.id)));
 
@@ -255,6 +261,7 @@ export function OrderBoard({
           renderCard={(order, state) => {
             const targets = transitions[order.status] ?? [];
             const forward = targets.filter((target) => target !== "CANCELLED");
+            const payable = canRecordPayment && (order.paymentStatus === "UNPAID" || order.paymentStatus === "PARTIALLY_PAID");
             return (
               <OrderCard
                 order={order}
@@ -263,8 +270,13 @@ export function OrderBoard({
                 active={state.active}
                 fresh={state.fresh}
                 primaryAction={
-                  forward.length > 0 ? (
+                  forward.length > 0 || payable ? (
                     <span className="flex flex-wrap gap-2">
+                      {payable && (
+                        <Button size="sm" variant="primary" icon={Wallet} disabled={pendingId === order.id} onClick={() => setPaying(order.id)}>
+                          Record Payment
+                        </Button>
+                      )}
                       {forward.map((target) => (
                         <Button key={target} size="sm" variant="primary" loading={pendingId === order.id} loadingLabel="Saving…" onClick={() => void move(order, target)}>
                           {TRANSITION_LABELS[target]}
@@ -307,6 +319,17 @@ export function OrderBoard({
           if (cancelling) void move(cancelling, "CANCELLED", reason);
         }}
       />
+
+      {canRecordPayment && (
+        <RecordPaymentDialog
+          orderId={paying}
+          onClose={() => setPaying(null)}
+          onSettled={() => {
+            void refetch();
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

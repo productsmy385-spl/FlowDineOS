@@ -240,6 +240,8 @@ export const updateOperationalSettingsSchema = strictObject({
   countryCode: countryCodeField,
   defaultOrderType: z.enum(ORDER_TYPES, { errorMap: () => ({ message: "Choose dine-in, takeaway or delivery" }) }),
   autoPrintKot: z.boolean(),
+  /** Optional so a caller that does not show the switch never changes it (absent = keep the stored value). */
+  simplifiedWorkflow: z.boolean().optional(),
   receiptFooter: clearable(maxText(280, "Receipt footer")),
   gstin: clearable(gstinField),
 });
@@ -249,6 +251,7 @@ export type UpdateOperationalSettingsInput = {
   countryCode: string;
   defaultOrderType: (typeof ORDER_TYPES)[number];
   autoPrintKot: boolean;
+  simplifiedWorkflow?: boolean;
   receiptFooter?: string | null;
   gstin?: string | null;
 };

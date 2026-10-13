@@ -267,6 +267,23 @@ export async function listPrintJobs(ctx: TenantContext, filters: PrintJobFilters
   return rows.map(toJobDto);
 }
 
+/**
+ * The receipt copies one payment queued: dedupe key `RECEIPT:PAYMENT:{transactionId}` for one copy, or with `:c{n}`
+ * for each of several (lib/services/printing.ts `queueReceiptForPayment`). Copy order.
+ */
+export async function listPaymentReceiptJobs(ctx: TenantContext, orderId: string, transactionId: string): Promise<PrintJobDto[]> {
+  const key = `RECEIPT:PAYMENT:${transactionId}`;
+  const rows = await mapErrors("Print job", () =>
+    db.printJob.findMany({
+      where: tenantScope(ctx, { orderId, jobType: PrintJobType.RECEIPT, OR: [{ dedupeKey: key }, { dedupeKey: { startsWith: `${key}:c` } }] }),
+      select: JOB_SELECT,
+      orderBy: [{ copyIndex: "asc" }, { createdAt: "asc" }],
+      take: 20,
+    }),
+  );
+  return rows.map(toJobDto);
+}
+
 export async function countPrintJobs(ctx: TenantContext, status: PrintJobStatus): Promise<number> {
   return mapErrors("Print job", () => db.printJob.count({ where: tenantScope(ctx, { status, archivedAt: null }) }));
 }

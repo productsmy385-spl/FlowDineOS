@@ -183,13 +183,32 @@ function colourDraft(settings: EditorSettings): ColourDraft {
   };
 }
 
-/** The palette the draft would produce: a preset owns its colours, `CUSTOM` uses the three in the form. */
-function draftPalette(draft: ColourDraft, reference: EditorReference): PreviewPalette {
+type DraftHexKey = "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex";
+
+/**
+ * The palette the draft would produce: a preset owns its colours, `CUSTOM` uses the three in the form.
+ *
+ * A hex field holds whatever is being typed, so mid-edit it is often not a colour (`#9D174` after a Backspace). The
+ * contrast maths throws on anything but `#RRGGBB`, and it runs during render, so an unchecked value crashed the whole
+ * editor (owner report 2026-10-13). Each field therefore falls back to the saved colour until it is complete again.
+ */
+export function draftPalette(draft: ColourDraft, reference: EditorReference, saved: ColourDraft): PreviewPalette {
+  const hex = (key: DraftHexKey) => (HEX.test(draft[key]) ? draft[key] : saved[key]);
   const base: PreviewPalette =
     draft.preset === "CUSTOM"
-      ? { primary: draft.primaryHex, secondary: draft.secondaryHex, accent: draft.accentHex, gradientFrom: draft.primaryHex, gradientTo: draft.secondaryHex }
+      ? { primary: hex("primaryHex"), secondary: hex("secondaryHex"), accent: hex("accentHex"), gradientFrom: hex("primaryHex"), gradientTo: hex("secondaryHex") }
       : reference.presetPalettes[draft.preset][draft.surfaceMode];
-  return draft.useGradient ? { ...base, gradientFrom: draft.gradientFromHex, gradientTo: draft.gradientToHex } : base;
+  return draft.useGradient ? { ...base, gradientFrom: hex("gradientFromHex"), gradientTo: hex("gradientToHex") } : base;
+}
+
+/** The text colours the preview paints: a half-typed one shows its saved colour until it is a full `#RRGGBB`. */
+export function previewTextColors(draft: ResolvedTextColors, saved: ResolvedTextColors): ResolvedTextColors {
+  return Object.fromEntries(TEXT_COLOR_KEYS.map((key) => [key, HEX.test(draft[key]) ? draft[key] : saved[key]])) as ResolvedTextColors;
+}
+
+/** Inline validation for a hex field; nothing while it is a complete colour. */
+function hexError(value: string): string | undefined {
+  return HEX.test(value) ? undefined : "Enter a colour as # and six digits or letters A–F, e.g. #9D174D";
 }
 
 const PRESET_LABELS: Record<WebsiteThemePresetName, string> = {
@@ -228,7 +247,7 @@ function ColourField({
   disabled: boolean;
 }) {
   return (
-    <FormField name={name} label={label} help={help}>
+    <FormField name={name} label={label} help={help} error={hexError(value)}>
       <div className="flex items-center gap-3">
         <input
           type="color"
@@ -267,7 +286,7 @@ function TextColourField({
   disabled: boolean;
 }) {
   return (
-    <FormField name={name} label={label} help={help}>
+    <FormField name={name} label={label} help={help} error={hexError(value)}>
       <div className="flex flex-col gap-2">
         <div className="flex items-center gap-3">
           <input
@@ -338,8 +357,8 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
 
   const [brandingNote, setBrandingNote] = React.useState<{ ok: boolean; text: string } | null>(null);
   const disabled = !view.canEdit;
-  const palette = draftPalette(colours, reference);
   const savedColours = colourDraft(view);
+  const palette = draftPalette(colours, reference, savedColours);
   const dirty =
     JSON.stringify(colours) !== JSON.stringify(savedColours) ||
     JSON.stringify(identity) !== JSON.stringify(view.identity) ||
@@ -448,7 +467,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   function updateCustomPalette(patch: Partial<Pick<ColourDraft, "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex">>) {
     setColours((current) => {
       const updated = { ...current, ...patch };
-      const nextPalette = draftPalette(updated, reference);
+      const nextPalette = draftPalette(updated, reference, savedColours);
       const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
       const nextTextColors = { ...updated.textColors };
       for (const k of TEXT_COLOR_KEYS) {
@@ -478,8 +497,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   }
 
   function resetTextColor(key: TextColorKey) {
-    const currentPalette = draftPalette(colours, reference);
-    const defaults = computeDefaultTextColors(colours.surfaceMode, currentPalette);
+    const defaults = computeDefaultTextColors(colours.surfaceMode, palette);
     setColours((current) => ({
       ...current,
       customTextColors: {
@@ -504,7 +522,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     tagline: identity.tagline,
     ctaLabel: sections.find((section) => section.key === "HERO")?.ctaLabel ?? null,
     sectionLabels: sections.filter((section) => section.enabled || section.alwaysEnabled).map((section) => section.headline || section.defaultHeadline),
-    textColors: colours.textColors,
+    textColors: previewTextColors(colours.textColors, savedColours.textColors),
   };
 
   const tabs = [
@@ -528,13 +546,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 onValueChange={(value) => {
                   const nextPreset = value as WebsiteThemePresetName;
                   setColours((current) => {
-                    const nextBase =
-                      nextPreset === "CUSTOM"
-                        ? { primary: current.primaryHex, secondary: current.secondaryHex, accent: current.accentHex, gradientFrom: current.primaryHex, gradientTo: current.secondaryHex }
-                        : reference.presetPalettes[nextPreset][current.surfaceMode];
-                    const nextPalette = current.useGradient
-                      ? { ...nextBase, gradientFrom: current.gradientFromHex, gradientTo: current.gradientToHex }
-                      : nextBase;
+                    const nextPalette = draftPalette({ ...current, preset: nextPreset }, reference, savedColours);
                     const defaults = computeDefaultTextColors(current.surfaceMode, nextPalette);
                     const nextTextColors = { ...current.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
@@ -567,13 +579,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 onValueChange={(value) => {
                   const nextMode = value as WebsiteSurfaceModeName;
                   setColours((current) => {
-                    const nextBase =
-                      current.preset === "CUSTOM"
-                        ? { primary: current.primaryHex, secondary: current.secondaryHex, accent: current.accentHex, gradientFrom: current.primaryHex, gradientTo: current.secondaryHex }
-                        : reference.presetPalettes[current.preset][nextMode];
-                    const nextPalette = current.useGradient
-                      ? { ...nextBase, gradientFrom: current.gradientFromHex, gradientTo: current.gradientToHex }
-                      : nextBase;
+                    const nextPalette = draftPalette({ ...current, surfaceMode: nextMode }, reference, savedColours);
                     const defaults = computeDefaultTextColors(nextMode, nextPalette);
                     const nextTextColors = { ...current.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
@@ -629,7 +635,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                   setColours((current) => {
                     const nextUse = event.target.checked;
                     const updated = { ...current, useGradient: nextUse };
-                    const nextPalette = draftPalette(updated, reference);
+                    const nextPalette = draftPalette(updated, reference, savedColours);
                     const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
                     const nextTextColors = { ...updated.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
