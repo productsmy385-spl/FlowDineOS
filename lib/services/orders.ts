@@ -37,6 +37,7 @@ import { required } from "@/lib/data/scope";
 import { audit } from "@/lib/audit/write";
 import { publishedMenuForToday } from "@/lib/services/daily-menu";
 import { cancelKotsWithOrder, generateKotsForRound } from "@/lib/services/kot";
+import { placeOrderOnTableBill } from "@/lib/services/table-placement";
 import { businessDateFor } from "@/lib/time/business-date";
 import {
   ORDER_TRANSITION_TARGETS,
@@ -106,12 +107,19 @@ export async function createOrder(ctx: TenantContext, data: CreateOrderData): Pr
 
   const businessDate = businessDateFor(new Date(), ctx.restaurant.timezone);
 
-  const { order, replayed } = await createOnce(ctx, data, businessDate).catch(async (error) => {
-    // Two submits with the same key raced: the loser's unique violation means the winner's order is now committed.
-    if (error instanceof ConflictError && error.code === "CONFLICT") {
-      const original = await withTx(ctx, (tx) => findOrderByIdempotencyKey(ctx, tx, data.idempotencyKey));
-      if (original) return { order: original, replayed: true };
-    }
+  const attempt = () =>
+    createOnce(ctx, data, businessDate).catch(async (error) => {
+      // Two submits with the same key raced: the loser's unique violation means the winner's order is now committed.
+      if (error instanceof ConflictError && error.code === "CONFLICT") {
+        const original = await withTx(ctx, (tx) => findOrderByIdempotencyKey(ctx, tx, data.idempotencyKey));
+        if (original) return { order: original, replayed: true };
+      }
+      throw error;
+    });
+  const { order, replayed } = await attempt().catch((error) => {
+    // Two first orders for the same empty table raced and the other one opened its bill (partial unique index,
+    // RASOIOS-ADR-027): try once more, now joining that bill — or refusing, if this order expected a new one.
+    if (error instanceof ConflictError && error.code === "CONFLICT" && data.orderType === "DINE_IN" && data.tableLabel) return attempt();
     throw error;
   });
 
@@ -181,9 +189,12 @@ async function createOnce(ctx: TenantContext, data: CreateOrderData, businessDat
       lines,
     });
 
+    // Dine-in with a table: the order joins that table's open bill (or opens one) in this same transaction.
+    await placeOrderOnTableBill(tx, ctx, { id: created.id, orderType: data.orderType, tableLabel: data.tableLabel }, data.expectedTableSessionId, businessDate);
+
     if (data.sendToKitchen) {
       await acceptNewOrder(tx, ctx, created.id);
-      await generateKotsForRound(tx, ctx, created.id, 1);
+      await generateKotsForRound(tx, ctx, created.id, 1, { print: data.printKot });
     }
 
     return { order: await readOrder(tx, ctx, created.id), replayed: false };

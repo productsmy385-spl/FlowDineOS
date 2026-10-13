@@ -14,8 +14,12 @@ export const dynamic = "force-dynamic";
  * additionally needs `order:accept`, and adding a new customer `customer:create`, so the form offers each control
  * only to a role that holds it (SC-RBAC-08 — the server still enforces it).
  */
-export default async function NewOrderPage() {
+export default async function NewOrderPage({ searchParams }: { searchParams: Promise<{ table?: string | string[] }> }) {
   const ctx = await requireTenantPage("order:create");
+  // "Add order" on a table bill opens this page with the table filled in (RASOIOS-ADR-027). Display text only: the
+  // server decides which bill the order joins when it is placed.
+  const tableParam = (await searchParams)?.table;
+  const initialTable = typeof tableParam === "string" ? tableParam.trim().slice(0, 20) : "";
   if (!hasPermission(ctx, "menu:read")) {
     return (
       <Card>
@@ -34,6 +38,7 @@ export default async function NewOrderPage() {
         canSendToKitchen={hasPermission(ctx, "order:accept")}
         canSetPriority={ctx.role === "TENANT_ADMIN" || ctx.role === "MANAGER" || ctx.role === "CASHIER"}
         canCreateCustomer={hasPermission(ctx, "customer:create")}
+        initialTable={initialTable}
       />
     </div>
   );

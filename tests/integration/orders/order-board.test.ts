@@ -47,7 +47,7 @@ describe("TC-ORDER-010 order board polling", () => {
     expect(Object.keys(board.items[0]).sort()).toEqual(
       [
         "id", "orderNumber", "status", "paymentStatus", "orderType", "tableLabel", "priority",
-        "customerName", "currencyCode", "totalAmount", "itemCount", "lines", "imageUrl", "createdAt", "updatedAt",
+        "customerName", "currencyCode", "totalAmount", "itemCount", "lines", "imageUrl", "openTableBillId", "createdAt", "updatedAt",
       ].sort(),
     );
     expect(JSON.stringify(board)).not.toContain(tenantIdOf("B"));

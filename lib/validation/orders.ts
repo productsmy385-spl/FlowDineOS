@@ -64,6 +64,17 @@ export const createOrderSchema = strictObject({
   customer: orderCustomerSchema.optional(),
   /** Accept the order and send its tickets to the kitchen in the same transaction (needs `order:accept`). */
   sendToKitchen: z.boolean().optional().default(false),
+  /**
+   * With `sendToKitchen`: true = "Send to KOT + Print" (the default, unchanged behaviour); false = "Send to KOT only",
+   * the tickets reach the kitchen screen and no print job is created (RASOIOS-ADR-027).
+   */
+  printKot: z.boolean().optional().default(true),
+  /**
+   * Dine-in with a table: the open bill the person placing the order was shown for that table (its id), or null when
+   * they were told a new bill would open. If the table's bill is no longer that one, the order is refused (409) rather
+   * than silently joining or opening a different bill. Omitted = join the table's open bill or open one.
+   */
+  expectedTableSessionId: uuidParam.nullable().optional(),
   items: z.array(orderLineSchema).min(1, "Order must contain at least one item").max(100, "An order can have at most 100 lines"),
 }).refine((input) => !(input.customerId && input.customer), {
   path: ["customer"],

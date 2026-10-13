@@ -167,6 +167,8 @@ export type OrderBoardItem = {
   lines: Array<{ name: string; quantity: number }>;
   /** The first line's dish photo, if it has one — the card's artwork. */
   imageUrl: string | null;
+  /** The open table bill this order is on (RASOIOS-ADR-027): it is paid with the bill, not on its own. */
+  openTableBillId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -199,6 +201,7 @@ const boardSelect = {
   createdAt: true,
   updatedAt: true,
   customer: { select: { fullName: true } },
+  tableSession: { select: { id: true, status: true } },
   _count: { select: { items: true } },
   items: { take: 4, orderBy: { createdAt: "asc" }, select: { itemNameSnapshot: true, quantity: true, menuItem: { select: { imageUrl: true } } } },
 } satisfies Prisma.OrderSelect;
@@ -220,6 +223,7 @@ function toBoardItem(row: BoardRow): OrderBoardItem {
     itemCount: row._count.items,
     lines: row.items.map((item) => ({ name: item.itemNameSnapshot, quantity: item.quantity })),
     imageUrl: row.items.find((item) => item.menuItem.imageUrl)?.menuItem.imageUrl ?? null,
+    openTableBillId: row.tableSession?.status === "OPEN" ? row.tableSession.id : null,
     createdAt: instantDto(row.createdAt),
     updatedAt: instantDto(row.updatedAt),
   };
@@ -367,6 +371,8 @@ export type OrderDetailDto = {
   updatedAt: string;
   createdByName: string | null;
   cancelledByName: string | null;
+  /** The table bill this order is on, if any (RASOIOS-ADR-027). */
+  tableBill: { id: string; billNumber: string; tableLabel: string; open: boolean } | null;
   customer: OrderCustomerDto | null;
   lines: OrderLineDto[];
   kots: OrderKotDto[];
@@ -402,6 +408,7 @@ const detailSelect = {
   createdBy: { select: { fullName: true, email: true } },
   cancelledBy: { select: { fullName: true, email: true } },
   customer: { select: { id: true, fullName: true, phoneE164: true, email: true } },
+  tableSession: { select: { id: true, billNumber: true, tableLabel: true, status: true } },
   items: {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
@@ -476,6 +483,9 @@ function toDetailDto(row: DetailRow, printStatuses: Map<string, KotPrintStatus>)
     updatedAt: instantDto(row.updatedAt),
     createdByName: displayName(row.createdBy),
     cancelledByName: displayName(row.cancelledBy),
+    tableBill: row.tableSession
+      ? { id: row.tableSession.id, billNumber: row.tableSession.billNumber, tableLabel: row.tableSession.tableLabel, open: row.tableSession.status === "OPEN" }
+      : null,
     customer: row.customer,
     lines: row.items.map((item) => ({
       id: item.id,

@@ -74,7 +74,7 @@ describe("TC-ORDER-016 order board screen (/restaurant/orders)", () => {
 describe("TC-ORDER-015 order entry (/restaurant/orders/new)", () => {
   it("loads the orderable catalogue with today's daily-menu highlight and the role's own flags", async () => {
     await asSeedUser("A", "WAITER");
-    const page = await invokeLoader(NewOrderPage);
+    const page = await invokeLoader(NewOrderPage, { searchParams: Promise.resolve({}) });
     const entry = requireComponent<React.ComponentProps<typeof OrderEntry>>(page, OrderEntry, "OrderEntry");
 
     expect(entry.catalogue.items.length).toBeGreaterThan(0);
@@ -97,7 +97,7 @@ describe("TC-ORDER-015 order entry (/restaurant/orders/new)", () => {
     const itemId = seeded("A", "item:masala-omelette");
     dataOf(await invokeAction(setMenuItemAvailabilityAction, { itemId, available: false }));
 
-    const entry = requireComponent<React.ComponentProps<typeof OrderEntry>>(await invokeLoader(NewOrderPage), OrderEntry, "OrderEntry");
+    const entry = requireComponent<React.ComponentProps<typeof OrderEntry>>(await invokeLoader(NewOrderPage, { searchParams: Promise.resolve({}) }), OrderEntry, "OrderEntry");
     expect(entry.catalogue.items.map((item) => item.id)).not.toContain(itemId);
 
     dataOf(await invokeAction(setMenuItemAvailabilityAction, { itemId, available: true }));

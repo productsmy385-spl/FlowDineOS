@@ -1,5 +1,5 @@
 import "server-only";
-import { type BackupReminder, OrderStatus, PrinterDiscoveryStatus, PrintJobStatus, Prisma, StaffSessionStatus, TransactionStatus } from "@prisma/client";
+import { type BackupReminder, OrderStatus, PrinterDiscoveryStatus, PrintJobStatus, Prisma, StaffSessionStatus, TableSessionStatus, TransactionStatus } from "@prisma/client";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { tenantKey, tenantScope } from "./scope";
 import type { Tx } from "./tx";
@@ -107,6 +107,18 @@ export const TABLES = {
     file: "tables",
     title: "Tables",
     read: (tx, ctx) => tx.diningTable.findMany({ where: tenantScope(ctx), orderBy: { sortOrder: "asc" } }),
+  },
+  tableSession: {
+    model: "TableSession",
+    file: "table_bills",
+    title: "Table bills",
+    read: (tx, ctx, r) => tx.tableSession.findMany({ where: tenantScope(ctx, businessDateWhere(r)), orderBy: { openedAt: "asc" } }),
+  },
+  tableSessionPayment: {
+    model: "TableSessionPayment",
+    file: "table_bill_payments",
+    title: "Table bill payments",
+    read: (tx, ctx, r) => tx.tableSessionPayment.findMany({ where: tenantScope(ctx, businessDateWhere(r)), orderBy: { createdAt: "asc" } }),
   },
   order: {
     model: "Order",
@@ -323,11 +335,13 @@ export const RESTORE_ORDER = [
   "dailyMenuItem",
   "customer",
   "diningTable",
+  "tableSession",
   "order",
   "orderItem",
   "orderItemAddon",
   "kotTicket",
   "kotItem",
+  "tableSessionPayment",
   "transaction",
   "businessDayClose",
 ] as const satisfies readonly TableKey[];
@@ -349,6 +363,8 @@ export async function existingIds(tx: Tx, ctx: TenantContext, table: RestoreKey,
     case "dailyMenuItem": rows = await tx.dailyMenuItem.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
     case "customer": rows = await tx.customer.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
     case "diningTable": rows = await tx.diningTable.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
+    case "tableSession": rows = await tx.tableSession.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
+    case "tableSessionPayment": rows = await tx.tableSessionPayment.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
     case "order": rows = await tx.order.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
     case "orderItem": rows = await tx.orderItem.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
     case "orderItemAddon": rows = await tx.orderItemAddon.findMany({ where: tenantScope(ctx, { id: { in: ids } }), select }); break;
@@ -378,6 +394,10 @@ export async function insertRows(tx: Tx, ctx: TenantContext, table: RestoreKey, 
     case "dailyMenuItem": return (await tx.dailyMenuItem.createMany({ data: data as Prisma.DailyMenuItemCreateManyInput[], ...opts })).count;
     case "customer": return (await tx.customer.createMany({ data: data as Prisma.CustomerCreateManyInput[], ...opts })).count;
     case "diningTable": return (await tx.diningTable.createMany({ data: data as Prisma.DiningTableCreateManyInput[], ...opts })).count;
+    // A restored bill comes back as it was saved. If it was OPEN and the table has an open bill now, the partial unique
+    // index refuses it and the whole restore rolls back — two open bills for one table never exist.
+    case "tableSession": return (await tx.tableSession.createMany({ data: data as Prisma.TableSessionCreateManyInput[], ...opts })).count;
+    case "tableSessionPayment": return (await tx.tableSessionPayment.createMany({ data: data as Prisma.TableSessionPaymentCreateManyInput[], ...opts })).count;
     case "order": return (await tx.order.createMany({ data: data as Prisma.OrderCreateManyInput[], ...opts })).count;
     case "orderItem": return (await tx.orderItem.createMany({ data: data as Prisma.OrderItemCreateManyInput[], ...opts })).count;
     case "orderItemAddon": return (await tx.orderItemAddon.createMany({ data: data as Prisma.OrderItemAddonCreateManyInput[], ...opts })).count;
@@ -492,8 +512,13 @@ export async function deleteOrdersInRange(tx: Tx, ctx: TenantContext, r: PurgeRa
     counts.payments += (await tx.transaction.deleteMany({ where: tenantScope(ctx, { orderId: { in: chunk } }) })).count;
     counts.orders += (await tx.order.deleteMany({ where: tenantScope(ctx, { id: { in: chunk } }) })).count;
   }
+  // Table bills (RASOIOS-ADR-027): a closed bill whose orders are all gone goes with them, with its payment records
+  // (their ledger rows were deleted with the orders above). A bill with any order left, or still open, stays.
+  const emptyClosed = { status: TableSessionStatus.CLOSED, orders: { none: {} } };
+  await tx.tableSessionPayment.deleteMany({ where: tenantScope(ctx, { tableSession: emptyClosed, transactions: { none: {} } }) });
+  const tableBills = (await tx.tableSession.deleteMany({ where: tenantScope(ctx, { ...emptyClosed, payments: { none: {} } }) })).count;
   counts.dayCloses = (await tx.businessDayClose.deleteMany({ where: tenantScope(ctx, inBusinessDays(r)) })).count;
-  return counts;
+  return { ...counts, tableBills };
 }
 
 /** Customers added in the range who have no orders left. A customer with any remaining order is kept. */

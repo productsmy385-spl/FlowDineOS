@@ -43,6 +43,7 @@ Architecture changes during implementation require a new ADR (brief §56).
 | [RASOIOS-ADR-023](decisions/RASOIOS-ADR-023.md) | Platform renamed FlowDineOS; per-restaurant feature switches (no tiers) | 2026-10-06 | APPROVED | Supersedes ADR-002's "no feature gating" clause only |
 | [RASOIOS-ADR-024](decisions/RASOIOS-ADR-024.md) | Book a Demo, one footer contact section, unlimited order/kitchen card rails | 2026-10-07 | APPROVED | Refines ADR-022/023 |
 | [RASOIOS-ADR-025](decisions/RASOIOS-ADR-025.md) | Printing hardening: error catalogue, Test connection, 30-min KOT retry, one lane per printer, profiles | 2026-10-08 | APPROVED | Refines ADR-007/015 |
+| [RASOIOS-ADR-027](decisions/RASOIOS-ADR-027.md) | Table bills: one consolidated bill per dine-in table session, table payments on the per-order ledger, KOT print choice | 2026-10-13 | PROPOSED (feature requested by owner; design awaits confirmation) | Refines ADR-007/010/026 |
 | [RASOIOS-ADR-026](decisions/RASOIOS-ADR-026.md) | Simplified order workflow: per-restaurant switch, server-side 10-minute auto-READY, Record Payment on the board | 2026-10-13 | PROPOSED (feature requested by owner; scheduler and PREPARING scope await confirmation) | Refines ADR-009/010/023 |
 
 ADR-006…011 were approved by the Project Owner on 2026-09-15 in decision gate S1-P01-T010. The same gate answered Q-004, which added GST receipt presentation to ADR-010 §3.

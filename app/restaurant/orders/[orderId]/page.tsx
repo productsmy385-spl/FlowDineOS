@@ -76,6 +76,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
               {ORDER_TYPE_LABELS[order.orderType]}
             </span>
             {order.tableLabel && <span>Table {order.tableLabel}</span>}
+            {order.tableBill && <span>Bill {order.tableBill.billNumber}</span>}
             <span>{formatBusinessDate(order.businessDate)}</span>
             <span>Priority: {PRIORITY_LABELS[order.priority]}</span>
           </span>
@@ -169,7 +170,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
                       </span>
                     </span>
                     <StatusBadge domain="kot" status={kot.status} />
-                    {kot.printStatus !== "NONE" && <StatusBadge domain="printJob" status={kot.printStatus} />}
+                    {kot.printStatus === "NOT_REQUESTED" ? (
+                      <span className="text-caption text-fg-secondary">Not printed (sent to screen)</span>
+                    ) : (
+                      kot.printStatus !== "NONE" && <StatusBadge domain="printJob" status={kot.printStatus} />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -185,6 +190,15 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
               <CardHeader>
                 <CardTitle>Payment</CardTitle>
               </CardHeader>
+              {order.tableBill && (
+                <p className="mb-3 text-body text-fg-secondary">
+                  {order.tableBill.open ? "Paid with " : "Was paid with "}
+                  <Link href={`/restaurant/orders/tables/${order.tableBill.id}`} className="text-fg-accent hover:underline">
+                    table {order.tableBill.tableLabel}&apos;s bill {order.tableBill.billNumber}
+                  </Link>
+                  {order.tableBill.open ? " — take payment there, for the whole table." : "."}
+                </p>
+              )}
               <PaymentPanel
                 orderId={order.id}
                 orderNumber={order.orderNumber}
@@ -195,7 +209,8 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ or
                 paymentStatus={order.paymentStatus}
                 ledger={ledger}
                 can={{
-                  recordPayment: hasPermission(ctx, "payment:record"),
+                  // An order on an open table bill is paid with the bill (RASOIOS-ADR-027); the server refuses it here too.
+                  recordPayment: hasPermission(ctx, "payment:record") && !order.tableBill?.open,
                   refund: hasPermission(ctx, "refund:create"),
                   complete: allowedActions.includes("COMPLETED"),
                 }}

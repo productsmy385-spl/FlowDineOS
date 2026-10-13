@@ -22,6 +22,7 @@ const ledgerOrderSelect = {
   paidAmount: true,
   refundedAmount: true,
   version: true,
+  tableSession: { select: { id: true, status: true, billNumber: true, tableLabel: true } },
 } satisfies Prisma.OrderSelect;
 
 export type LedgerOrder = Prisma.OrderGetPayload<{ select: typeof ledgerOrderSelect }>;
@@ -110,6 +111,8 @@ export type NewLedgerRow = {
   reason?: string | null;
   businessDate: Date;
   idempotencyKey: string;
+  /** Set when this row is one order's share of a table-bill payment (RASOIOS-ADR-027). */
+  tableSessionPaymentId?: string | null;
 };
 
 /** Appends a SUCCESS ledger row for the caller's tenant, recorded by the caller. */

@@ -5,6 +5,7 @@ import { requireTenantPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
 import { isSimplifiedWorkflowOn } from "@/lib/data/restaurant";
 import { allowedOrderTransitions, getOrderBoard } from "@/lib/services/orders";
+import { listOpenTableBills } from "@/lib/services/table-sessions";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,8 @@ export default async function OrdersPage() {
   // Record Payment on the board belongs to the simplified order workflow; with it off the board is unchanged.
   const canRecordPayment =
     hasPermission(ctx, "payment:record") && hasPermission(ctx, "transaction:read") && (await isSimplifiedWorkflowOn(ctx));
+  // Open table bills (RASOIOS-ADR-027) carry amounts, so only roles that may see money get them.
+  const openTables = hasPermission(ctx, "transaction:read") ? await listOpenTableBills(ctx) : null;
 
   return (
     <div className="flex flex-col gap-6">
@@ -37,7 +40,7 @@ export default async function OrdersPage() {
           ) : undefined
         }
       />
-      <OrderBoard initial={board} transitions={allowedOrderTransitions(ctx)} timezone={ctx.restaurant.timezone} canCreate={canCreate} canRecordPayment={canRecordPayment} />
+      <OrderBoard initial={board} transitions={allowedOrderTransitions(ctx)} timezone={ctx.restaurant.timezone} canCreate={canCreate} canRecordPayment={canRecordPayment} openTables={openTables} />
     </div>
   );
 }

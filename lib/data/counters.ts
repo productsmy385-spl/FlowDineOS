@@ -11,7 +11,13 @@ import type { Tx } from "./tx";
  * row, so every order/KOT gets a distinct consecutive number, and a rolled-back transaction gives its number back.
  * Separate tenants and separate business dates have independent sequences.
  */
-export const COUNTER_LIMITS: Readonly<Record<CounterType, number>> = { ORDER: 9999, KOT: 999 };
+export const COUNTER_LIMITS: Readonly<Record<CounterType, number>> = { ORDER: 9999, KOT: 999, TABLE_BILL: 9999 };
+
+const LIMIT_MESSAGES: Readonly<Record<CounterType, string>> = {
+  ORDER: "This restaurant has reached 9,999 orders for the business day.",
+  KOT: "This restaurant has reached 999 kitchen tickets for the business day.",
+  TABLE_BILL: "This restaurant has reached 9,999 table bills for the business day.",
+};
 
 export async function nextNumber(tx: Tx, ctx: TenantScopedContext, type: CounterType, businessDate: Date): Promise<number> {
   // The business date goes in as an ISO date string, never a timestamp, so the session time zone cannot shift it.
@@ -24,10 +30,7 @@ export async function nextNumber(tx: Tx, ctx: TenantScopedContext, type: Counter
   const value = Number(rows[0].last_value);
   if (value > COUNTER_LIMITS[type]) {
     // Throwing rolls the increment back with the caller's transaction, so the counter stays at the limit.
-    throw new ConflictError(
-      type === "ORDER" ? "This restaurant has reached 9,999 orders for the business day." : "This restaurant has reached 999 kitchen tickets for the business day.",
-      "DAILY_NUMBER_LIMIT",
-    );
+    throw new ConflictError(LIMIT_MESSAGES[type], "DAILY_NUMBER_LIMIT");
   }
   return value;
 }
@@ -35,6 +38,11 @@ export async function nextNumber(tx: Tx, ctx: TenantScopedContext, type: Counter
 /** `YYYYMMDD-NNNN`, e.g. `20260915-0042` (BR-ORD-07). */
 export function formatOrderNumber(businessDate: Date, value: number): string {
   return `${compactIsoDate(businessDate)}-${String(value).padStart(4, "0")}`;
+}
+
+/** `B-YYYYMMDD-NNNN`, e.g. `B-20261013-0003`: a table bill's number, unique per tenant (RASOIOS-ADR-027). */
+export function formatBillNumber(businessDate: Date, value: number): string {
+  return `B-${compactIsoDate(businessDate)}-${String(value).padStart(4, "0")}`;
 }
 
 /** `K-NNN`, e.g. `K-007`, unique per tenant and business date (BR-ORD-07, U-KOT-1). */

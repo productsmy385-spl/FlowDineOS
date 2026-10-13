@@ -272,10 +272,18 @@ export async function listPrintJobs(ctx: TenantContext, filters: PrintJobFilters
  * for each of several (lib/services/printing.ts `queueReceiptForPayment`). Copy order.
  */
 export async function listPaymentReceiptJobs(ctx: TenantContext, orderId: string, transactionId: string): Promise<PrintJobDto[]> {
-  const key = `RECEIPT:PAYMENT:${transactionId}`;
+  return receiptJobsByKey(ctx, `RECEIPT:PAYMENT:${transactionId}`, { orderId });
+}
+
+/** The receipt copies one table-bill payment queued (`RECEIPT:SESSION:{paymentId}[:c{n}]`, RASOIOS-ADR-027). */
+export async function listTableBillReceiptJobs(ctx: TenantContext, paymentId: string): Promise<PrintJobDto[]> {
+  return receiptJobsByKey(ctx, `RECEIPT:SESSION:${paymentId}`, {});
+}
+
+async function receiptJobsByKey(ctx: TenantContext, key: string, extra: { orderId?: string }): Promise<PrintJobDto[]> {
   const rows = await mapErrors("Print job", () =>
     db.printJob.findMany({
-      where: tenantScope(ctx, { orderId, jobType: PrintJobType.RECEIPT, OR: [{ dedupeKey: key }, { dedupeKey: { startsWith: `${key}:c` } }] }),
+      where: tenantScope(ctx, { ...extra, jobType: PrintJobType.RECEIPT, OR: [{ dedupeKey: key }, { dedupeKey: { startsWith: `${key}:c` } }] }),
       select: JOB_SELECT,
       orderBy: [{ copyIndex: "asc" }, { createdAt: "asc" }],
       take: 20,
@@ -514,6 +522,8 @@ export type KotDispatchRow = {
   kotTicketId: string;
   kotNumber: string;
   sectionName: string | null;
+  /** False when the ticket was sent with "Send to KOT only". */
+  printRequested: boolean;
   job: { status: PrintJobStatus; printerName: string; agentStatus: PrintAgentStatus | null; agentLastSeenAt: string | null } | null;
 };
 
@@ -529,6 +539,7 @@ export async function kotDispatchOfOrder(client: Tx, ctx: TenantContext, orderId
     select: {
       id: true,
       kotNumber: true,
+      printRequested: true,
       kitchenSection: { select: { name: true } },
       printJobs: {
         where: { tenantId: ctx.tenantId, jobType: PrintJobType.KOT, isReprint: false },
@@ -544,6 +555,7 @@ export async function kotDispatchOfOrder(client: Tx, ctx: TenantContext, orderId
       kotTicketId: ticket.id,
       kotNumber: ticket.kotNumber,
       sectionName: ticket.kitchenSection?.name ?? null,
+      printRequested: ticket.printRequested,
       job: job
         ? {
             status: job.status,

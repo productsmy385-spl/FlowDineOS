@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Clock, Printer, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
+import { CircleCheck, Clock, MonitorSmartphone, Printer, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 import type { OrderType } from "@prisma/client";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import { DOMAIN_ICONS, MENU_ICONS, isMenuIconKey } from "@/lib/ui/icons";
 import { useConsoleSession } from "@/lib/ui/session-context";
 import { useIdempotencyKey } from "@/lib/ui/use-idempotency-key";
 import { createStaffOrderAction, quoteOrderAction } from "@/app/restaurant/orders/actions";
+import { lookupTableBillAction } from "@/app/restaurant/orders/table-actions";
 import { ORDER_TYPE_LABELS } from "./order-labels";
 import { PosItemDialog, type ChosenLine } from "./pos-item-dialog";
 import { QuantityStepper } from "./quantity-stepper";
@@ -37,7 +38,26 @@ type CartLine = ChosenLine & { key: string };
 
 const ORDER_TYPES: OrderType[] = ["DINE_IN", "TAKEAWAY", "DELIVERY"];
 
-type Saved = { id: string; orderNumber: string; status: string; totalAmount: string | null; currencyCode: string; kitchen: KitchenDispatch | null };
+type Saved = {
+  id: string;
+  orderNumber: string;
+  status: string;
+  totalAmount: string | null;
+  currencyCode: string;
+  kitchen: KitchenDispatch | null;
+  printKot: boolean;
+  tableBill: { id: string; billNumber: string; tableLabel: string; balance: string } | null;
+};
+
+/** The table's open bill as order entry last looked it up (RASOIOS-ADR-027). */
+type TableBillLookup =
+  | { state: "idle" }
+  | { state: "loading" }
+  | { state: "none" }
+  | { state: "open"; bill: { id: string; billNumber: string; tableLabel: string; orderCount: number; balance: string } }
+  | { state: "error"; message: string };
+
+const TABLE_BILL_CONFLICTS = new Set(["TABLE_HAS_OPEN_BILL", "TABLE_BILL_CLOSED", "TABLE_BILL_CHANGED"]);
 
 /**
  * What the person who placed the order is told about each automatic KOT (never "printed" unless the agent said so).
@@ -50,6 +70,7 @@ const DISPATCH_COPY: Record<KotDispatchState, { icon: LucideIcon; tone: string; 
   FAILED: { icon: TriangleAlert, tone: "text-status-danger", text: () => "Print failed — retry it from Printing" },
   NO_PRINTER: { icon: TriangleAlert, tone: "text-status-warning", text: () => "No printer for this station — on the kitchen screen only" },
   AUTO_PRINT_OFF: { icon: Clock, tone: "text-fg-secondary", text: () => "Automatic KOT printing is off — on the kitchen screen" },
+  NOT_PRINTED: { icon: MonitorSmartphone, tone: "text-fg-secondary", text: () => "Sent to the kitchen screen only — not printed" },
 };
 
 function dispatchHeadline(kitchen: KitchenDispatch | null): string {
@@ -65,11 +86,14 @@ export function OrderEntry({
   canSendToKitchen,
   canSetPriority,
   canCreateCustomer,
+  initialTable = "",
 }: {
   catalogue: OrderEntryCatalogue;
   canSendToKitchen: boolean;
   canSetPriority: boolean;
   canCreateCustomer: boolean;
+  /** Table to start with ("Add order" from a table bill). */
+  initialTable?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -82,8 +106,10 @@ export function OrderEntry({
   const [search, setSearch] = React.useState("");
   const [optionsFor, setOptionsFor] = React.useState<string | null>(null);
   const [lines, setLines] = React.useState<CartLine[]>([]);
-  const [orderType, setOrderType] = React.useState<OrderType>(catalogue.defaults.orderType);
-  const [tableLabel, setTableLabel] = React.useState("");
+  const [orderType, setOrderType] = React.useState<OrderType>(initialTable ? "DINE_IN" : catalogue.defaults.orderType);
+  const [tableLabel, setTableLabel] = React.useState(initialTable);
+  const [tableBill, setTableBill] = React.useState<TableBillLookup>({ state: "idle" });
+  const [lookupNonce, setLookupNonce] = React.useState(0);
   const [notes, setNotes] = React.useState("");
   const [urgent, setUrgent] = React.useState(false);
   const [customerName, setCustomerName] = React.useState("");
@@ -139,6 +165,28 @@ export function OrderEntry({
     };
   }, [lines]);
 
+  // Which bill a dine-in order for this table would join — shown before placing it, and sent with it, so the server can
+  // refuse instead of silently joining a bill that was settled in the meantime (RASOIOS-ADR-027).
+  const table = orderType === "DINE_IN" ? tableLabel.trim() : "";
+  React.useEffect(() => {
+    if (!table) {
+      setTableBill({ state: "idle" });
+      return;
+    }
+    let live = true;
+    setTableBill({ state: "loading" });
+    const timer = setTimeout(async () => {
+      const result = await lookupTableBillAction({ tableLabel: table });
+      if (!live) return;
+      if (!result.ok) setTableBill({ state: "error", message: result.error.message });
+      else setTableBill(result.data ? { state: "open", bill: result.data } : { state: "none" });
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [table, lookupNonce]);
+
   function addLine(line: ChosenLine) {
     setLines((current) => [...current, { ...line, key: crypto.randomUUID() }]);
     setOptionsFor(null);
@@ -178,15 +226,19 @@ export function OrderEntry({
     idempotency.reset();
   }
 
-  async function submit() {
+  async function submit(printKot: boolean) {
     if (lines.length === 0) return;
+    if (table && (tableBill.state === "loading" || tableBill.state === "idle")) return;
     setSubmitting(true);
     setFormError(null);
     setLineErrors({});
+    const expectedTableSessionId = !table ? undefined : tableBill.state === "open" ? tableBill.bill.id : tableBill.state === "none" ? null : undefined;
     const result = await createStaffOrderAction({
       idempotencyKey: idempotency.current(),
       orderType,
-      ...(orderType === "DINE_IN" && tableLabel.trim() ? { tableLabel: tableLabel.trim() } : {}),
+      ...(table ? { tableLabel: table } : {}),
+      ...(expectedTableSessionId === undefined ? {} : { expectedTableSessionId }),
+      printKot,
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(urgent && canSetPriority ? { priority: "HIGH" as const } : {}),
       ...(canCreateCustomer && customerName.trim()
@@ -203,6 +255,14 @@ export function OrderEntry({
     });
     setSubmitting(false);
 
+    if (!result.ok && TABLE_BILL_CONFLICTS.has(result.error.code)) {
+      // The table's bill changed since it was shown (settled, or opened by someone else): show the new state and let
+      // the person decide; nothing was saved. The same cart is a new attempt, so it gets a new key.
+      setFormError(result.error.message);
+      idempotency.reset();
+      setLookupNonce((n) => n + 1);
+      return;
+    }
     if (!result.ok) {
       // `items.<index>.<field>` from the pricing engine points at the offending line (api.md SA-ORD-01).
       const perLine: Record<number, string> = {};
@@ -216,9 +276,24 @@ export function OrderEntry({
     }
 
     const { order, kitchen } = result.data;
-    setSaved({ id: order.id, orderNumber: order.orderNumber, status: order.status, totalAmount: order.totalAmount, currencyCode: order.currencyCode, kitchen });
+    // The bill the order is now on, as the server has it (its balance includes this order).
+    const bill = table ? await lookupTableBillAction({ tableLabel: table }) : null;
+    setSaved({
+      id: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      totalAmount: order.totalAmount,
+      currencyCode: order.currencyCode,
+      kitchen,
+      printKot,
+      tableBill: bill?.ok && bill.data ? { id: bill.data.id, billNumber: bill.data.billNumber, tableLabel: bill.data.tableLabel, balance: bill.data.balance } : null,
+    });
     setPanelOpen(false);
-    toast.success(order.status === "ACCEPTED" ? `Order ${order.orderNumber} placed.${dispatchHeadline(kitchen)}` : `Order ${order.orderNumber} saved.`);
+    toast.success(
+      order.status === "ACCEPTED"
+        ? `Order ${order.orderNumber} placed.${printKot ? dispatchHeadline(kitchen) : " KOT sent to the kitchen screen — not printed."}`
+        : `Order ${order.orderNumber} saved.`,
+    );
     // The key has done its job; the next order is a new one.
     idempotency.reset();
     router.refresh();
@@ -232,11 +307,16 @@ export function OrderEntry({
           <div>
             <h2 className="text-heading text-fg-primary">Order {saved.orderNumber} {saved.status === "ACCEPTED" ? "placed" : "saved"}</h2>
             <p className="text-body text-fg-secondary">
-              {saved.status === "ACCEPTED" ? "Sent to the kitchen." : "Waiting to be accepted."}
+              {saved.status === "ACCEPTED" ? (saved.printKot ? "Sent to the kitchen." : "Sent to the kitchen screen — not printed.") : "Waiting to be accepted."}
               {saved.totalAmount ? ` Total ${formatMoney(saved.totalAmount, saved.currencyCode, locale)}.` : ""}
             </p>
           </div>
         </div>
+        {saved.tableBill && (
+          <Alert tone="neutral" title={`On table ${saved.tableBill.tableLabel}'s bill ${saved.tableBill.billNumber}`}>
+            The table now owes {formatMoney(saved.tableBill.balance, saved.currencyCode, locale)} in total. Take payment on the table bill.
+          </Alert>
+        )}
         {saved.kitchen && saved.kitchen.tickets.length > 0 && (
           <ul aria-label="Kitchen tickets" className="flex flex-col gap-2 rounded-xl border border-border-subtle p-3">
             {saved.kitchen.tickets.map((ticket) => {
@@ -254,12 +334,36 @@ export function OrderEntry({
           </ul>
         )}
         <div className="flex flex-wrap gap-3">
-          <Link
-            href={`/restaurant/orders/${saved.id}`}
-            className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-subheading text-action-primary-fg hover:bg-action-primary-hover"
-          >
-            View order
-          </Link>
+          {saved.tableBill ? (
+            <Link
+              href={`/restaurant/orders/tables/${saved.tableBill.id}`}
+              className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-subheading text-action-primary-fg hover:bg-action-primary-hover"
+            >
+              Open table bill
+            </Link>
+          ) : (
+            <Link
+              href={`/restaurant/orders/${saved.id}`}
+              className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-subheading text-action-primary-fg hover:bg-action-primary-hover"
+            >
+              View order
+            </Link>
+          )}
+          {saved.tableBill && (
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => {
+                const keepTable = saved.tableBill!.tableLabel;
+                setSaved(null);
+                resetForNextOrder();
+                setOrderType("DINE_IN");
+                setTableLabel(keepTable);
+              }}
+            >
+              Add another order to this table
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="lg"
@@ -291,6 +395,9 @@ export function OrderEntry({
     );
   }
 
+  // A dine-in order waits for the table lookup, so it is always placed knowing which bill it joins.
+  const tableBusy = Boolean(table) && (tableBill.state === "loading" || tableBill.state === "idle");
+
   const orderPanel = (
     <div className="flex flex-col gap-4">
       <Select
@@ -306,9 +413,28 @@ export function OrderEntry({
           size="touch"
           maxLength={20}
           value={tableLabel}
-          onChange={(event) => setTableLabel(event.target.value)}
+          onChange={(event) => {
+            setTableLabel(event.target.value);
+            setFormError(null);
+          }}
           help="Letters, digits, spaces and dashes."
         />
+      )}
+      {table && (
+        <p role="status" aria-live="polite" className="-mt-2 text-caption">
+          {tableBill.state === "loading" || tableBill.state === "idle" ? (
+            <span className="text-fg-secondary">Checking table {table}…</span>
+          ) : tableBill.state === "open" ? (
+            <span className="text-fg-primary">
+              Adds to table {tableBill.bill.tableLabel}&apos;s open bill {tableBill.bill.billNumber} ({tableBill.bill.orderCount}{" "}
+              {tableBill.bill.orderCount === 1 ? "order" : "orders"}, {formatMoney(tableBill.bill.balance, currency, locale)} due).
+            </span>
+          ) : tableBill.state === "none" ? (
+            <span className="text-fg-secondary">Starts a new bill for table {table}.</span>
+          ) : (
+            <span className="text-status-danger">{tableBill.message}</span>
+          )}
+        </p>
       )}
 
       {lines.length === 0 ? (
@@ -387,17 +513,47 @@ export function OrderEntry({
 
       {formError && <Alert tone="danger">{formError}</Alert>}
 
-      <Button
-        variant="primary"
-        size="touch"
-        className="w-full"
-        loading={submitting}
-        loadingLabel={sendToKitchen && canSendToKitchen ? "Placing order…" : "Saving…"}
-        disabled={lines.length === 0}
-        onClick={() => void submit()}
-      >
-        {sendToKitchen && canSendToKitchen ? "Place order" : "Save order"}
-      </Button>
+      {sendToKitchen && canSendToKitchen ? (
+        // The print choice (RASOIOS-ADR-027): both save the order and put its KOT on the kitchen screen; only the first
+        // sends it to the kitchen printer. Printing is the default, as before.
+        <div className="flex flex-col gap-2">
+          <Button
+            variant="primary"
+            size="touch"
+            className="w-full"
+            icon={Printer}
+            loading={submitting}
+            loadingLabel="Placing order…"
+            disabled={lines.length === 0 || tableBusy}
+            onClick={() => void submit(true)}
+          >
+            Send to KOT + Print
+          </Button>
+          <Button
+            variant="secondary"
+            size="touch"
+            className="w-full"
+            icon={MonitorSmartphone}
+            disabled={lines.length === 0 || tableBusy || submitting}
+            onClick={() => void submit(false)}
+          >
+            Send to KOT only (don&apos;t print)
+          </Button>
+          <p className="text-caption text-fg-secondary">&ldquo;KOT only&rdquo; shows the ticket on the kitchen screen without printing it.</p>
+        </div>
+      ) : (
+        <Button
+          variant="primary"
+          size="touch"
+          className="w-full"
+          loading={submitting}
+          loadingLabel="Saving…"
+          disabled={lines.length === 0 || tableBusy}
+          onClick={() => void submit(true)}
+        >
+          Save order
+        </Button>
+      )}
     </div>
   );
 

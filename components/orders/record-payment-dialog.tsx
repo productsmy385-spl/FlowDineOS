@@ -32,7 +32,7 @@ const METHODS = [
   { value: "UPI", label: "UPI" },
 ] as const;
 
-const RECEIPT_STATUS_LABEL: Record<ReceiptCopyView["status"], string> = {
+export const RECEIPT_STATUS_LABEL: Record<ReceiptCopyView["status"], string> = {
   QUEUED: "Queued",
   PRINTING: "Sending",
   RETRYING: "Retrying",
@@ -41,7 +41,7 @@ const RECEIPT_STATUS_LABEL: Record<ReceiptCopyView["status"], string> = {
   CANCELLED: "Cancelled",
 };
 
-const RECEIPT_STATUS_TONE: Record<ReceiptCopyView["status"], string> = {
+export const RECEIPT_STATUS_TONE: Record<ReceiptCopyView["status"], string> = {
   QUEUED: "text-fg-secondary",
   PRINTING: "text-fg-accent",
   RETRYING: "text-status-warning",
@@ -50,10 +50,10 @@ const RECEIPT_STATUS_TONE: Record<ReceiptCopyView["status"], string> = {
   CANCELLED: "text-fg-secondary",
 };
 
-const IN_FLIGHT: ReadonlySet<ReceiptCopyView["status"]> = new Set(["QUEUED", "PRINTING", "RETRYING"]);
-const RECEIPT_POLL_MS = 3_000;
+export const IN_FLIGHT: ReadonlySet<ReceiptCopyView["status"]> = new Set(["QUEUED", "PRINTING", "RETRYING"]);
+export const RECEIPT_POLL_MS = 3_000;
 /** Stop polling after this long; the Printing page keeps the full history. */
-const RECEIPT_POLL_LIMIT_MS = 120_000;
+export const RECEIPT_POLL_LIMIT_MS = 120_000;
 
 export function RecordPaymentDialog({ orderId, onClose, onSettled }: { orderId: string | null; onClose: () => void; onSettled: () => void }) {
   const [view, setView] = React.useState<SettlementView | null>(null);

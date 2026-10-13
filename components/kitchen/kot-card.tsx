@@ -141,7 +141,11 @@ export function KotCard({
                   <>
                     <dt className="text-fg-secondary">Ticket print</dt>
                     <dd className="min-w-0">
-                      <StatusBadge domain="printJob" status={ticket.printStatus} />
+                      {ticket.printStatus === "NOT_REQUESTED" ? (
+                        <span className="text-fg-secondary">Not printed (sent to screen)</span>
+                      ) : (
+                        <StatusBadge domain="printJob" status={ticket.printStatus} />
+                      )}
                     </dd>
                   </>
                 )}

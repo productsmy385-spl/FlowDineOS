@@ -131,9 +131,24 @@ async function buildFixture() {
     },
   });
   const diningTable = await db.diningTable.create({ data: { tenantId: tenant.id, label: "T1", publicCode: `c${randomUUID().replace(/-/g, "").slice(0, 11)}` } });
+  // An open table bill and a table payment (RASOIOS-ADR-027) for their CHECKs.
+  const tableSession = await db.tableSession.create({
+    data: { tenantId: tenant.id, tableLabel: "T1", tableKey: "T1", billNumber: "B-20260915-0001", businessDate: new Date("2026-09-15T00:00:00Z"), openedByUserId: user.id },
+  });
+  const tableSessionPayment = await db.tableSessionPayment.create({
+    data: {
+      tenantId: tenant.id,
+      tableSessionId: tableSession.id,
+      idempotencyKey: randomUUID(),
+      paymentMethod: "CARD",
+      amount: new Prisma.Decimal("10.00"),
+      businessDate: new Date("2026-09-15T00:00:00Z"),
+      recordedByUserId: user.id,
+    },
+  });
   await db.tenantFeature.create({ data: { tenantId: tenant.id, featureKey: "SOCIAL", enabled: false } });
   const demoRequest = await db.demoRequest.create({ data: { name: "N", businessName: "B", phone: "+919390038335", email: "d@example.test", city: "C", preferredDate: new Date("2030-01-01T00:00:00Z"), preferredTime: "10:00" } });
-  return { demoRequest, diningTable, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, printerCheck, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
+  return { demoRequest, diningTable, tableSession, tableSessionPayment, tenant, restaurant, user, section, category, item, variant, addon, order, orderItem: items[0], orderItemAddon, kot, kotItem, payment, hours, dayClose, agent, printer, printJob, printerCheck, websiteSection, mediaAsset, staffCredential, staffSession, bucketKey };
 }
 
 beforeAll(async () => {
@@ -222,6 +237,9 @@ const CHECK_CASES: CheckCase[] = [
   { constraint: "printers_archived_inactive_check", table: "printers", set: "archived_at = now(), is_active = true", where: byId(() => f.printer.id) },
   { constraint: "printer_checks_elapsed_ms_check", table: "printer_checks", set: "elapsed_ms = -1", where: byId(() => f.printerCheck.id) },
   { constraint: "printer_checks_completed_check", table: "printer_checks", set: "ok = NULL", where: byId(() => f.printerCheck.id) },
+  // E19a TABLE_SESSION (RASOIOS-ADR-027): a closed bill records when; a table payment is never zero or negative.
+  { constraint: "table_sessions_closed_consistent", table: "table_sessions", set: "status = 'CLOSED'", where: byId(() => f.tableSession.id) },
+  { constraint: "table_session_payments_amount_positive", table: "table_session_payments", set: "amount = 0", where: byId(() => f.tableSessionPayment.id) },
   { constraint: "print_jobs_kot_ticket_check", table: "print_jobs", set: "job_type = 'KOT'", where: byId(() => f.printJob.id) },
   // E02 RESTAURANT — website theme and identity (migration 0002, ADR-013 §6)
   { constraint: "restaurants_brand_accent_hex_check", table: "restaurants", set: "brand_accent_hex = '#12ab34'", where: byId(() => f.restaurant.id) },

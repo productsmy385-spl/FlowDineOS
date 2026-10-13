@@ -24,6 +24,9 @@ import { Wallet } from "lucide-react";
 import { OrderCard } from "./order-card";
 import { ORDER_TYPE_LABELS, TRANSITION_LABELS, type TransitionTarget } from "./order-labels";
 import { RecordPaymentDialog } from "./record-payment-dialog";
+import { BillStateChip } from "./table-bill-panel";
+import { listOpenTableBillsAction } from "@/app/restaurant/orders/table-actions";
+import type { OpenTableBill } from "@/lib/services/table-sessions";
 
 /**
  * Live order board (S1-P12-T008; frontend.md §5.3, api.md LD-ORD-01 / RH-ORD-01 / SA-ORD-02).
@@ -72,6 +75,7 @@ export function OrderBoard({
   timezone,
   canCreate,
   canRecordPayment = false,
+  openTables = null,
 }: {
   initial: OrderBoardPage;
   transitions: Record<OrderStatus, TransitionTarget[]>;
@@ -79,6 +83,8 @@ export function OrderBoard({
   canCreate: boolean;
   /** Simplified order workflow on and the caller may record payments: active unpaid cards get Record Payment. */
   canRecordPayment?: boolean;
+  /** Open table bills (RASOIOS-ADR-027); null for a role that may not see amounts. */
+  openTables?: OpenTableBill[] | null;
 }) {
   const session = useConsoleSession();
   const locale = localeForCountry(session?.activeTenant.countryCode);
@@ -92,8 +98,10 @@ export function OrderBoard({
   const [cancelling, setCancelling] = React.useState<OrderBoardItem | null>(null);
   const [cancelError, setCancelError] = React.useState<string | null>(null);
   const [paying, setPaying] = React.useState<string | null>(null);
+  const [tables, setTables] = React.useState<OpenTableBill[] | null>(openTables);
   const [announcement, setAnnouncement] = React.useState("");
   const knownIds = React.useRef(new Set(initial.items.map((order) => order.id)));
+  const canSeeTables = openTables !== null;
 
   // One clock for every card, so the waiting times on the board always agree.
   React.useEffect(() => {
@@ -114,7 +122,13 @@ export function OrderBoard({
     }
     // A complete full page replaces the board, so an order deleted elsewhere disappears without a reload.
     setOrders((current) => sortForBoard(meta.full && !page.hasMore ? page.items : mergeDelta(current, page.items)));
-  }, []);
+    // Any order change can change a table's bill (a new order, a payment, a cancellation): refresh the open tables.
+    if (canSeeTables && (page.items.length > 0 || meta.full)) {
+      void listOpenTableBillsAction().then((result) => {
+        if (result.ok) setTables(result.data as OpenTableBill[]);
+      });
+    }
+  }, [canSeeTables]);
 
   const { stale, lastSuccessAt, refetch } = usePolling<OrderBoardPage>({
     url: "/api/v1/orders",
@@ -200,6 +214,32 @@ export function OrderBoard({
     <div className="flex flex-col gap-6">
       <StaleBanner stale={stale} lastSuccessAt={lastSuccessAt} timezone={timezone} />
 
+      {tables && tables.length > 0 && (
+        <section aria-labelledby="open-tables-heading" className="flex min-w-0 flex-col gap-2">
+          <h2 id="open-tables-heading" className="text-label text-fg-primary">
+            Open tables <span className="text-numeric text-caption text-fg-secondary">{tables.length}</span>
+          </h2>
+          <ul className="-mx-4 flex min-w-0 gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
+            {tables.map((table) => (
+              <li key={table.id} className="shrink-0">
+                <Link
+                  href={`/restaurant/orders/tables/${table.id}`}
+                  className="flex min-h-11 flex-col rounded-xl border border-border-subtle bg-card px-3 py-2 transition-colors duration-fast ease-standard hover:border-border-strong"
+                >
+                  <span className="flex items-center gap-2 text-label text-fg-primary">
+                    Table {table.tableLabel}
+                    <BillStateChip state={table.state} />
+                  </span>
+                  <span className="text-caption text-fg-secondary">
+                    {table.orderCount} {table.orderCount === 1 ? "order" : "orders"} · <span className="text-numeric">{formatMoney(table.balance, session?.activeTenant.currencyCode ?? "INR", locale)}</span> due
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         {/* A swipeable rail on a phone (no scrollbar), wrapping rows from a tablet up — never wider than the page. */}
         <div role="tablist" aria-label="Order status" className="-mx-4 flex min-w-0 flex-nowrap gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
@@ -261,7 +301,9 @@ export function OrderBoard({
           renderCard={(order, state) => {
             const targets = transitions[order.status] ?? [];
             const forward = targets.filter((target) => target !== "CANCELLED");
-            const payable = canRecordPayment && (order.paymentStatus === "UNPAID" || order.paymentStatus === "PARTIALLY_PAID");
+            // An order on an open table bill is paid with the whole table, never on its own (RASOIOS-ADR-027).
+            const onTableBill = order.openTableBillId !== null;
+            const payable = canRecordPayment && !onTableBill && (order.paymentStatus === "UNPAID" || order.paymentStatus === "PARTIALLY_PAID");
             return (
               <OrderCard
                 order={order}
@@ -270,8 +312,17 @@ export function OrderBoard({
                 active={state.active}
                 fresh={state.fresh}
                 primaryAction={
-                  forward.length > 0 || payable ? (
+                  forward.length > 0 || payable || (onTableBill && canSeeTables) ? (
                     <span className="flex flex-wrap gap-2">
+                      {onTableBill && canSeeTables && (
+                        <Link
+                          href={`/restaurant/orders/tables/${order.openTableBillId}`}
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border-strong px-3 text-label text-fg-primary hover:bg-raised"
+                        >
+                          <Wallet className="size-4" aria-hidden />
+                          Table bill
+                        </Link>
+                      )}
                       {payable && (
                         <Button size="sm" variant="primary" icon={Wallet} disabled={pendingId === order.id} onClick={() => setPaying(order.id)}>
                           Record Payment

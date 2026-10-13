@@ -309,6 +309,34 @@ export async function createFullTenant(db: Db, label: string) {
       recordedByUserId: user.id,
     },
   });
+  // A closed table bill (RASOIOS-ADR-027) the order sits on, with a table payment that the fixture payment belongs
+  // to — so TC-DB-004 has a child row for orders(tenant_id, table_session_id), table_session_payments(tenant_id,
+  // table_session_id) and transactions(tenant_id, table_session_payment_id).
+  const tableSession = await db.tableSession.create({
+    data: {
+      tenantId: tenant.id,
+      tableLabel: "T1",
+      tableKey: "T1",
+      billNumber: `B-20260915-${label === "A" ? "0001" : "0002"}`,
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      status: "CLOSED",
+      closedAt: new Date("2026-09-15T12:00:00.000Z"),
+      openedByUserId: user.id,
+    },
+  });
+  await db.order.update({ where: { id: order.id }, data: { tableSessionId: tableSession.id } });
+  const tableSessionPayment = await db.tableSessionPayment.create({
+    data: {
+      tenantId: tenant.id,
+      tableSessionId: tableSession.id,
+      idempotencyKey: randomUUID(),
+      paymentMethod: PaymentMethod.CARD,
+      amount: new Prisma.Decimal("10.00"),
+      businessDate: new Date("2026-09-15T00:00:00.000Z"),
+      recordedByUserId: user.id,
+    },
+  });
+  await db.transaction.update({ where: { id: payment.id }, data: { tableSessionPaymentId: tableSessionPayment.id } });
   const agent = await createPrintAgent(db, tenant.id, user.id);
   // TC-DB-004 walks every composite foreign key and needs a row on each child side to push across the tenant
   // boundary. Without this, `printer_discoveries(tenant_id, print_agent_id)` has nothing to test and the key goes
@@ -404,5 +432,5 @@ export async function createFullTenant(db: Db, label: string) {
     },
   });
 
-  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, agent, printerDiscovery, staffUser, staffMembership, staffCredential, staffSession, printer, printJob, printerCheck, socialPost, dayClose, websiteSection, audit };
+  return { tenant, restaurant, user, membership, hours, section, category, menuItem, variant, addon, dailyMenu, copiedDailyMenu, dailyMenuItem, customer, order, orderItem, orderItemAddon, kot, kotItem, payment, refund, tableSession, tableSessionPayment, agent, printerDiscovery, staffUser, staffMembership, staffCredential, staffSession, printer, printJob, printerCheck, socialPost, dayClose, websiteSection, audit };
 }

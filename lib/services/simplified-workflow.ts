@@ -120,7 +120,7 @@ export type ReceiptCopyView = {
   error: string | null;
 };
 
-function receiptCopyView(job: PrintJobDto): ReceiptCopyView {
+export function receiptCopyView(job: PrintJobDto): ReceiptCopyView {
   return {
     printJobId: job.id,
     copyLabel: job.copyLabel,
@@ -171,9 +171,19 @@ async function attachCustomer(ctx: TenantContext, orderId: string, existing: boo
 
 async function completeIfAllowed(ctx: TenantContext, orderId: string, payment: PaymentResult): Promise<{ completion: CompletionOutcome; message: string | null }> {
   if (payment.paymentStatus !== PaymentStatus.PAID) return { completion: "NOT_PAID", message: `A balance of ${payment.balance} is still due.` };
+  return completeOrderIfReady(ctx, orderId);
+}
+
+/**
+ * Completes a paid order through the existing state machine when it is READY (READY → COMPLETED requires PAID,
+ * BR-ORD-06) and the caller may complete orders. Anything else is reported, never forced: an order still in the
+ * kitchen stays open, a cancelled one is untouched.
+ */
+export async function completeOrderIfReady(ctx: TenantContext, orderId: string): Promise<{ completion: CompletionOutcome; message: string | null }> {
   if (!hasPermission(ctx, "order:complete")) return { completion: "NOT_PERMITTED", message: "Paid in full. Your role can't complete orders." };
 
   const order = required(await findOrderDetail(ctx, orderId), "Order");
+  if (order.paymentStatus !== PaymentStatus.PAID) return { completion: "NOT_PAID", message: `A balance of ${order.balanceDue} is still due.` };
   if (order.status === OrderStatus.COMPLETED) return { completion: "ALREADY_COMPLETED", message: null };
   if (order.status !== OrderStatus.READY) {
     return { completion: "NOT_READY", message: "Paid in full. Complete the order once it is ready." };

@@ -50,6 +50,8 @@ export type ReceiptDocumentInput = {
   totals: { subtotal: string; tax: string; discount: string; total: string; paid: string; refunded: string; balance: string };
   ledger: readonly ReceiptDocumentLedgerEntry[];
   footer: string | null;
+  /** A table bill (RASOIOS-ADR-027): the order numbers it covers, printed under the bill number. */
+  orderReferences?: readonly string[];
   isReprint?: boolean;
   copyLabel?: string | null;
   copyIndex?: number;
@@ -94,6 +96,9 @@ export function renderReceiptDocument(input: ReceiptDocumentInput): PrintDocumen
   if (input.copyLabel) blocks.push({ type: "text", text: `*** ${input.copyLabel} ***`, align: "center", bold: true });
   if (input.isReprint) blocks.push({ type: "text", text: "*** REPRINT ***", align: "center", bold: true });
   blocks.push(row("Receipt", sanitizeLine(input.orderNumber, 24)));
+  if (input.orderReferences && input.orderReferences.length > 0) {
+    blocks.push(...line(`Orders: ${input.orderReferences.map((ref) => sanitizeLine(ref, 24)).join(", ")}`));
+  }
   blocks.push(row("Date", printableTimestamp(input.createdAt, input.timeZone)));
   blocks.push(row("Type", ORDER_TYPE_LABELS[input.orderType]));
   if (input.tableLabel) blocks.push(row("Table", sanitizeLine(input.tableLabel, 20)));

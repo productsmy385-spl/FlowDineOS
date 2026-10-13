@@ -590,6 +590,100 @@ async function queueReceipt(
   return result;
 }
 
+// ─── Table-bill receipt (RASOIOS-ADR-027) ───
+
+/** Everything one consolidated table receipt prints. Amounts are decimal strings built from the orders' snapshots. */
+export type TableBillReceipt = {
+  billNumber: string;
+  tableLabel: string;
+  orderNumbers: readonly string[];
+  openedAt: Date;
+  customerName: string | null;
+  items: Parameters<typeof renderReceiptDocument>[0]["items"];
+  totals: Parameters<typeof renderReceiptDocument>[0]["totals"];
+  ledger: Parameters<typeof renderReceiptDocument>[0]["ledger"];
+};
+
+/**
+ * Queues the one customer receipt of a settled table bill, keyed to the payment that settled it:
+ * `RECEIPT:SESSION:{paymentId}` (with `:c{n}` per copy). Same printer, profile, copy count and copy labels as an order's
+ * receipt; same document format, so installed agents print it unchanged. A repeated call — a retry, a double submit, a
+ * refresh — finds the same dedupe keys and creates nothing new (ON CONFLICT DO NOTHING).
+ *
+ * Never throws: the payment has already committed. `printReceipt: true` queues even when the printer's automatic
+ * receipt is off (staff pressed Print).
+ */
+export async function queueTableBillReceipt(
+  ctx: TenantContext,
+  paymentId: string,
+  receipt: TableBillReceipt,
+  options: { printReceipt?: boolean } = {},
+): Promise<ReceiptQueueOutcome> {
+  const dedupe = `RECEIPT:SESSION:${paymentId}`;
+  try {
+    const result = await withTx(ctx, async (tx) => {
+      const printer = await resolveReceiptPrinter(tx, ctx);
+      if (!printer) return { status: "NO_PRINTER" as const };
+      if (options.printReceipt === undefined && !printer.autoPrintReceipt) return { status: "NOT_REQUESTED" as const };
+      const profile = await printingProfile(tx, ctx);
+      const copyCount = Math.max(MIN_PRINT_COPIES, Math.min(MAX_PRINT_COPIES, printer.receiptCopies ?? 2));
+      const ids: string[] = [];
+
+      for (let copyIndex = 1; copyIndex <= copyCount; copyIndex++) {
+        const copyLabel = receiptCopyLabel(copyIndex, copyCount);
+        const document = renderReceiptDocument({
+          widthMm: printer.paperWidthMm,
+          restaurantName: profile.name,
+          addressLines: profile.addressLines,
+          phone: profile.phoneE164,
+          gstin: profile.gstin,
+          orderNumber: receipt.billNumber,
+          orderType: "DINE_IN",
+          tableLabel: receipt.tableLabel,
+          createdAt: receipt.openedAt,
+          timeZone: ctx.restaurant.timezone,
+          currencyCode: ctx.restaurant.currencyCode,
+          customerName: receipt.customerName,
+          items: receipt.items,
+          totals: receipt.totals,
+          ledger: receipt.ledger,
+          footer: profile.receiptFooter,
+          orderReferences: receipt.orderNumbers,
+          copyLabel,
+          copyIndex,
+          copyCount,
+        });
+        const { id, created } = await createPrintJob(tx, ctx, {
+          printerId: printer.id,
+          jobType: PrintJobType.RECEIPT,
+          dedupeKey: copyCount === 1 ? dedupe : `${dedupe}:c${copyIndex}`,
+          payload: document,
+          orderId: null,
+          requestedByUserId: ctx.userId,
+          copyIndex,
+          copyCount,
+          copyLabel,
+          trigger: options.printReceipt ? "manual" : "automatic",
+        });
+        if (created) {
+          await audit(tx, ctx, {
+            action: "print_job.created",
+            resourceType: "print_job",
+            resourceId: id,
+            after: { jobType: PrintJobType.RECEIPT, printerId: printer.id, billNumber: receipt.billNumber, tableSessionPaymentId: paymentId, copyCount, copyIndex, copyLabel },
+          });
+        }
+        ids.push(id);
+      }
+      return { status: "QUEUED" as const, printJobId: ids[0], printJobIds: ids, copiesQueued: ids.length };
+    });
+    return result;
+  } catch (error) {
+    logger.error("receipt.table_bill_print_failed", { requestId: ctx.requestId, tenantId: ctx.tenantId, paymentId, error: String(error) });
+    return { status: "FAILED", error: "Payment recorded successfully, but receipt printing failed." };
+  }
+}
+
 /** SA-PRN-04 — a server-built test page for one of the caller's active printers. Rate limited to 6/min per printer. */
 export async function createTestPrintJob(ctx: TenantContext, printerId: string): Promise<PrintJobDto> {
   // Counted before the printer is looked up, so a caller cannot use the endpoint as a printer-existence oracle by
@@ -1008,9 +1102,10 @@ export async function getAgentConfig(ctx: AgentContext): Promise<{ agentId: stri
  * - FAILED: the job already failed permanently (retry from the printing console).
  * - NO_PRINTER: no active printer serves this kitchen section; the ticket is on the kitchen screen only.
  * - AUTO_PRINT_OFF: the restaurant turned automatic KOT printing off.
+ * - NOT_PRINTED: staff chose "Send to KOT only"; the ticket is on the kitchen screen and no job was created.
  * Never "printed" on assumption: the order itself succeeded either way (a printer never blocks an order).
  */
-export type KotDispatchState = "QUEUED" | "PRINTED" | "AGENT_OFFLINE" | "FAILED" | "NO_PRINTER" | "AUTO_PRINT_OFF";
+export type KotDispatchState = "QUEUED" | "PRINTED" | "AGENT_OFFLINE" | "FAILED" | "NO_PRINTER" | "AUTO_PRINT_OFF" | "NOT_PRINTED";
 export type KitchenDispatch = {
   tickets: Array<{ kotNumber: string; sectionName: string | null; printerName: string | null; state: KotDispatchState }>;
 };
@@ -1024,7 +1119,7 @@ export async function kitchenDispatchOfOrder(ctx: TenantContext, orderId: string
   return {
     tickets: rows.map((row) => {
       let state: KotDispatchState;
-      if (!row.job) state = autoPrintKot ? "NO_PRINTER" : "AUTO_PRINT_OFF";
+      if (!row.job) state = !row.printRequested ? "NOT_PRINTED" : autoPrintKot ? "NO_PRINTER" : "AUTO_PRINT_OFF";
       else if (row.job.status === PrintJobStatus.PRINTED) state = "PRINTED";
       else if (row.job.status === PrintJobStatus.FAILED) state = "FAILED";
       else if (!row.job.agentStatus || !isAgentOnline({ status: row.job.agentStatus, lastSeenAt: row.job.agentLastSeenAt }, at)) state = "AGENT_OFFLINE";

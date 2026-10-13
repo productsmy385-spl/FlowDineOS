@@ -51,8 +51,12 @@ type OrderLine = OrderRoundForKot["items"][number];
  * of the round's lines (lines without a section share one ticket), each with its K-NNN number from the counter and
  * immutable item snapshots. Idempotent per (order, section, round) (U-KOT-2): sections that already have a ticket are
  * skipped, so a retried acceptance creates nothing. Audits `kot.generated` per ticket. Returns the new ticket ids.
+ *
+ * `print: false` is "Send to KOT only" (RASOIOS-ADR-027): the tickets are created and reach the kitchen screen exactly
+ * as usual, but no print job is queued for them now or by any later retry — there is no job to retry.
  */
-export async function generateKotsForRound(tx: Tx, ctx: TenantContext, orderId: string, round = 1): Promise<string[]> {
+export async function generateKotsForRound(tx: Tx, ctx: TenantContext, orderId: string, round = 1, options: { print?: boolean } = {}): Promise<string[]> {
+  const print = options.print ?? true;
   const order = required(await findOrderRoundForKot(tx, ctx, orderId, round), "Order");
   const existing = await kotSectionsOfRound(tx, ctx, orderId, round);
 
@@ -83,20 +87,21 @@ export async function generateKotsForRound(tx: Tx, ctx: TenantContext, orderId: 
         addonsSnapshot: line.addons.length ? line.addons.map((a) => a.nameSnapshot).join(", ").slice(0, 280) : null,
         instructionsSnapshot: line.specialInstructions,
       })),
+      printRequested: print,
     });
     await audit(tx, ctx, {
       action: "kot.generated",
       resourceType: "kot_ticket",
       resourceId: id,
-      after: { orderId: order.id, kitchenSectionId, kotNumber, roundNumber: round, status: "QUEUED", itemCount: lines.length },
+      after: { orderId: order.id, kitchenSectionId, kotNumber, roundNumber: round, status: "QUEUED", itemCount: lines.length, printRequested: print },
     });
     created.push(id);
   }
   if (created.length > 0) {
-    logger.info("kot.generated", { requestId: ctx.requestId, tenantId: ctx.tenantId, orderId, round, count: created.length });
+    logger.info("kot.generated", { requestId: ctx.requestId, tenantId: ctx.tenantId, orderId, round, count: created.length, printRequested: print });
     // S1-P16-T003: KOT print jobs are queued in this same transaction, so a ticket and its job commit together
     // (ADR-007 §6). Honours RESTAURANT.auto_print_kot and creates nothing when no printer serves the section.
-    await enqueueKotPrintJobs(tx, ctx, created);
+    if (print) await enqueueKotPrintJobs(tx, ctx, created);
   }
   return created;
 }

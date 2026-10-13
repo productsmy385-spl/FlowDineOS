@@ -338,6 +338,7 @@ enum BackupReminder {
 enum CounterType {
   ORDER
   KOT
+  TABLE_BILL
 
   @@map("counter_type")
 }
@@ -389,6 +390,8 @@ model Tenant {
   counters          TenantCounter[]
   diningTables      DiningTable[]
   features          TenantFeature[]
+  tableSessions     TableSession[]
+  tableSessionPayments TableSessionPayment[]
 
   @@index([status])
   @@map("tenants")
@@ -634,6 +637,9 @@ model User {
   endedStaffSessions     StaffSession[]     @relation("StaffSessionEndedBy")
   cancelledOrders        Order[]            @relation("OrderCancelledBy")
   recordedTransactions   Transaction[]      @relation("TransactionRecordedBy")
+  openedTableSessions    TableSession[]     @relation("TableSessionOpenedBy")
+  closedTableSessions    TableSession[]     @relation("TableSessionClosedBy")
+  recordedTablePayments  TableSessionPayment[] @relation("TableSessionPaymentRecordedBy")
   voidedTransactions     Transaction[]      @relation("TransactionVoidedBy")
   businessDayCloses      BusinessDayClose[] @relation("DayCloseClosedBy")
   createdPrintAgents     PrintAgent[]       @relation("PrintAgentCreatedBy")
@@ -901,6 +907,9 @@ model Order {
   cancelledAt       DateTime?     @map("cancelled_at") @db.Timestamptz(6)
   cancelledByUserId String?       @map("cancelled_by_user_id") @db.Uuid
   cancelReason      String?       @map("cancel_reason") @db.VarChar(280)
+  /// The dine-in table bill this order belongs to (RASOIOS-ADR-027). Null for takeaway, delivery, an order without a
+  /// table, and every order placed before table bills existed.
+  tableSessionId    String?       @map("table_session_id") @db.Uuid
   version           Int           @default(0)
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -909,6 +918,7 @@ model Order {
   customer     Customer?     @relation(fields: [tenantId, customerId], references: [tenantId, id], onDelete: Restrict)
   createdBy    User?         @relation("OrderCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
   cancelledBy  User?         @relation("OrderCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  tableSession TableSession? @relation(fields: [tenantId, tableSessionId], references: [tenantId, id], onDelete: Restrict)
   items        OrderItem[]
   kotTickets   KotTicket[]
   transactions Transaction[]
@@ -917,6 +927,7 @@ model Order {
   @@unique([tenantId, orderNumber])
   @@unique([tenantId, idempotencyKey])
   @@unique([tenantId, id])
+  @@index([tenantId, tableSessionId])
   @@index([tenantId, businessDate])
   @@index([tenantId, status, updatedAt])
   @@index([tenantId, paymentStatus])
@@ -1002,6 +1013,8 @@ model KotTicket {
   readyAt            DateTime?     @map("ready_at") @db.Timestamptz(6)
   servedAt           DateTime?     @map("served_at") @db.Timestamptz(6)
   cancelledAt        DateTime?     @map("cancelled_at") @db.Timestamptz(6)
+  /// False when staff chose "Send to KOT only": the ticket is on the kitchen screen and no print job was created.
+  printRequested     Boolean       @default(true) @map("print_requested")
   createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -1067,11 +1080,14 @@ model Transaction {
   voidedAt              DateTime?         @map("voided_at") @db.Timestamptz(6)
   voidedByUserId        String?           @map("voided_by_user_id") @db.Uuid
   voidReason            String?           @map("void_reason") @db.VarChar(280)
+  /// The table-bill payment this row is this order's share of (RASOIOS-ADR-027); null for a payment taken per order.
+  tableSessionPaymentId String?           @map("table_session_payment_id") @db.Uuid
   createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   order      Order         @relation(fields: [tenantId, orderId], references: [tenantId, id], onDelete: Restrict)
+  tableSessionPayment TableSessionPayment? @relation(fields: [tenantId, tableSessionPaymentId], references: [tenantId, id], onDelete: Restrict)
   refundOf   Transaction?  @relation("TransactionRefundOf", fields: [tenantId, refundOfTransactionId], references: [tenantId, id], onDelete: Restrict)
   refunds    Transaction[] @relation("TransactionRefundOf")
   recordedBy User          @relation("TransactionRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
@@ -1083,6 +1099,81 @@ model Transaction {
   @@index([tenantId, businessDate, type])
   @@index([tenantId, recordedByUserId, createdAt])
   @@map("transactions")
+}
+
+// ───────────────────────── E19a TABLE_SESSION (RASOIOS-ADR-027) ─────────────────────────
+
+enum TableSessionStatus {
+  /// Taking orders; the bill is open.
+  OPEN
+  /// Settled (balance zero) or closed empty. A closed bill never takes another order.
+  CLOSED
+
+  @@map("table_session_status")
+}
+
+/// One dine-in party's bill at one table: every order placed for that table while the session is OPEN joins it, and
+/// the bill is the sum of those orders' own snapshots. At most one OPEN session per table per restaurant (partial
+/// unique index `table_sessions_open_table_key`, migration 0014). `version` moves on every join and payment, so a
+/// cashier's payment is refused if the bill changed after they looked at it.
+model TableSession {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  /// The table as staff typed it on the first order (display).
+  tableLabel       String             @map("table_label") @db.VarChar(20)
+  /// Normalised label (trimmed, single spaces, upper case): "table 1" and "TABLE  1" are one table.
+  tableKey         String             @map("table_key") @db.VarChar(20)
+  billNumber       String             @map("bill_number") @db.VarChar(20)
+  businessDate     DateTime           @map("business_date") @db.Date
+  status           TableSessionStatus @default(OPEN)
+  version          Int                @default(0)
+  openedByUserId   String             @map("opened_by_user_id") @db.Uuid
+  openedAt         DateTime           @default(now()) @map("opened_at") @db.Timestamptz(6)
+  closedByUserId   String?            @map("closed_by_user_id") @db.Uuid
+  closedAt         DateTime?          @map("closed_at") @db.Timestamptz(6)
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant   Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  openedBy User                  @relation("TableSessionOpenedBy", fields: [openedByUserId], references: [id], onDelete: Restrict)
+  closedBy User?                 @relation("TableSessionClosedBy", fields: [closedByUserId], references: [id], onDelete: Restrict)
+  orders   Order[]
+  payments TableSessionPayment[]
+
+  @@unique([tenantId, id])
+  @@unique([tenantId, billNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, businessDate])
+  @@map("table_sessions")
+}
+
+/// One payment taken for a whole table bill. The money itself is in the ledger as one TRANSACTION row per order it
+/// paid (each pointing back here), so refunds, day close and reports keep working per order. This row holds what
+/// belongs to the payment as a whole: the idempotency key, the cash handed over and the change.
+model TableSessionPayment {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String        @map("tenant_id") @db.Uuid
+  tableSessionId   String        @map("table_session_id") @db.Uuid
+  idempotencyKey   String        @map("idempotency_key") @db.Uuid
+  paymentMethod    PaymentMethod @map("payment_method")
+  amount           Decimal       @db.Decimal(12, 2)
+  amountTendered   Decimal?      @map("amount_tendered") @db.Decimal(12, 2)
+  changeDue        Decimal?      @map("change_due") @db.Decimal(12, 2)
+  reference        String?       @db.VarChar(64)
+  businessDate     DateTime      @map("business_date") @db.Date
+  recordedByUserId String        @map("recorded_by_user_id") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tableSession TableSession  @relation(fields: [tenantId, tableSessionId], references: [tenantId, id], onDelete: Restrict)
+  recordedBy   User          @relation("TableSessionPaymentRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@unique([tenantId, idempotencyKey])
+  @@unique([tenantId, id])
+  @@index([tenantId, tableSessionId])
+  @@index([tenantId, businessDate])
+  @@map("table_session_payments")
 }
 
 // ───────────────────────── E20 BUSINESS_DAY_CLOSE ─────────────────────────

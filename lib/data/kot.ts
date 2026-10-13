@@ -259,6 +259,8 @@ export type NewKot = {
   tableLabelSnapshot: string | null;
   notesSnapshot: string | null;
   items: Array<{ orderItemId: string; quantity: number; itemLabelSnapshot: string; addonsSnapshot: string | null; instructionsSnapshot: string | null }>;
+  /** False for "Send to KOT only": the ticket is not printed (default true, the existing behaviour). */
+  printRequested?: boolean;
 };
 
 /** Creates a QUEUED ticket and its immutable items in the caller's tenant. */
@@ -276,6 +278,7 @@ export async function createKotWithItems(tx: Tx, ctx: TenantContext, kot: NewKot
       orderTypeSnapshot: kot.orderTypeSnapshot,
       tableLabelSnapshot: kot.tableLabelSnapshot,
       notesSnapshot: kot.notesSnapshot,
+      printRequested: kot.printRequested ?? true,
     },
     select: { id: true },
   });
@@ -289,30 +292,38 @@ export async function createKotWithItems(tx: Tx, ctx: TenantContext, kot: NewKot
 
 // ─── Print state (S1-P14-T004) ───
 
-/** What the board shows about a ticket's KOT print: no job yet, queued, being printed, printed, or failed. */
-export type KotPrintStatus = "NONE" | "PENDING" | "PROCESSING" | "PRINTED" | "FAILED";
+/**
+ * What the board shows about a ticket's KOT print: no job yet, queued, being printed, printed, failed — or
+ * NOT_REQUESTED when staff chose "Send to KOT only" and no job was ever wanted (RASOIOS-ADR-027).
+ */
+export type KotPrintStatus = "NONE" | "NOT_REQUESTED" | "PENDING" | "PROCESSING" | "PRINTED" | "FAILED";
 
 /**
  * The print state of many tickets in one query (LD-KOT-01, RH-KOT-01): for each ticket, the newest KOT job that is not
  * a reprint. A lateral join keeps it to one index scan per ticket, so a board of 50 tickets costs one round trip.
- * Tickets without a job are absent from the map and read as NONE.
+ * A ticket sent without printing and never reprinted reads NOT_REQUESTED; other tickets without a job are absent from
+ * the map and read as NONE.
  */
 export async function printStatusFor(ctx: TenantContext, kotIds: readonly string[]): Promise<Map<string, KotPrintStatus>> {
   if (kotIds.length === 0) return new Map();
   const rows = await mapErrors("Print job", () =>
     db.$queryRaw<Array<{ kot_ticket_id: string; status: KotPrintStatus }>>`
-      SELECT t.id AS kot_ticket_id, j.status
-      FROM unnest(${kotIds}::uuid[]) AS t(id)
-      JOIN LATERAL (
+      SELECT k.id AS kot_ticket_id,
+             COALESCE(j.status::text, CASE WHEN k.print_requested THEN NULL ELSE 'NOT_REQUESTED' END) AS status
+      FROM kot_tickets k
+      LEFT JOIN LATERAL (
         SELECT p.status
         FROM print_jobs p
         WHERE p.tenant_id = ${ctx.tenantId}::uuid
-          AND p.kot_ticket_id = t.id
+          AND p.kot_ticket_id = k.id
           AND p.job_type = 'KOT'
           AND p.is_reprint = false
         ORDER BY p.created_at DESC
         LIMIT 1
-      ) j ON true`,
+      ) j ON true
+      WHERE k.tenant_id = ${ctx.tenantId}::uuid
+        AND k.id = ANY(${kotIds}::uuid[])
+        AND (j.status IS NOT NULL OR k.print_requested = false)`,
   );
   return new Map(rows.map((r) => [r.kot_ticket_id, r.status]));
 }

@@ -1,5 +1,17 @@
 import "server-only";
-import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, TransactionStatus, TransactionType } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma, TableSessionStatus, TransactionStatus, TransactionType } from "@prisma/client";
+import { allocatePayment, billTotals } from "@/lib/billing/table-bill";
+import {
+  bumpSession,
+  findSession,
+  findSessionPaymentByKey,
+  insertSessionPayment,
+  lockSession,
+  lockSessionOrders,
+  sessionOrders,
+  sessionPaymentLedgerRows,
+} from "@/lib/data/table-sessions";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { audit } from "@/lib/audit/write";
 import { moneyDto, nullableMoneyDto, type MoneyString } from "@/lib/data/dto";
@@ -15,7 +27,7 @@ import {
   type LedgerRow,
 } from "@/lib/data/payments";
 import { findDayClose } from "@/lib/data/day-close";
-import { withTx } from "@/lib/data/tx";
+import { withTx, type Tx } from "@/lib/data/tx";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { statusAfterRefund } from "@/lib/services/orders";
@@ -98,7 +110,7 @@ function paymentResult(row: LedgerRow, order: Pick<LedgerOrder, "paymentStatus" 
   };
 }
 
-function paymentFieldErrors(input: RecordPaymentData): Record<string, string[]> {
+function paymentFieldErrors(input: Pick<RecordPaymentData, "method" | "amount" | "amountTendered" | "reference">): Record<string, string[]> {
   const errors: Record<string, string[]> = {};
   if (input.amountTendered !== undefined) {
     if (input.method !== PaymentMethod.CASH) errors.amountTendered = ["Amount tendered applies to cash payments only"];
@@ -135,6 +147,15 @@ export async function recordPayment(ctx: TenantContext, input: RecordPaymentData
 
       if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.REFUNDED) {
         throw new ConflictError(`A ${order.status.toLowerCase()} order cannot take payments.`, "ORDER_NOT_PAYABLE");
+      }
+      // An order on an open table bill is paid with the bill (RASOIOS-ADR-027): paying it alone would print a receipt
+      // per order and let the table's bill and its orders be settled twice over.
+      if (order.tableSession?.status === TableSessionStatus.OPEN) {
+        throw new ConflictError(
+          `This order is on the bill for table ${order.tableSession.tableLabel} (${order.tableSession.billNumber}). Take payment on the table bill.`,
+          "TABLE_BILL",
+          { tableSessionId: order.tableSession.id },
+        );
       }
 
       // A closed business day is a harder stop than any amount rule, so it is checked first (SA-TXN-04).
@@ -224,6 +245,238 @@ export async function recordPayment(ctx: TenantContext, input: RecordPaymentData
     }
     throw error;
   }
+}
+
+// ─── Table-bill payments (RASOIOS-ADR-027) ───
+
+export type TableBillPaymentInput = {
+  tableSessionId: string;
+  /** Client UUID per submit attempt; a repeat returns the original payment (ADR-010 §7). */
+  idempotencyKey: string;
+  /** The bill version the cashier was looking at. A different version means the bill changed: refused, reload. */
+  expectedVersion: number;
+  method: PaymentMethod;
+  amount: Prisma.Decimal;
+  amountTendered?: Prisma.Decimal;
+  reference?: string;
+};
+
+export type TableBillPaymentResult = {
+  paymentId: string;
+  tableSessionId: string;
+  method: PaymentMethod;
+  /** Applied to the bill. */
+  amount: MoneyString;
+  amountTendered: MoneyString | null;
+  changeDue: MoneyString | null;
+  /** What the bill still owes after this payment. */
+  balance: MoneyString;
+  /** The payment settled the bill and closed the session. */
+  closed: boolean;
+  /** Each order's ledger row: the payment split oldest order first. */
+  allocations: Array<{ orderId: string; transactionId: string; amount: MoneyString }>;
+  sessionVersion: number;
+  replayed: boolean;
+};
+
+/**
+ * One payment for a whole table bill. In one transaction, under the session's row lock and every order's row lock:
+ *
+ * 1. a repeated idempotency key returns the original payment (a double click or a lost response never charges twice);
+ * 2. the bill must be OPEN and still at the version the cashier saw — an order that joined in between, or another
+ *    payment, refuses this one with `BILL_CHANGED` instead of collecting a stale total;
+ * 3. the amount rules are the per-order ledger's: no more than the balance, except CASH, where the surplus is change;
+ * 4. the money goes into the ledger as one TRANSACTION per order it pays (oldest first), each order's own totals and
+ *    payment status recomputed exactly as a per-order payment would — so refunds, day close and reports are unchanged;
+ * 5. the bill closes when its balance reaches zero.
+ *
+ * Receipts and completion happen after the commit (`lib/services/table-sessions.ts`), never inside the money step.
+ */
+export async function recordTableBillPayment(ctx: TenantContext, input: TableBillPaymentInput): Promise<TableBillPaymentResult> {
+  const fieldErrors = paymentFieldErrors(input);
+  if (Object.keys(fieldErrors).length > 0) throw new ValidationError("Check the highlighted fields.", fieldErrors);
+
+  const replay = async (): Promise<TableBillPaymentResult | null> =>
+    withTx(ctx, async (tx) => {
+      const existing = await findSessionPaymentByKey(tx, ctx, input.idempotencyKey);
+      if (!existing) return null;
+      if (existing.tableSessionId !== input.tableSessionId) throw tableKeyReused();
+      return tableBillReplay(tx, ctx, existing);
+    });
+
+  try {
+    const result = await withTx(ctx, async (tx) => {
+      const existing = await findSessionPaymentByKey(tx, ctx, input.idempotencyKey);
+      if (existing) {
+        if (existing.tableSessionId !== input.tableSessionId) throw tableKeyReused();
+        return tableBillReplay(tx, ctx, existing);
+      }
+
+      const session = await lockSession(tx, ctx, input.tableSessionId);
+      if (!session) throw new NotFoundError("Table bill not found");
+      // Re-checked under the lock: a twin submit that was waiting for this lock sees the payment its twin just
+      // committed and replays it, instead of reporting the bill it settled as "already closed" or "changed".
+      const committed = await findSessionPaymentByKey(tx, ctx, input.idempotencyKey);
+      if (committed) {
+        if (committed.tableSessionId !== input.tableSessionId) throw tableKeyReused();
+        return tableBillReplay(tx, ctx, committed);
+      }
+      if (session.status !== TableSessionStatus.OPEN) {
+        throw new ConflictError(`The bill ${session.billNumber} is already closed.`, "TABLE_BILL_CLOSED");
+      }
+      if (session.version !== input.expectedVersion) {
+        throw new ConflictError("The bill changed while you were looking at it — new items were added or a payment was taken. Review the updated bill.", "BILL_CHANGED", {
+          sessionVersion: session.version,
+        });
+      }
+      const orders = await lockSessionOrders(tx, ctx, session.id);
+
+      const businessDate = businessDateFor(now(), ctx.restaurant.timezone);
+      if (await findDayClose(tx, ctx, businessDate)) {
+        throw new ConflictError("The business day is closed. Reopen it or record this on the current day.", "DAY_CLOSED");
+      }
+
+      const outstanding = billTotals(orders).balance;
+      if (outstanding.lte(0)) {
+        throw new LedgerRuleError("AMOUNT_EXCEEDS_BALANCE", "This bill has no balance left to pay.", { amount: ["Nothing is outstanding on this bill"] });
+      }
+
+      let amount = input.amount;
+      let amountTendered: Prisma.Decimal | null = null;
+      let changeDue: Prisma.Decimal | null = null;
+      if (input.method === PaymentMethod.CASH) {
+        amountTendered = input.amountTendered ?? input.amount;
+        amount = Prisma.Decimal.min(input.amount, outstanding);
+        changeDue = amountTendered.minus(amount);
+      } else if (input.amount.gt(outstanding)) {
+        throw new LedgerRuleError("AMOUNT_EXCEEDS_BALANCE", `The amount exceeds the bill's outstanding balance of ${moneyDto(outstanding)}.`, {
+          amount: [`At most ${moneyDto(outstanding)}`],
+        });
+      }
+
+      const payment = await insertSessionPayment(tx, ctx, {
+        tableSessionId: session.id,
+        idempotencyKey: input.idempotencyKey,
+        paymentMethod: input.method,
+        amount,
+        amountTendered,
+        changeDue,
+        reference: input.reference ?? null,
+        businessDate,
+      });
+
+      const byId = new Map(orders.map((o) => [o.id, o]));
+      const allocations: TableBillPaymentResult["allocations"] = [];
+      for (const part of allocatePayment(orders, amount)) {
+        const order = byId.get(part.orderId)!;
+        const paidAmount = order.paidAmount.plus(part.amount);
+        const paymentStatus = derivePaymentStatus(order.totalAmount, paidAmount, order.refundedAmount);
+        if (!(await updateOrderLedgerTotals(ctx, tx, order, { paidAmount, paymentStatus }))) throw orderChanged();
+        const row = await insertLedgerRow(ctx, tx, {
+          orderId: order.id,
+          type: TransactionType.PAYMENT,
+          paymentMethod: input.method,
+          amount: part.amount,
+          reference: input.reference ?? null,
+          businessDate,
+          // Each ledger row needs its own key; the payment's key is on the table payment row and is what replays.
+          idempotencyKey: randomUUID(),
+          tableSessionPaymentId: payment.id,
+        });
+        await audit(tx, ctx, {
+          action: "payment.recorded",
+          resourceType: "transaction",
+          resourceId: row.id,
+          before: { orderId: order.id, paymentStatus: order.paymentStatus, paidAmount: moneyDto(order.paidAmount) },
+          after: { orderId: order.id, method: input.method, amount: moneyDto(part.amount), paymentStatus, paidAmount: moneyDto(paidAmount), tableSessionPaymentId: payment.id },
+        });
+        allocations.push({ orderId: order.id, transactionId: row.id, amount: moneyDto(part.amount) });
+      }
+
+      const balance = outstanding.minus(amount);
+      const closed = balance.lte(0);
+      if (!(await bumpSession(tx, ctx, session, closed ? { at: now() } : null))) throw orderChanged();
+
+      await audit(tx, ctx, {
+        action: "table_session.payment_recorded",
+        resourceType: "table_session_payment",
+        resourceId: payment.id,
+        before: { tableSessionId: session.id, billNumber: session.billNumber, balance: moneyDto(outstanding) },
+        after: {
+          tableSessionId: session.id,
+          method: input.method,
+          amount: moneyDto(amount),
+          amountTendered: nullableMoneyDto(amountTendered),
+          changeDue: nullableMoneyDto(changeDue),
+          balance: moneyDto(balance),
+          orders: allocations.map((a) => ({ orderId: a.orderId, amount: a.amount })),
+        },
+      });
+      if (closed) {
+        await audit(tx, ctx, {
+          action: "table_session.closed",
+          resourceType: "table_session",
+          resourceId: session.id,
+          before: { status: TableSessionStatus.OPEN },
+          after: { status: TableSessionStatus.CLOSED, billNumber: session.billNumber, trigger: "settled" },
+        });
+      }
+
+      return {
+        paymentId: payment.id,
+        tableSessionId: session.id,
+        method: input.method,
+        amount: moneyDto(amount),
+        amountTendered: nullableMoneyDto(amountTendered),
+        changeDue: nullableMoneyDto(changeDue),
+        balance: moneyDto(balance),
+        closed,
+        allocations,
+        sessionVersion: session.version + 1,
+        replayed: false,
+      } satisfies TableBillPaymentResult;
+    });
+
+    if (!result.replayed) {
+      logger.info("table_session.payment_recorded", { requestId: ctx.requestId, tenantId: ctx.tenantId, tableSessionId: result.tableSessionId, paymentId: result.paymentId, amount: result.amount, closed: result.closed });
+    }
+    return result;
+  } catch (error) {
+    // Two submits with one key raced past the key check: the loser hits UNIQUE (tenant_id, idempotency_key).
+    if (error instanceof ConflictError && (error.code === "CONFLICT" || error.code === "ORDER_CHANGED")) {
+      const replayed = await replay();
+      if (replayed) return replayed;
+    }
+    throw error;
+  }
+}
+
+function tableKeyReused(): ConflictError {
+  return new ConflictError("This request id was already used for a different bill. Reload and try again.", "IDEMPOTENCY_KEY_REUSED");
+}
+
+/** The original result of a table payment, rebuilt for a repeated key from what was committed. */
+async function tableBillReplay(
+  tx: Tx,
+  ctx: TenantContext,
+  payment: NonNullable<Awaited<ReturnType<typeof findSessionPaymentByKey>>>,
+): Promise<TableBillPaymentResult> {
+  const session = await findSession(tx, ctx, payment.tableSessionId);
+  const orders = await sessionOrders(tx, ctx, payment.tableSessionId);
+  const rows = await sessionPaymentLedgerRows(tx, ctx, payment.id);
+  return {
+    paymentId: payment.id,
+    tableSessionId: payment.tableSessionId,
+    method: payment.paymentMethod,
+    amount: moneyDto(payment.amount),
+    amountTendered: nullableMoneyDto(payment.amountTendered),
+    changeDue: nullableMoneyDto(payment.changeDue),
+    balance: moneyDto(billTotals(orders).balance),
+    closed: session?.status === TableSessionStatus.CLOSED,
+    allocations: rows.map((r) => ({ orderId: r.orderId, transactionId: r.id, amount: moneyDto(r.amount) })),
+    sessionVersion: session?.version ?? 0,
+    replayed: true,
+  };
 }
 
 // ─── Refunds (SA-TXN-02) ───

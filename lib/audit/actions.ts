@@ -97,6 +97,11 @@ export const AUDIT_ACTIONS = [
   "kot.reprint_requested",
   // Money
   "payment.recorded",
+  // Table bills (RASOIOS-ADR-027)
+  "table_session.opened",
+  "table_session.order_joined",
+  "table_session.payment_recorded",
+  "table_session.closed",
   "refund.created",
   "transaction.voided",
   "day_close.performed",
