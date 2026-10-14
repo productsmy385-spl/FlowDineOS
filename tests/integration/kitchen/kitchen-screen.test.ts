@@ -79,7 +79,7 @@ describe("TC-KITCH-005 kitchen moves the order", () => {
 
     const statusOnBoard = async (role: "KITCHEN" | "WAITER" | "MANAGER") => {
       await asSeedUser("A", role);
-      const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(await invokeLoader(OrdersPage), OrderBoard, "OrderBoard");
+      const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(await invokeLoader(OrdersPage, { searchParams: Promise.resolve({ view: "all" }) }), OrderBoard, "OrderBoard");
       return board.initial.items.find((order) => order.id === orderId)?.status;
     };
 

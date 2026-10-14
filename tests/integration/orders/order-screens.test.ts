@@ -36,7 +36,7 @@ const params = (orderId: string) => ({ params: Promise.resolve({ orderId }) });
 describe("TC-ORDER-016 order board screen (/restaurant/orders)", () => {
   it("renders the live board from the server with this role's own transitions", async () => {
     await asSeedUser("A", "MANAGER");
-    const page = await invokeLoader(OrdersPage);
+    const page = await invokeLoader(OrdersPage, { searchParams: Promise.resolve({ view: "all" }) });
     const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(page, OrderBoard, "OrderBoard");
 
     expect(board.initial.items.length).toBeGreaterThan(0);
@@ -51,7 +51,7 @@ describe("TC-ORDER-016 order board screen (/restaurant/orders)", () => {
 
   it("shows a kitchen user no totals, no customer names and no way to create an order", async () => {
     await asSeedUser("A", "KITCHEN");
-    const page = await invokeLoader(OrdersPage);
+    const page = await invokeLoader(OrdersPage, { searchParams: Promise.resolve({ view: "all" }) });
     const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(page, OrderBoard, "OrderBoard");
 
     expect(board.canCreate).toBe(false);
@@ -63,7 +63,7 @@ describe("TC-ORDER-016 order board screen (/restaurant/orders)", () => {
 
   it("a cashier's board carries money but only the moves a cashier may make", async () => {
     await asSeedUser("A", "CASHIER");
-    const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(await invokeLoader(OrdersPage), OrderBoard, "OrderBoard");
+    const board = requireComponent<React.ComponentProps<typeof OrderBoard>>(await invokeLoader(OrdersPage, { searchParams: Promise.resolve({ view: "all" }) }), OrderBoard, "OrderBoard");
     expect(board.initial.items.some((order) => order.totalAmount !== null)).toBe(true);
     expect(board.transitions.NEW.sort()).toEqual(["ACCEPTED", "CANCELLED"]);
     expect(board.transitions.ACCEPTED).toEqual([]);

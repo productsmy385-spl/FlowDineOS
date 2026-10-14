@@ -38,7 +38,7 @@ import { IN_FLIGHT, RECEIPT_POLL_LIMIT_MS, RECEIPT_POLL_MS, RECEIPT_STATUS_LABEL
  * the new bill instead of collecting the old total.
  */
 export const BILL_STATE_LABEL: Record<TableBillState, string> = {
-  OPEN: "Open",
+  OPEN: "Occupied",
   PREPARING: "Preparing",
   READY: "Ready",
   PARTIALLY_PAID: "Partially paid",
@@ -117,107 +117,140 @@ export function TableBillPanel({
     }
   }
 
+  const lastPayment = [...bill.payments].reverse().find((p) => p.active) ?? null;
+  const itemCount = (order: TableBillView["orders"][number]) => order.items.reduce((n, i) => n + i.quantity, 0);
+
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6">
-      <div className="flex min-w-0 flex-col gap-4 lg:gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Bill</CardTitle>
-          </CardHeader>
-          {bill.lines.length === 0 ? (
-            <p className="text-body text-fg-secondary">Nothing on this bill yet.</p>
-          ) : (
-            <div className="-mx-1 overflow-x-auto px-1">
-              <table className="w-full min-w-[480px] text-body">
-                <caption className="sr-only">Everything the table has ordered, as one bill</caption>
-                <thead>
-                  <tr className="border-b border-border-subtle text-left text-caption text-fg-secondary">
-                    <th scope="col" className="py-2 pr-3 font-medium">Item</th>
-                    <th scope="col" className="py-2 pr-3 text-right font-medium">Qty</th>
-                    <th scope="col" className="py-2 pr-3 text-right font-medium">Price</th>
-                    <th scope="col" className="py-2 text-right font-medium">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {bill.lines.map((line, index) => (
-                    <tr key={`${line.name}-${line.unitPrice}-${index}`} className="border-b border-border-subtle align-top">
-                      <td className="py-2 pr-3">
-                        <span className="block text-fg-primary">{line.name}</span>
-                        <span className="block text-caption text-fg-secondary">Order {line.orders.join(", ")}</span>
-                      </td>
-                      <td className="py-2 pr-3 text-right text-numeric text-fg-primary">{line.quantity}</td>
-                      <td className="py-2 pr-3 text-right text-numeric text-fg-secondary">{money(line.unitPrice)}</td>
-                      <td className="py-2 text-right text-numeric text-fg-primary">{money(line.lineSubtotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <BillTotals bill={bill} />
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Orders on this bill</CardTitle>
-          </CardHeader>
-          <ul className="flex flex-col divide-y divide-border-subtle">
-            {bill.orders.map((order) => (
-              <li key={order.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
-                <Link href={`/restaurant/orders/${order.id}`} className="text-label text-numeric text-fg-accent hover:underline">
-                  {order.orderNumber}
-                </Link>
-                <StatusBadge domain="order" status={order.status} />
-                <span className="text-caption text-fg-secondary">
-                  {formatInZone(order.createdAt, timezone, "time")}
-                  {order.kots.length > 0 ? ` · KOT ${order.kots.map((k) => k.kotNumber).join(", ")}` : ""}
-                </span>
-                <span className="ml-auto text-numeric text-fg-primary">{order.billed ? money(order.total) : "Not billed"}</span>
-              </li>
-            ))}
-          </ul>
-        </Card>
+    <div className="flex flex-col gap-4 lg:gap-6">
+      {/* A. Actions — the two things staff do at a table, always at the top (owner brief 2026-10-14 §3, §7). */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        {open && can.addOrder && (
+          <Link
+            href={`/restaurant/orders/new?bill=${bill.id}`}
+            className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-action-primary px-6 text-subheading text-action-primary-fg shadow-e1 transition-colors duration-fast ease-standard hover:bg-action-primary-hover"
+          >
+            <Plus className="size-5" aria-hidden />
+            Add Items
+            <span className="sr-only"> (add an order to this table)</span>
+          </Link>
+        )}
+        {open && can.pay && bill.totals.balance !== "0.00" && (
+          <Button variant="secondary" icon={Wallet} size="touch" className="sm:ml-auto" onClick={() => setPaying(true)}>
+            Record Payment · {money(bill.totals.balance)}
+          </Button>
+        )}
+        {bill.canClose && can.pay && (
+          <Button variant="secondary" icon={XCircle} loading={closing} loadingLabel="Closing…" onClick={() => void closeBill()}>
+            Close table
+          </Button>
+        )}
+        <Button variant="ghost" icon={RefreshCw} loading={refreshing} loadingLabel="Refreshing…" onClick={() => void refresh()}>
+          Refresh
+        </Button>
       </div>
+      {!open && <Alert tone="neutral" title="This bill is closed">A new order for table {bill.tableLabel} starts a new bill.</Alert>}
 
-      <div className="flex flex-col gap-4 lg:gap-6">
-        <Card>
-          <div className="flex flex-col gap-4">
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-subheading text-fg-primary">Balance due</span>
-              <span className="text-heading text-numeric text-fg-primary">{money(bill.totals.balance)}</span>
-            </div>
-            {bill.customers.length > 0 && (
-              <p className="text-caption text-fg-secondary">Customer: {bill.customers.map((c) => c.name).join(", ")}</p>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:gap-6">
+        <div className="flex min-w-0 flex-col gap-4 lg:gap-6">
+          {/* B. Order history — each order keeps its own KOT and kitchen status. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Orders ({bill.orders.length})</CardTitle>
+            </CardHeader>
+            <ul className="flex flex-col gap-2">
+              {bill.orders.map((order, index) => (
+                <li key={order.id}>
+                  <details className="group rounded-xl border border-border-subtle bg-raised/40" open={index === bill.orders.length - 1}>
+                    <summary className="flex min-h-12 cursor-pointer list-none flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 [&::-webkit-details-marker]:hidden">
+                      <span className="text-label text-numeric text-fg-primary">Order {order.orderNumber}</span>
+                      <StatusBadge domain="order" status={order.status} />
+                      <span className="text-caption text-fg-secondary">
+                        {formatInZone(order.createdAt, timezone, "time")} · {itemCount(order)} {itemCount(order) === 1 ? "item" : "items"}
+                      </span>
+                      <span className="ml-auto text-numeric text-fg-primary">{order.billed ? money(order.total) : "Not billed"}</span>
+                    </summary>
+                    <div className="flex flex-col gap-2 border-t border-border-subtle px-3 py-3">
+                      {order.kots.length > 0 && (
+                        <p className="text-caption text-fg-secondary">
+                          {order.kots.map((k) => `KOT ${k.kotNumber} · ${k.status.toLowerCase()}`).join(" · ")}
+                        </p>
+                      )}
+                      <ul className="flex flex-col gap-1">
+                        {order.items.map((item, i) => (
+                          <li key={`${item.name}-${i}`} className="flex justify-between gap-3 text-body">
+                            <span className="min-w-0 text-fg-primary">
+                              {item.quantity} × {item.name}
+                            </span>
+                            <span className="shrink-0 text-numeric text-fg-secondary">{money(item.lineTotal)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <Link href={`/restaurant/orders/${order.id}`} className="self-start text-caption text-fg-accent hover:underline">
+                        Open order
+                      </Link>
+                    </div>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          {/* C. Consolidated bill — the orders' own stored prices, grouped; stacks on a phone instead of scrolling. */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Bill</CardTitle>
+            </CardHeader>
+            {bill.lines.length === 0 ? (
+              <p className="text-body text-fg-secondary">Nothing on this bill yet.</p>
+            ) : (
+              <ul className="flex flex-col divide-y divide-border-subtle" aria-label="Everything the table has ordered, as one bill">
+                {bill.lines.map((line, index) => (
+                  <li key={`${line.name}-${line.unitPrice}-${index}`} className="flex items-start justify-between gap-3 py-2">
+                    <span className="min-w-0">
+                      <span className="block text-body text-fg-primary">
+                        {line.quantity} × {line.name}
+                      </span>
+                      <span className="block text-caption text-fg-secondary">
+                        <span className="text-numeric">{money(line.unitPrice)}</span> each · Order {line.orders.join(", ")}
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-body text-numeric text-fg-primary">{money(line.lineSubtotal)}</span>
+                  </li>
+                ))}
+              </ul>
             )}
-            <div className="flex flex-col gap-2">
+            <BillTotals bill={bill} />
+          </Card>
+        </div>
+
+        <div className="flex flex-col gap-4 lg:gap-6">
+          {/* D. Payment summary */}
+          <Card>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-baseline justify-between gap-3">
+                <span className="text-subheading text-fg-primary">Balance due</span>
+                <span className="text-heading text-numeric text-fg-primary">{money(bill.totals.balance)}</span>
+              </div>
+              <dl className="flex flex-col gap-1 text-body">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-fg-secondary">Total bill</dt>
+                  <dd className="text-numeric text-fg-primary">{money(bill.totals.total)}</dd>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <dt className="text-fg-secondary">Amount paid</dt>
+                  <dd className="text-numeric text-fg-primary">{money(bill.totals.paid)}</dd>
+                </div>
+              </dl>
+              {bill.customers.length > 0 && <p className="text-caption text-fg-secondary">Customer: {bill.customers.map((c) => c.name).join(", ")}</p>}
               {open && can.pay && bill.totals.balance !== "0.00" && (
                 <Button icon={Wallet} size="touch" className="w-full" onClick={() => setPaying(true)}>
                   Record Payment
                 </Button>
               )}
-              {open && can.addOrder && (
-                <Link
-                  href={`/restaurant/orders/new?table=${encodeURIComponent(bill.tableLabel)}`}
-                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-border-strong text-subheading text-fg-primary hover:bg-raised"
-                >
-                  <Plus className="size-4" aria-hidden />
-                  Add order to this table
-                </Link>
-              )}
-              {bill.canClose && can.pay && (
-                <Button variant="secondary" icon={XCircle} loading={closing} loadingLabel="Closing…" onClick={() => void closeBill()}>
-                  Close table
-                </Button>
-              )}
-              <Button variant="ghost" icon={RefreshCw} loading={refreshing} loadingLabel="Refreshing…" onClick={() => void refresh()}>
-                Refresh bill
-              </Button>
             </div>
-            {!open && <p className="text-caption text-fg-secondary">This bill is closed. A new order for table {bill.tableLabel} starts a new bill.</p>}
-          </div>
-        </Card>
+          </Card>
 
-        {bill.payments.length > 0 && (
+          {bill.payments.length > 0 && (
           <Card>
             <CardHeader>
               <CardTitle>Payments</CardTitle>
@@ -238,7 +271,18 @@ export function TableBillPanel({
           </Card>
         )}
 
-        {settlement && <PaymentOutcome settlement={settlement} currencyCode={bill.currencyCode} canRetry={can.retryReceipt} onDismiss={() => setSettlement(null)} />}
+          {settlement ? (
+            <PaymentOutcome settlement={settlement} currencyCode={bill.currencyCode} canRetry={can.retryReceipt} onDismiss={() => setSettlement(null)} />
+          ) : (
+            // E. Receipt status after a reload: the settled bill's receipt, from the payment that settled it.
+            bill.state === "SETTLED" &&
+            lastPayment && (
+              <Card>
+                <ReceiptStatus paymentId={lastPayment.id} initial={null} closed receiptQueue={null} canRetry={can.retryReceipt} />
+              </Card>
+            )
+          )}
+        </div>
       </div>
 
       {can.pay && (
@@ -418,37 +462,7 @@ function TablePaymentDialog({
 
 function PaymentOutcome({ settlement, currencyCode, canRetry, onDismiss }: { settlement: TableBillSettlement; currencyCode: string; canRetry: boolean; onDismiss: () => void }) {
   const { payment } = settlement;
-  const [receipts, setReceipts] = React.useState<ReceiptCopyView[]>(settlement.receipts);
-  const [retrying, setRetrying] = React.useState(false);
-  const [retryError, setRetryError] = React.useState<string | null>(null);
-  const startedAt = React.useRef(Date.now());
   const money = (value: string) => formatMoney(value, currencyCode);
-
-  const inFlight = receipts.some((copy) => IN_FLIGHT.has(copy.status));
-  React.useEffect(() => {
-    if (!inFlight || Date.now() - startedAt.current > RECEIPT_POLL_LIMIT_MS) return;
-    const timer = setTimeout(() => {
-      void getTableBillReceiptsAction({ paymentId: payment.paymentId }).then((res) => {
-        if (res.ok) setReceipts(res.data as ReceiptCopyView[]);
-      });
-    }, RECEIPT_POLL_MS);
-    return () => clearTimeout(timer);
-  }, [inFlight, receipts, payment.paymentId]);
-
-  const failed = receipts.some((copy) => copy.status === "FAILED");
-  const canQueue = payment.closed && receipts.length === 0 && settlement.receiptQueue !== "NO_PRINTER";
-
-  async function retry() {
-    setRetrying(true);
-    setRetryError(null);
-    const res = await retryTableBillReceiptsAction({ paymentId: payment.paymentId });
-    setRetrying(false);
-    if (res.ok) {
-      startedAt.current = Date.now();
-      setReceipts(res.data as ReceiptCopyView[]);
-    } else setRetryError(res.error.message);
-  }
-
   const notCompleted = settlement.completions.filter((c) => c.completion !== "COMPLETED" && c.completion !== "ALREADY_COMPLETED");
 
   return (
@@ -464,8 +478,80 @@ function PaymentOutcome({ settlement, currencyCode, canRetry, onDismiss }: { set
             Still open: {notCompleted.map((c) => `${c.orderNumber} (${c.message ?? c.completion.toLowerCase()})`).join("; ")}
           </p>
         )}
-        <section aria-labelledby="table-receipt-heading" className="flex flex-col gap-2">
-          <h3 id="table-receipt-heading" className="text-label text-fg-primary">
+        <ReceiptStatus paymentId={payment.paymentId} initial={settlement.receipts} closed={payment.closed} receiptQueue={settlement.receiptQueue} canRetry={canRetry} />
+        <div className="flex justify-end">
+          <Button variant="ghost" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * The consolidated receipt's real queue status (Queued, Sending, Retrying, Delivered, Failed — never "printed") with the
+ * safe retry. `initial` null loads it (after a page reload). A printing problem never touches the payment.
+ */
+function ReceiptStatus({
+  paymentId,
+  initial,
+  closed,
+  receiptQueue,
+  canRetry,
+}: {
+  paymentId: string;
+  initial: ReceiptCopyView[] | null;
+  closed: boolean;
+  receiptQueue: TableBillSettlement["receiptQueue"] | null;
+  canRetry: boolean;
+}) {
+  const [receipts, setReceipts] = React.useState<ReceiptCopyView[] | null>(initial);
+  const [retrying, setRetrying] = React.useState(false);
+  const [retryError, setRetryError] = React.useState<string | null>(null);
+  const startedAt = React.useRef(Date.now());
+
+  React.useEffect(() => {
+    if (initial !== null) return;
+    let live = true;
+    void getTableBillReceiptsAction({ paymentId }).then((res) => {
+      if (live) setReceipts(res.ok ? (res.data as ReceiptCopyView[]) : []);
+    });
+    return () => {
+      live = false;
+    };
+  }, [initial, paymentId]);
+
+  const inFlight = (receipts ?? []).some((copy) => IN_FLIGHT.has(copy.status));
+  React.useEffect(() => {
+    if (!inFlight || Date.now() - startedAt.current > RECEIPT_POLL_LIMIT_MS) return;
+    const timer = setTimeout(() => {
+      void getTableBillReceiptsAction({ paymentId }).then((res) => {
+        if (res.ok) setReceipts(res.data as ReceiptCopyView[]);
+      });
+    }, RECEIPT_POLL_MS);
+    return () => clearTimeout(timer);
+  }, [inFlight, receipts, paymentId]);
+
+  if (receipts === null) return <p className="text-caption text-fg-secondary">Checking the receipt…</p>;
+
+  const failed = receipts.some((copy) => copy.status === "FAILED");
+  const canQueue = closed && receipts.length === 0 && receiptQueue !== "NO_PRINTER";
+
+  async function retry() {
+    setRetrying(true);
+    setRetryError(null);
+    const res = await retryTableBillReceiptsAction({ paymentId });
+    setRetrying(false);
+    if (res.ok) {
+      startedAt.current = Date.now();
+      setReceipts(res.data as ReceiptCopyView[]);
+    } else setRetryError(res.error.message);
+  }
+
+  return (
+        <section aria-labelledby={`receipt-${paymentId}`} className="flex flex-col gap-2">
+          <h3 id={`receipt-${paymentId}`} className="text-label text-fg-primary">
             Receipt
           </h3>
           {receipts.length > 0 ? (
@@ -480,13 +566,13 @@ function PaymentOutcome({ settlement, currencyCode, canRetry, onDismiss }: { set
             </ul>
           ) : (
             <p className="text-body text-fg-secondary">
-              {!payment.closed
+              {!closed
                 ? "The receipt prints once the bill is paid in full."
-                : settlement.receiptQueue === "NO_PRINTER"
+                : receiptQueue === "NO_PRINTER"
                   ? "No receipt printer is set up, so nothing was sent."
-                  : settlement.receiptQueue === "FAILED"
+                  : receiptQueue === "FAILED"
                     ? "The payment is safe, but the receipt could not be queued."
-                    : "No receipt was sent automatically."}
+                    : "No receipt was sent for this bill."}
             </p>
           )}
           {canRetry && (failed || canQueue) && (
@@ -498,12 +584,5 @@ function PaymentOutcome({ settlement, currencyCode, canRetry, onDismiss }: { set
           )}
           {retryError && <p className="text-caption text-status-danger">{retryError}</p>}
         </section>
-        <div className="flex justify-end">
-          <Button variant="ghost" onClick={onDismiss}>
-            Dismiss
-          </Button>
-        </div>
-      </div>
-    </Card>
   );
 }

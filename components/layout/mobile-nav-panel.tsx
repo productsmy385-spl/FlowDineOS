@@ -6,7 +6,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { IconTile } from "@/components/ui/icon-tile";
 import { cn } from "@/lib/ui/cn";
 import { ThemeToggle } from "./theme-toggle";
-import { groupNavItems, isNavItemActive, NAV_HUES, NAV_ICONS, type NavItem } from "@/lib/ui/navigation";
+import { activeNavItem, groupNavItems, NAV_HUES, NAV_ICONS, NAV_ITEMS, type NavItem } from "@/lib/ui/navigation";
 
 /**
  * Mobile side panel (below 768 px; ADR-013 §3 as amended 2026-09-25). Every feature the role may reach, grouped the
@@ -43,7 +43,7 @@ export function MobileNavPanel({
             <p className="px-2 pb-1 text-caption uppercase tracking-wide text-fg-secondary">{group}</p>
             <ul className="flex flex-col gap-1">
               {groupItems.map((item) => {
-                const active = isNavItemActive(item, pathname);
+                const active = item.key === activeNavItem(NAV_ITEMS, pathname)?.key;
                 return (
                   <li key={item.key}>
                     <Link

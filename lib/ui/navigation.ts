@@ -14,6 +14,7 @@ import { DOMAIN_HUES, DOMAIN_ICONS, type DomainHue } from "./icons";
 
 export type NavKey =
   | "dashboard"
+  | "dineIn"
   | "orders"
   | "kitchen"
   | "transactions"
@@ -41,11 +42,19 @@ export type NavItem = {
    * `/restaurant/menu/items` but owns every `/restaurant/menu/*` page (frontend.md §3.1). Defaults to `href`.
    */
   activePrefix?: string;
+  /**
+   * Further route prefixes this item owns although they live under another item's path — Dine-in owns the table bill
+   * pages at `/restaurant/orders/tables/*`. The longest matching prefix decides which item is active.
+   */
+  alsoActiveOn?: readonly string[];
 };
 
 /** Routes that exist today; items from frontend.md §3.1 whose pages are not built yet are added by their feature tasks. */
 export const NAV_ITEMS: readonly NavItem[] = [
   { key: "dashboard", href: "/restaurant/dashboard", label: "Dashboard", group: "Main", capability: "dashboard:read" },
+  // Owner brief 2026-10-14: dine-in tables and their bills are their own area, next to Orders (RASOIOS-ADR-027).
+  // `order:create`: the roles that seat and serve tables; the kitchen works from its own board.
+  { key: "dineIn", href: "/restaurant/dine-in", label: "Dine-in", group: "Operations", capability: "order:create", alsoActiveOn: ["/restaurant/orders/tables"] },
   { key: "orders", href: "/restaurant/orders", label: "Orders", group: "Operations", capability: "order:read" },
   { key: "kitchen", href: "/restaurant/kitchen", label: "Kitchen", group: "Operations", capability: "kot:read" },
   { key: "transactions", href: "/restaurant/transactions", label: "Transactions", group: "Operations", capability: "transaction:read" },
@@ -66,6 +75,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
 /** design.md §5.1 icon for each navigation item. */
 export const NAV_ICONS: Record<NavKey, LucideIcon> = {
   dashboard: DOMAIN_ICONS.dashboard,
+  dineIn: DOMAIN_ICONS.dineIn,
   orders: DOMAIN_ICONS.orders,
   kitchen: DOMAIN_ICONS.kitchen,
   transactions: DOMAIN_ICONS.transactions,
@@ -84,6 +94,7 @@ export const NAV_ICONS: Record<NavKey, LucideIcon> = {
 /** design.md §5.2 domain hue for each navigation item (icon and tile wash only). */
 export const NAV_HUES: Record<NavKey, DomainHue> = {
   dashboard: DOMAIN_HUES.dashboard,
+  dineIn: DOMAIN_HUES.orders,
   orders: DOMAIN_HUES.orders,
   kitchen: DOMAIN_HUES.kitchen,
   transactions: DOMAIN_HUES.transactions,
@@ -150,15 +161,26 @@ export function fitCount(widths: readonly number[], available: number, moreWidth
   return count;
 }
 
-/** True when `pathname` is the item's page or a page below it (or below its `activePrefix` area). */
-export function isNavItemActive(item: Pick<NavItem, "href"> & { activePrefix?: string }, pathname: string): boolean {
-  const base = item.activePrefix ?? item.href;
-  return pathname === base || pathname.startsWith(`${base}/`);
+type Matchable = Pick<NavItem, "href"> & { activePrefix?: string; alsoActiveOn?: readonly string[] };
+
+const under = (pathname: string, base: string) => pathname === base || pathname.startsWith(`${base}/`);
+
+/** The longest of the item's prefixes that `pathname` is on or below; 0 when none. */
+function matchLength(item: Matchable, pathname: string): number {
+  return [item.activePrefix ?? item.href, ...(item.alsoActiveOn ?? [])].filter((base) => under(pathname, base)).reduce((longest, base) => Math.max(longest, base.length), 0);
 }
 
-/** The navigation item for the current page (longest matching href), if any. */
-export function activeNavItem<T extends Pick<NavItem, "href"> & { activePrefix?: string }>(items: readonly T[], pathname: string): T | undefined {
-  return items.filter((item) => isNavItemActive(item, pathname)).sort((a, b) => b.href.length - a.href.length)[0];
+/** True when `pathname` is the item's page or a page below it (or below its `activePrefix` / `alsoActiveOn` areas). */
+export function isNavItemActive(item: Matchable, pathname: string): boolean {
+  return matchLength(item, pathname) > 0;
+}
+
+/** The navigation item for the current page — the one whose matching prefix is the longest — if any. */
+export function activeNavItem<T extends Matchable>(items: readonly T[], pathname: string): T | undefined {
+  return items
+    .map((item) => ({ item, length: matchLength(item, pathname) }))
+    .filter((entry) => entry.length > 0)
+    .sort((a, b) => b.length - a.length)[0]?.item;
 }
 
 /**
@@ -172,8 +194,10 @@ export const BOTTOM_NAV_PRESETS: Readonly<Record<TenantRole, readonly NavKey[]>>
   // Everything else, Menu and Reports included, stays one tap away under More.
   TENANT_ADMIN: ["dashboard", "orders"],
   MANAGER: ["dashboard", "orders"],
-  CASHIER: ["orders", "transactions"],
-  WAITER: ["orders", "customers"],
+  // Counter and floor staff work tables first (owner brief 2026-10-14): Dine-in and Orders; Payments / Customers
+  // stay one tap away under More.
+  CASHIER: ["dineIn", "orders"],
+  WAITER: ["dineIn", "orders"],
   KITCHEN: ["orders", "dailyMenu"],
 };
 

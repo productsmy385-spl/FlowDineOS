@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Menu as MenuIcon } from "lucide-react";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/ui/cn";
-import { isNavItemActive, NAV_ICONS, type NavItem } from "@/lib/ui/navigation";
+import { activeNavItem, NAV_ICONS, NAV_ITEMS, type NavItem } from "@/lib/ui/navigation";
 
 /**
  * Glass bottom bar below 768 px (ADR-013 §3, amended 2026-09-25). The role's four most relevant destinations, the
@@ -54,8 +54,10 @@ export function BottomNav({
   const right = items.slice(2, 4);
   const columns = left.length + right.length + (action ? 1 : 0) + 1;
 
+  // One active item for the page, judged against every item — a table bill under /restaurant/orders belongs to Dine-in.
+  const current = activeNavItem(NAV_ITEMS, pathname)?.key;
   const link = (item: NavItem, emphasis = false) => {
-    const active = isNavItemActive(item, pathname);
+    const active = item.key === current;
     return (
       <Link
         key={item.key}

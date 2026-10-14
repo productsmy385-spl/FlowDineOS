@@ -6,6 +6,7 @@ import {
   closeTableBill,
   getTableBill,
   getTableBillReceipts,
+  listDineInTables,
   listOpenTableBills,
   lookupTableBill,
   payTableBill,
@@ -43,6 +44,12 @@ export const listOpenTableBillsAction = action(async () => {
   const ctx = await requireTenant("order:read");
   requirePermission(ctx, "transaction:read");
   return listOpenTableBills(ctx);
+});
+
+/** The Dine-in grid: tables with their open bills — `order:read` (amounts only with `transaction:read`). */
+export const listDineInTablesAction = action(async () => {
+  const ctx = await requireTenant("order:read");
+  return listDineInTables(ctx);
 });
 
 /** Order entry: which open bill a dine-in order for this table would join — `order:create`. */

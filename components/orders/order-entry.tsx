@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CircleCheck, Clock, MonitorSmartphone, Printer, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
+import { CircleCheck, Clock, MonitorSmartphone, Plus, Printer, Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 import type { OrderType } from "@prisma/client";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -87,13 +87,22 @@ export function OrderEntry({
   canSetPriority,
   canCreateCustomer,
   initialTable = "",
+  initialType,
+  addToBill,
 }: {
   catalogue: OrderEntryCatalogue;
   canSendToKitchen: boolean;
   canSetPriority: boolean;
   canCreateCustomer: boolean;
-  /** Table to start with ("Add order" from a table bill). */
+  /** Table to start with ("Start Order" on a table card). */
   initialTable?: string;
+  /** Order type to start with (e.g. New order from the Takeaway view). */
+  initialType?: OrderType;
+  /**
+   * "+ Add Items" to an open table bill (RASOIOS-ADR-027): the order is fixed to this table and this bill. It is placed
+   * only on this bill — if the bill was settled or closed meanwhile the server refuses it, and nothing else is opened.
+   */
+  addToBill?: { id: string; billNumber: string; tableLabel: string; canViewBill: boolean };
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -106,8 +115,10 @@ export function OrderEntry({
   const [search, setSearch] = React.useState("");
   const [optionsFor, setOptionsFor] = React.useState<string | null>(null);
   const [lines, setLines] = React.useState<CartLine[]>([]);
-  const [orderType, setOrderType] = React.useState<OrderType>(initialTable ? "DINE_IN" : catalogue.defaults.orderType);
-  const [tableLabel, setTableLabel] = React.useState(initialTable);
+  const [orderType, setOrderType] = React.useState<OrderType>(addToBill || initialTable ? "DINE_IN" : (initialType ?? catalogue.defaults.orderType));
+  const [tableLabel, setTableLabel] = React.useState(addToBill?.tableLabel ?? initialTable);
+  /** Add-items mode only: the server said this bill can no longer take orders. */
+  const [billClosed, setBillClosed] = React.useState<string | null>(null);
   const [tableBill, setTableBill] = React.useState<TableBillLookup>({ state: "idle" });
   const [lookupNonce, setLookupNonce] = React.useState(0);
   const [notes, setNotes] = React.useState("");
@@ -169,7 +180,8 @@ export function OrderEntry({
   // refuse instead of silently joining a bill that was settled in the meantime (RASOIOS-ADR-027).
   const table = orderType === "DINE_IN" ? tableLabel.trim() : "";
   React.useEffect(() => {
-    if (!table) {
+    // Adding items to a known bill needs no lookup: the bill is fixed and the server checks it on placing.
+    if (!table || addToBill) {
       setTableBill({ state: "idle" });
       return;
     }
@@ -185,7 +197,7 @@ export function OrderEntry({
       live = false;
       clearTimeout(timer);
     };
-  }, [table, lookupNonce]);
+  }, [table, lookupNonce, addToBill]);
 
   function addLine(line: ChosenLine) {
     setLines((current) => [...current, { ...line, key: crypto.randomUUID() }]);
@@ -227,12 +239,20 @@ export function OrderEntry({
   }
 
   async function submit(printKot: boolean) {
-    if (lines.length === 0) return;
-    if (table && (tableBill.state === "loading" || tableBill.state === "idle")) return;
+    if (lines.length === 0 || billClosed) return;
+    if (!addToBill && table && (tableBill.state === "loading" || tableBill.state === "idle")) return;
     setSubmitting(true);
     setFormError(null);
     setLineErrors({});
-    const expectedTableSessionId = !table ? undefined : tableBill.state === "open" ? tableBill.bill.id : tableBill.state === "none" ? null : undefined;
+    const expectedTableSessionId = addToBill
+      ? addToBill.id
+      : !table
+        ? undefined
+        : tableBill.state === "open"
+          ? tableBill.bill.id
+          : tableBill.state === "none"
+            ? null
+            : undefined;
     const result = await createStaffOrderAction({
       idempotencyKey: idempotency.current(),
       orderType,
@@ -241,7 +261,7 @@ export function OrderEntry({
       printKot,
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(urgent && canSetPriority ? { priority: "HIGH" as const } : {}),
-      ...(canCreateCustomer && customerName.trim()
+      ...(!addToBill && canCreateCustomer && customerName.trim()
         ? { customer: { name: customerName.trim(), ...(customerPhone.trim() ? { phone: customerPhone.trim() } : {}) } }
         : {}),
       sendToKitchen: sendToKitchen && canSendToKitchen,
@@ -255,6 +275,13 @@ export function OrderEntry({
     });
     setSubmitting(false);
 
+    if (!result.ok && addToBill && TABLE_BILL_CONFLICTS.has(result.error.code)) {
+      // The bill these items were for was settled or closed while the screen was open: nothing was saved, and no other
+      // bill is opened from here. Staff go back to Dine-in and choose the table again.
+      setBillClosed(result.error.message);
+      idempotency.reset();
+      return;
+    }
     if (!result.ok && TABLE_BILL_CONFLICTS.has(result.error.code)) {
       // The table's bill changed since it was shown (settled, or opened by someone else): show the new state and let
       // the person decide; nothing was saved. The same cart is a new attempt, so it gets a new key.
@@ -333,6 +360,38 @@ export function OrderEntry({
             })}
           </ul>
         )}
+        {addToBill ? (
+          <div className="flex flex-wrap gap-3">
+            {addToBill.canViewBill ? (
+              <Link
+                href={`/restaurant/orders/tables/${addToBill.id}`}
+                className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-subheading text-action-primary-fg hover:bg-action-primary-hover"
+              >
+                View table bill
+              </Link>
+            ) : (
+              <Link
+                href="/restaurant/dine-in"
+                className="inline-flex h-12 items-center rounded-xl bg-action-primary px-5 text-subheading text-action-primary-fg hover:bg-action-primary-hover"
+              >
+                Back to Dine-in
+              </Link>
+            )}
+            <Button
+              variant="secondary"
+              size="lg"
+              icon={Plus}
+              onClick={() => {
+                setSaved(null);
+                resetForNextOrder();
+                setOrderType("DINE_IN");
+                setTableLabel(addToBill.tableLabel);
+              }}
+            >
+              Add more items
+            </Button>
+          </div>
+        ) : (
         <div className="flex flex-wrap gap-3">
           {saved.tableBill ? (
             <Link
@@ -378,6 +437,7 @@ export function OrderEntry({
             Back to the board
           </Link>
         </div>
+        )}
       </Card>
     );
   }
@@ -395,19 +455,37 @@ export function OrderEntry({
     );
   }
 
-  // A dine-in order waits for the table lookup, so it is always placed knowing which bill it joins.
-  const tableBusy = Boolean(table) && (tableBill.state === "loading" || tableBill.state === "idle");
+  // A dine-in order waits for the table lookup, so it is always placed knowing which bill it joins. Adding to a known
+  // bill needs no lookup; a bill the server reported closed takes nothing more from this screen.
+  const tableBusy = Boolean(billClosed) || (!addToBill && Boolean(table) && (tableBill.state === "loading" || tableBill.state === "idle"));
 
   const orderPanel = (
     <div className="flex flex-col gap-4">
-      <Select
-        label="Order type"
-        size="touch"
-        value={orderType}
-        onChange={(event) => setOrderType(event.target.value as OrderType)}
-        options={ORDER_TYPES.map((type) => ({ value: type, label: ORDER_TYPE_LABELS[type] }))}
-      />
-      {orderType === "DINE_IN" && (
+      {addToBill ? (
+        <div className="rounded-xl border border-action-primary/40 bg-action-primary/8 p-3">
+          <p className="text-subheading text-fg-primary">Table {addToBill.tableLabel}</p>
+          <p className="text-caption text-fg-secondary">
+            Adding to bill <span className="text-numeric">{addToBill.billNumber}</span> — a new order with its own KOT.
+          </p>
+        </div>
+      ) : (
+        <Select
+          label="Order type"
+          size="touch"
+          value={orderType}
+          onChange={(event) => setOrderType(event.target.value as OrderType)}
+          options={ORDER_TYPES.map((type) => ({ value: type, label: ORDER_TYPE_LABELS[type] }))}
+        />
+      )}
+      {billClosed && (
+        <Alert tone="warning" title="This bill can't take more items">
+          <span className="block">{billClosed}</span>
+          <Link href="/restaurant/dine-in" className="mt-2 inline-flex text-label text-fg-accent hover:underline">
+            Back to Dine-in
+          </Link>
+        </Alert>
+      )}
+      {!addToBill && orderType === "DINE_IN" && (
         <TextField
           label="Table"
           size="touch"
@@ -420,7 +498,7 @@ export function OrderEntry({
           help="Letters, digits, spaces and dashes."
         />
       )}
-      {table && (
+      {!addToBill && table && (
         <p role="status" aria-live="polite" className="-mt-2 text-caption">
           {tableBill.state === "loading" || tableBill.state === "idle" ? (
             <span className="text-fg-secondary">Checking table {table}…</span>
@@ -468,7 +546,7 @@ export function OrderEntry({
       )}
 
       <div className="flex flex-col gap-2 border-t border-border-subtle pt-4">
-        <p className="text-caption text-fg-secondary">Running total — priced by the server</p>
+        <p className="text-caption text-fg-secondary">{addToBill ? "This new order — priced by the server; the table bill adds it" : "Running total — priced by the server"}</p>
         {quoteError && <Alert tone="danger">{quoteError}</Alert>}
         <dl className="flex flex-col gap-1">
           <div className="flex justify-between gap-4">
@@ -488,7 +566,7 @@ export function OrderEntry({
         </dl>
       </div>
 
-      {canCreateCustomer && (
+      {canCreateCustomer && !addToBill && (
         <div className="flex flex-col gap-3 border-t border-border-subtle pt-4">
           <TextField label="Customer name" size="touch" maxLength={120} value={customerName} onChange={(event) => setCustomerName(event.target.value)} help="Optional." />
           <TextField

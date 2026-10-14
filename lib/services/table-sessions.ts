@@ -5,6 +5,7 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { audit } from "@/lib/audit/write";
 import { billTotals, groupBillLines, isBilled, outstandingOf, tableKeyOf, type BillTotals } from "@/lib/billing/table-bill";
 import { findCustomerByPhone } from "@/lib/data/customers";
+import { listTables } from "@/lib/data/dining-tables";
 import { moneyDto, nullableMoneyDto, rateDto, type MoneyString } from "@/lib/data/dto";
 import { listTableBillReceiptJobs } from "@/lib/data/printing";
 import { required } from "@/lib/data/scope";
@@ -67,6 +68,8 @@ export type TableBillView = {
     balance: MoneyString;
     createdAt: string;
     kots: Array<{ kotNumber: string; status: KotStatus; round: number }>;
+    /** The order's own lines, as sold (for the order-history cards). */
+    items: Array<{ name: string; quantity: number; lineTotal: MoneyString }>;
   }>;
   lines: Array<{
     name: string;
@@ -131,6 +134,7 @@ function toView(ctx: TenantContext, session: SessionRow, orders: SessionOrder[],
       balance: isBilled(o.status) ? moneyDto(outstandingOf(o)) : "0.00",
       createdAt: o.createdAt.toISOString(),
       kots: o.kots.map((k) => ({ kotNumber: k.kotNumber, status: k.status, round: k.round })),
+      items: o.items.map((i) => ({ name: i.name, quantity: i.quantity, lineTotal: moneyDto(i.lineTotal) })),
     })),
     lines: groupBillLines(orders).map((line) => ({
       name: line.name,
@@ -193,6 +197,77 @@ export async function listOpenTableBills(ctx: TenantContext): Promise<OpenTableB
       openedAt: row.openedAt.toISOString(),
     };
   });
+}
+
+// ─── Dine-in table overview ───
+
+export type DineInTable = {
+  /** Normalised table key: one card per table however it was typed. */
+  key: string;
+  label: string;
+  /** The configured table (Settings → Tables), or null for a table typed on an order that is not in the list. */
+  diningTableId: string | null;
+  /** The table's OPEN bill, or null when the table is available. Closed and settled bills are never shown here. */
+  bill: {
+    id: string;
+    billNumber: string;
+    state: TableBillState;
+    orderCount: number;
+    openedAt: string;
+    /** Null for a role that may not see amounts (a waiter). */
+    balance: MoneyString | null;
+    total: MoneyString | null;
+  } | null;
+};
+
+/**
+ * The Dine-in grid: the restaurant's active configured tables in their own order, each with its OPEN bill if it has
+ * one, followed by any open bill for a table that is not configured (staff typed it on an order). Availability is the
+ * table-session rule — a table is occupied exactly while it has an OPEN bill — never a guess from the latest order.
+ * Amounts only for roles holding `transaction:read`.
+ */
+export async function listDineInTables(ctx: TenantContext): Promise<DineInTable[]> {
+  const withMoney = hasPermission(ctx, "transaction:read");
+  const [configured, open] = await Promise.all([withTx(ctx, (tx) => listTables(tx, ctx)), listOpenSessions(ctx)]);
+  const bills = new Map(
+    open.map((row) => {
+      const totals = billTotals(row.orders);
+      return [
+        row.tableKey,
+        {
+          id: row.id,
+          label: row.tableLabel,
+          bill: {
+            id: row.id,
+            billNumber: row.billNumber,
+            state: stateOf(row, row.orders, totals),
+            orderCount: row.orderCount,
+            openedAt: row.openedAt.toISOString(),
+            balance: withMoney ? moneyDto(totals.balance) : null,
+            total: withMoney ? moneyDto(totals.total) : null,
+          },
+        },
+      ] as const;
+    }),
+  );
+
+  const cards: DineInTable[] = [];
+  for (const table of configured) {
+    const key = tableKeyOf(table.label);
+    const open = bills.get(key);
+    if (!table.isActive && !open) continue;
+    cards.push({ key, label: table.label, diningTableId: table.id, bill: open?.bill ?? null });
+    bills.delete(key);
+  }
+  for (const [key, open] of bills) cards.push({ key, label: open.label, diningTableId: null, bill: open.bill });
+  return cards;
+}
+
+/** What the Add Items screen shows about the bill it adds to — no amounts, so a waiter may see it. */
+export async function getTableBillSummary(ctx: TenantContext, sessionId: string): Promise<{ id: string; billNumber: string; tableLabel: string; open: boolean }> {
+  const session = await withTx(ctx, (tx) => findSession(tx, ctx, sessionId));
+  if (!session) throw new NotFoundError("Table bill not found");
+  return { id: session.id, billNumber: session.billNumber, tableLabel: session.tableLabel, open: session.status === TableSessionStatus.OPEN };
 }
 
 /** Order entry: the open bill a new dine-in order for `tableLabel` would join, or null when it would open one. */

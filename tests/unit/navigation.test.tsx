@@ -38,6 +38,7 @@ describe("capability-filtered navigation", () => {
   it("shows every area to TENANT_ADMIN", () => {
     expect(labels("TENANT_ADMIN")).toEqual([
       "dashboard",
+      "dineIn",
       "orders",
       "kitchen",
       "transactions",
@@ -57,8 +58,10 @@ describe("capability-filtered navigation", () => {
   it("hides management and money areas from WAITER and KITCHEN", () => {
     // Menu and daily menu are read-only for these roles (`menu:read` / `daily_menu:read`), so the links stay.
     // No Settings for staff: it is a management screen (ADR-019, owner 2026-10-02).
-    expect(labels("WAITER")).toEqual(["orders", "kitchen", "customers", "menu", "dailyMenu"]);
+    expect(labels("WAITER")).toEqual(["dineIn", "orders", "kitchen", "customers", "menu", "dailyMenu"]);
+    // The kitchen works from its own board: no Dine-in item (it takes no orders).
     expect(labels("KITCHEN")).toEqual(["orders", "kitchen", "menu", "dailyMenu", "printing"]);
+    expect(labels("CASHIER")).toContain("dineIn");
     expect(labels("CASHIER")).not.toContain("settings");
     expect(labels("CASHIER")).not.toContain("reports");
     expect(labels("CASHIER")).not.toContain("dashboard");
@@ -85,7 +88,7 @@ describe("capability-filtered navigation", () => {
 describe("header navigation (ADR-013 §3)", () => {
   it("orders items so Main and Operations survive the squeeze and Settings goes into More first", () => {
     const keys = headerNavItems(navItemsFor(permissionsForTenantRole("TENANT_ADMIN"))).map((i) => i.key);
-    expect(keys.slice(0, 5)).toEqual(["dashboard", "orders", "kitchen", "transactions", "customers"]);
+    expect(keys.slice(0, 5)).toEqual(["dashboard", "dineIn", "orders", "kitchen", "transactions"]);
     expect(keys.slice(-2)).toEqual(["printing", "settings"]);
     const groups = keys.map((key) => NAV_ITEMS.find((item) => item.key === key)!.group);
     const priorities = groups.map((group) => NAV_OVERFLOW_PRIORITY[group]);
@@ -95,8 +98,8 @@ describe("header navigation (ADR-013 §3)", () => {
   it("splits the header at the measured count and puts the rest in More", () => {
     const items = navItemsFor(permissionsForTenantRole("TENANT_ADMIN"));
     const { visible, overflow } = splitNavOverflow(items, 4);
-    expect(visible.map((i) => i.key)).toEqual(["dashboard", "orders", "kitchen", "transactions"]);
-    expect(overflow.map((i) => i.key)).toEqual(["customers", "menu", "dailyMenu", "social", "website", "staff", "reports", "audit", "printing", "settings"]);
+    expect(visible.map((i) => i.key)).toEqual(["dashboard", "dineIn", "orders", "kitchen"]);
+    expect(overflow.map((i) => i.key)).toEqual(["transactions", "customers", "menu", "dailyMenu", "social", "website", "staff", "reports", "audit", "printing", "settings"]);
     expect([...visible, ...overflow]).toHaveLength(items.length);
     // Degenerate counts never drop or duplicate an item.
     expect(splitNavOverflow(items, 0).overflow).toHaveLength(items.length);
@@ -128,6 +131,14 @@ describe("header navigation (ADR-013 §3)", () => {
     expect(activeNavItem(items, "/account/select-tenant")).toBeUndefined();
   });
 
+  it("keeps Dine-in active on its page and on table bills, which live under /restaurant/orders", () => {
+    const items = navItemsFor(permissionsForTenantRole("CASHIER"));
+    expect(activeNavItem(items, "/restaurant/dine-in")?.key).toBe("dineIn");
+    expect(activeNavItem(items, "/restaurant/orders/tables/0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b")?.key).toBe("dineIn");
+    expect(activeNavItem(items, "/restaurant/orders/new")?.key).toBe("orders");
+    expect(activeNavItem(items, "/restaurant/orders/tablesx")?.key).toBe("orders");
+  });
+
   it("keeps Menu active across its whole area and never confuses it with the daily menu (frontend.md §3.1)", () => {
     const items = navItemsFor(permissionsForTenantRole("TENANT_ADMIN"));
     expect(activeNavItem(items, "/restaurant/menu/items")?.key).toBe("menu");
@@ -148,9 +159,12 @@ describe("header navigation (ADR-013 §3)", () => {
 describe("bottom bar (< 768 px)", () => {
   it("shows at most four of the role's allowed areas, in preset order", () => {
     expect(bottomNavItemsFor("TENANT_ADMIN", permissionsForTenantRole("TENANT_ADMIN")).map((i) => i.key)).toEqual(["dashboard", "orders"]);
-    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["orders", "customers"]);
+    expect(bottomNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toEqual(["dineIn", "orders"]);
     expect(bottomNavItemsFor("KITCHEN", permissionsForTenantRole("KITCHEN")).map((i) => i.key)).toEqual(["orders", "dailyMenu"]);
-    expect(bottomNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toEqual(["orders", "transactions"]);
+    expect(bottomNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toEqual(["dineIn", "orders"]);
+    // Payments and Customers moved off the bar for counter and floor staff, and are still one tap away under More.
+    expect(moreNavItemsFor("CASHIER", permissionsForTenantRole("CASHIER")).map((i) => i.key)).toContain("transactions");
+    expect(moreNavItemsFor("WAITER", permissionsForTenantRole("WAITER")).map((i) => i.key)).toContain("customers");
     for (const role of ROLES) {
       const caps = permissionsForTenantRole(role);
       const items = bottomNavItemsFor(role, caps);

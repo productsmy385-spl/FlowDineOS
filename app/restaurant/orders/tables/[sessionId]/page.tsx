@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { notFound } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { ForbiddenState } from "@/components/states/access-states";
@@ -35,17 +36,22 @@ export default async function TableBillPage({ params }: { params: Promise<{ sess
   });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4 lg:gap-6">
+      <Link href="/restaurant/dine-in" className="inline-flex min-h-11 items-center gap-2 self-start text-label text-fg-accent hover:underline">
+        <ArrowLeft className="size-4" aria-hidden />
+        Back to Dine-in
+      </Link>
       <PageHeader
         title={`Table ${bill.tableLabel}`}
         description={
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="text-numeric">Bill {bill.billNumber}</span>
-            <BillStateChip state={bill.state} />
+            <span>
+              Bill <span className="text-numeric">{bill.billNumber}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              Status <BillStateChip state={bill.state} />
+            </span>
             <span>Opened {formatInZone(bill.openedAt, ctx.restaurant.timezone, "time")}</span>
-            <Link href="/restaurant/orders" className="text-fg-accent hover:underline">
-              Back to orders
-            </Link>
           </span>
         }
       />

@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import type { OrderStatus } from "@prisma/client";
+import type { OrderStatus, OrderType } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable, type DataTableColumn } from "@/components/ui/data-table";
@@ -76,7 +76,10 @@ export function OrderBoard({
   canCreate,
   canRecordPayment = false,
   openTables = null,
+  orderType,
 }: {
+  /** Only this kind of order (the Takeaway view); every order when omitted. */
+  orderType?: OrderType;
   initial: OrderBoardPage;
   transitions: Record<OrderStatus, TransitionTarget[]>;
   timezone: string;
@@ -131,7 +134,7 @@ export function OrderBoard({
   }, [canSeeTables]);
 
   const { stale, lastSuccessAt, refetch } = usePolling<OrderBoardPage>({
-    url: "/api/v1/orders",
+    url: orderType ? `/api/v1/orders?type=${orderType}` : "/api/v1/orders",
     intervalMs: POLL_INTERVAL_MS,
     resyncEveryMs: 60_000,
     onData: onDelta,
@@ -272,7 +275,7 @@ export function OrderBoard({
         <Card>
           <EmptyState
             icon={DOMAIN_ICONS.orders}
-            title={needle ? "No orders match your search" : showingClosed ? "Nothing closed today yet" : "No active orders"}
+            title={needle ? "No orders match your search" : showingClosed ? "Nothing closed today yet" : orderType === "TAKEAWAY" ? "No active takeaway orders" : "No active orders"}
             description={
               needle
                 ? "Clear the search to see the whole board."
@@ -280,7 +283,9 @@ export function OrderBoard({
                   ? "Completed and cancelled orders from today appear here."
                   : "Orders taken at the counter appear here as soon as they are saved."
             }
-            {...(canCreate && !needle && !showingClosed ? { action: { href: "/restaurant/orders/new", label: "New order" } } : {})}
+            {...(canCreate && !needle && !showingClosed
+              ? { action: { href: orderType ? `/restaurant/orders/new?type=${orderType}` : "/restaurant/orders/new", label: "New order" } }
+              : {})}
           />
         </Card>
       ) : showingClosed ? (
