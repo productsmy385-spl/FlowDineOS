@@ -28,7 +28,7 @@ function publicRedirectUrl(location: string, req: NextRequest, targetHost?: stri
 
 /** Sanitize request headers forwarded downstream to Next.js Server Components so redirect() never sees internal ports */
 function sanitizeForwardedHeaders(headers: Headers, req: NextRequest): Headers {
-  const rawHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || "flowdine.in";
+  const rawHost = req.headers.get("host") || req.headers.get("x-forwarded-host") || "flowdine.in";
   const host = normalizeHost(rawHost) || "flowdine.in";
   const isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
 
@@ -258,6 +258,14 @@ export default clerkMiddleware(async (auth, req) => {
   response.headers.set("content-security-policy", csp);
   if (mustNotBeStored(pathname)) response.headers.set("cache-control", "no-store");
   return response;
+}, (req) => {
+  const rootDomain = normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN);
+  const rawHost = req.headers.get("host") || "";
+  const host = normalizeHost(rawHost) || "";
+  if (rootDomain && (host === rootDomain || host.endsWith(`.${rootDomain}`))) {
+    return { domain: rootDomain };
+  }
+  return {};
 });
 
 export const config = {

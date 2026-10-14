@@ -179,6 +179,14 @@ describe("TC-FOUND-003 environment validation", () => {
     expect(problemsOf(elsewhere)).toContain("NEXT_PUBLIC_APP_URL: must use https in production");
   });
 
+  it("defaults NEXT_PUBLIC_CLERK_DOMAIN to normalized PUBLIC_ROOT_DOMAIN for cross-subdomain sessions", () => {
+    const env: Record<string, string | undefined> = {
+      PUBLIC_ROOT_DOMAIN: "https://flowdine.in",
+    };
+    applyPlatformDefaults(env);
+    expect(env.NEXT_PUBLIC_CLERK_DOMAIN).toBe("flowdine.in");
+  });
+
   it("appUrl() reads the live value, not a build-time copy", async () => {
     const { appUrl } = await import("@/lib/env");
     const previous = process.env.NEXT_PUBLIC_APP_URL;

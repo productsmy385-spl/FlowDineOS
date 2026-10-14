@@ -40,8 +40,6 @@ export function tokenHashesMatch(a: string, b: string): boolean {
 export const STAFF_SESSION_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  // `strict`, not `lax`: nothing should ever navigate into a staff session from another site. The console is not
-  // linked to from anywhere public, so there is no cross-site entry point to preserve.
-  sameSite: "strict" as const,
+  sameSite: "lax" as const,
   path: "/",
 };

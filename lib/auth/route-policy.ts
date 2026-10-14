@@ -19,14 +19,6 @@ const PUBLIC_EXACT = new Set(["/", "/book-demo", "/privacy", "/terms", "/offline
 // password is checked server-side and rate limited there (RASOIOS-ADR-019 §5).
 const PUBLIC_PREFIXES = ["/r/", "/sign-in", "/sign-up", "/staff-login", "/staff/login", "/icons/"];
 
-/**
- * Paths that sit under a public prefix but are not public. `/sign-in/landing` reads the caller's platform role and
- * memberships and sends each user somewhere different, so it is an ordinary signed-in page that happens to live under
- * `/sign-in`. Classifying it `public` gave its per-user redirect no `no-store`, so a browser could replay the redirect
- * it received while signed out — back to `/sign-in` — and the sign-in form appeared to hang until a manual reload.
- */
-const PRIVATE_EXACT = new Set(["/sign-in/landing"]);
-
 function matchesPrefix(pathname: string, prefix: string): boolean {
   // "/sign-in" matches "/sign-in" and "/sign-in/…" but not "/sign-inx".
   if (prefix.endsWith("/")) return pathname.startsWith(prefix);
@@ -36,7 +28,6 @@ function matchesPrefix(pathname: string, prefix: string): boolean {
 export function classifyRoute(pathname: string): RouteKind {
   if (pathname === "/api/webhooks/clerk") return "webhook";
   if (pathname === "/api/v1/print-agent" || pathname.startsWith("/api/v1/print-agent/")) return "agent";
-  if (PRIVATE_EXACT.has(pathname)) return "page";
   if (PUBLIC_EXACT.has(pathname) || PUBLIC_PREFIXES.some((p) => matchesPrefix(pathname, p))) return "public";
   if (pathname === "/api" || pathname.startsWith("/api/")) return "api";
   return "page";
@@ -49,11 +40,15 @@ export function classifyRoute(pathname: string): RouteKind {
  * restaurant's — data. Without this a shared cache (a corporate proxy, a CDN put in front of the app, the browser's
  * back/forward cache) may hold a console page rendered for one person and hand it to the next.
  *
+ * `/sign-in/landing` is dynamic and answers per-user, so it must carry `no-store` to prevent caching the redirect,
+ * but it remains classified as public so middleware does not prematurely bounce signed-out requests before the
+ * client-side handshake in `<CompletingSignIn />` has a chance to exchange cookies.
+ *
  * Public routes are deliberately excluded: `/r/{slug}` is the same page for everyone and is served from the ISR cache
  * with `revalidate = 60` (api.md §7), which `no-store` would defeat.
  */
 export function mustNotBeStored(pathname: string): boolean {
-  return classifyRoute(pathname) !== "public";
+  return pathname === "/sign-in/landing" || classifyRoute(pathname) !== "public";
 }
 
 /**

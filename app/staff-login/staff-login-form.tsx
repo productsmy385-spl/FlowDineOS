@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
 import { useAuth, useClerk } from "@clerk/nextjs";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/inputs";
@@ -16,7 +15,6 @@ import { staffLoginAction } from "./actions";
  * today's (C15).
  */
 export function StaffLoginForm() {
-  const router = useRouter();
   const { isSignedIn } = useAuth();
   const { signOut } = useClerk();
   const [email, setEmail] = React.useState("");
@@ -51,8 +49,7 @@ export function StaffLoginForm() {
       return;
     }
     // The role decides the page; /restaurant resolves it from the session the cookie just established.
-    router.replace("/restaurant");
-    router.refresh();
+    window.location.assign("/restaurant");
   }
 
   return (

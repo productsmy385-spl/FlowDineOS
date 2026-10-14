@@ -167,6 +167,11 @@ let cached: ServerEnv | undefined;
  * process.env at request time, so the default reaches every consumer.
  */
 export function applyPlatformDefaults(env: Record<string, string | undefined>): void {
+  const root = normalizeRootDomain(env.PUBLIC_ROOT_DOMAIN);
+  if (root && !env.NEXT_PUBLIC_CLERK_DOMAIN) {
+    env.NEXT_PUBLIC_CLERK_DOMAIN = root;
+  }
+
   const railwayDomain = env.RAILWAY_PUBLIC_DOMAIN?.trim();
   if (!railwayDomain || !/^[a-z0-9.-]+$/i.test(railwayDomain)) return;
 

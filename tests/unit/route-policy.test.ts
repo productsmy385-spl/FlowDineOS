@@ -29,17 +29,14 @@ describe("classifyRoute", () => {
     expect(classifyRoute(pathname)).toBe(kind);
   });
 
-  // The post-sign-in landing answers differently for every user, so it is a page even though it lives under
-  // `/sign-in`. When it counted as public its per-user redirect carried no `no-store`, and a browser could replay
-  // the one it was given while signed out — straight back to `/sign-in`.
-  it("treats the post-sign-in landing as a signed-in page, not a public route", () => {
-    expect(classifyRoute("/sign-in/landing")).toBe("page");
+  // The post-sign-in landing answers differently for every user, so it must carry `no-store` to prevent
+  // replay/caching of redirects. It is classified as public at the edge so middleware does not prematurely
+  // bounce requests to /sign-in before the client-side `<CompletingSignIn />` completes the session handshake.
+  it("treats the post-sign-in landing as a public route with no-store cache control", () => {
+    expect(classifyRoute("/sign-in/landing")).toBe("public");
     expect(mustNotBeStored("/sign-in/landing")).toBe(true);
     expect(gate("/sign-in/landing", "", true, rid)).toEqual({ action: "next" });
-    expect(gate("/sign-in/landing", "", false, rid)).toEqual({
-      action: "redirect",
-      location: "/sign-in?redirect_url=%2Fsign-in%2Flanding",
-    });
+    expect(gate("/sign-in/landing", "", false, rid)).toEqual({ action: "next" });
   });
 
   it("keeps the sign-in form itself public", () => {
@@ -148,5 +145,12 @@ describe("staff daily-password sessions at the gate", () => {
       action: "redirect",
       location: "/sign-in?redirect_url=%2Frestaurant",
     });
+  });
+
+  it("configures staff session cookies with sameSite: lax to survive document navigation", async () => {
+    const { STAFF_SESSION_COOKIE_OPTIONS } = await import("@/lib/auth/staff-session-cookie");
+    expect(STAFF_SESSION_COOKIE_OPTIONS.sameSite).toBe("lax");
+    expect(STAFF_SESSION_COOKIE_OPTIONS.path).toBe("/");
+    expect(STAFF_SESSION_COOKIE_OPTIONS.httpOnly).toBe(true);
   });
 });
