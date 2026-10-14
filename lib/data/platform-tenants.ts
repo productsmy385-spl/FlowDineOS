@@ -620,3 +620,9 @@ export async function writeFeatureSwitches(ctx: PlatformContext, tx: Tx, tenantI
     });
   }
 }
+
+/** Looks up a tenant's assigned subdomain if configured. */
+export async function getTenantSubdomain(tenantId: string): Promise<string | null> {
+  const row = await db.tenant.findUnique({ where: { id: tenantId }, select: { subdomain: true } });
+  return row?.subdomain ?? null;
+}

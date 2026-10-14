@@ -34,11 +34,17 @@ function presetReference(): EditorReference {
   return { presetPalettes: presets, surfaceHex: SURFACE_HEX, onSurfaceHex };
 }
 
+import { configuredRootDomain } from "@/lib/tenancy/request";
+
 export default async function WebsiteSettingsPage() {
   // Management screen: owners edit, managers read (`canEdit`); cashier, kitchen and waiter staff are refused it like
   // every other management screen (TC-ROLE-010).
   const ctx = await requireTenantPage("dashboard:read");
   const [settings, snapshot] = await Promise.all([getWebsiteSettings(ctx), getRestaurantSettingsSnapshot(ctx)]);
+
+  const rootDomain = configuredRootDomain() ?? (process.env.NODE_ENV !== "test" ? "flowdine.in" : null);
+  const sub = snapshot.subdomain || snapshot.slug;
+  const publicPath = rootDomain ? `https://${sub}.${rootDomain}` : `/r/${snapshot.slug}`;
 
   return (
     <>
@@ -53,7 +59,7 @@ export default async function WebsiteSettingsPage() {
           name: snapshot.restaurant.name,
           slug: snapshot.slug,
           published: snapshot.restaurant.websitePublished,
-          publicPath: `/r/${snapshot.slug}`,
+          publicPath,
         }}
       />
     </>

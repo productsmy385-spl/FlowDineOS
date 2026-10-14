@@ -9,7 +9,7 @@ export function BrandMark({ href, context, className }: { href: string; /** e.g.
   return (
     <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3 rounded-xl", className)}>
       <span className="brand-gradient inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl p-0.5 shadow-e1">
-        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-white">
+        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-transparent">
           <Image
             src="/logo.png"
             alt="FlowDineOS logo"

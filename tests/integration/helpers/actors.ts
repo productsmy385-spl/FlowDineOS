@@ -27,8 +27,13 @@ const DEF = { A: TENANTS[0], B: TENANTS[1] } as const;
 export const SEED_NOW = new Date("2026-09-15T08:30:00.000Z");
 export const SUPER_ADMIN_EMAIL = "platform.owner+clerk_test@example.com";
 
+const activeStaffTokens = new Map<string, string>();
+const inFlightStaffSessions = new Map<string, Promise<string>>();
+
 /** Resets the database and loads the two-tenant seed. Call once per file (beforeAll). */
 export async function seedOnce(): Promise<void> {
+  activeStaffTokens.clear();
+  inFlightStaffSessions.clear();
   const db = testDb();
   await resetDatabase(db);
   await seedDatabase(db, { now: SEED_NOW, superAdminEmail: SUPER_ADMIN_EMAIL, appUrl: "http://localhost:3000" });
@@ -79,51 +84,88 @@ export async function asSeedUser(tenant: TenantKey, role: TenantRole): Promise<{
  * not pay scrypt (and the login rate limit) for every actor switch.
  */
 async function openSeededStaffSession(input: { tenantId: string; membershipId: string; userId: string; role: TenantRole }): Promise<void> {
-  const db = testDb();
-  // Fixed instants, not Date.now(): several suites freeze the clock ("one minute before midnight in Kolkata"), and a
-  // credential stamped from a faked now would expire before the database's real created_at, which the
-  // staff_credentials_expires_after_creation_check rightly refuses. Valid from 2000 to 2099 is valid under any clock
-  // a test can set.
-  const since = new Date("2000-01-01T00:00:00.000Z");
-  const expiresAt = new Date("2099-12-31T00:00:00.000Z");
-  const businessDate = new Date("2026-09-15T00:00:00.000Z");
+  const cacheKey = `${input.tenantId}:${input.membershipId}`;
 
-  await db.staffSession.deleteMany({
-    where: { tenantId: input.tenantId, membershipId: input.membershipId },
-  });
-  await db.staffCredential.deleteMany({
-    where: { tenantId: input.tenantId, membershipId: input.membershipId },
-  });
-  const credential = await db.staffCredential.create({
-    data: {
-      tenantId: input.tenantId,
-      membershipId: input.membershipId,
-      userId: input.userId,
-      passwordHash: "scrypt$65536$8$1$c2FsdHNhbHRzYWx0c2E=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=",
-      businessDate,
-      expiresAt,
-      generatedByUserId: input.userId,
-      createdAt: since,
-    },
-    select: { id: true },
-  });
-  const token = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "").slice(0, 11);
-  await db.staffSession.create({
-    data: {
-      tenantId: input.tenantId,
-      membershipId: input.membershipId,
-      userId: input.userId,
-      credentialId: credential.id,
-      role: input.role,
-      tokenHash: hashStaffSessionToken(token),
-      businessDate,
-      expiresAt,
-      loginAt: since,
-      lastSeenAt: since,
-    },
-  });
-  resetActorState();
-  actorState.cookies.set(STAFF_SESSION_COOKIE, token);
+  if (inFlightStaffSessions.has(cacheKey)) {
+    const token = await inFlightStaffSessions.get(cacheKey)!;
+    resetActorState();
+    actorState.cookies.set(STAFF_SESSION_COOKIE, token);
+    return;
+  }
+
+  const existingToken = activeStaffTokens.get(cacheKey);
+  if (existingToken) {
+    const active = await testDb().staffSession.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        membershipId: input.membershipId,
+        status: "ACTIVE",
+        tokenHash: hashStaffSessionToken(existingToken),
+      },
+    });
+    if (active) {
+      resetActorState();
+      actorState.cookies.set(STAFF_SESSION_COOKIE, existingToken);
+      return;
+    }
+  }
+
+  const promise = (async () => {
+    const db = testDb();
+    // Fixed instants, not Date.now(): several suites freeze the clock ("one minute before midnight in Kolkata"), and a
+    // credential stamped from a faked now would expire before the database's real created_at, which the
+    // staff_credentials_expires_after_creation_check rightly refuses. Valid from 2000 to 2099 is valid under any clock
+    // a test can set.
+    const since = new Date("2000-01-01T00:00:00.000Z");
+    const expiresAt = new Date("2099-12-31T00:00:00.000Z");
+    const businessDate = new Date("2026-09-15T00:00:00.000Z");
+
+    await db.staffSession.deleteMany({
+      where: { tenantId: input.tenantId, membershipId: input.membershipId },
+    });
+    await db.staffCredential.deleteMany({
+      where: { tenantId: input.tenantId, membershipId: input.membershipId },
+    });
+    const credential = await db.staffCredential.create({
+      data: {
+        tenantId: input.tenantId,
+        membershipId: input.membershipId,
+        userId: input.userId,
+        passwordHash: "scrypt$65536$8$1$c2FsdHNhbHRzYWx0c2E=$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g=",
+        businessDate,
+        expiresAt,
+        generatedByUserId: input.userId,
+        createdAt: since,
+      },
+      select: { id: true },
+    });
+    const token = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "").slice(0, 11);
+    await db.staffSession.create({
+      data: {
+        tenantId: input.tenantId,
+        membershipId: input.membershipId,
+        userId: input.userId,
+        credentialId: credential.id,
+        role: input.role,
+        tokenHash: hashStaffSessionToken(token),
+        businessDate,
+        expiresAt,
+        loginAt: since,
+        lastSeenAt: since,
+      },
+    });
+    activeStaffTokens.set(cacheKey, token);
+    return token;
+  })();
+
+  inFlightStaffSessions.set(cacheKey, promise);
+  try {
+    const token = await promise;
+    resetActorState();
+    actorState.cookies.set(STAFF_SESSION_COOKIE, token);
+  } finally {
+    inFlightStaffSessions.delete(cacheKey);
+  }
 }
 
 /** Acts as any existing USER row. */

@@ -15,6 +15,7 @@ import { requirePlatformPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
 import { NotFoundError } from "@/lib/errors";
 import { getTenantFeatures, inspectTenant, type TenantFeatureView } from "@/lib/services/platform-tenants";
+import { getTenantSubdomain } from "@/lib/data/platform-tenants";
 import { TenantFeaturesCard } from "@/components/admin/feature-switches";
 import { normalizeRootDomain } from "@/lib/tenancy/hostnames";
 import { formatInZone } from "@/lib/ui/format";
@@ -61,8 +62,10 @@ export default async function TenantDetailPage({ params, searchParams }: { param
   const invitation = typeof query.invitation === "string" ? query.invitation : undefined;
   const firstAdminEmail = members[0]?.email;
 
+  const tenantSubdomain = (await getTenantSubdomain(tenant.id)) || tenant.slug;
+
   const details: DescriptionItem[] = [
-    { term: "Public address", value: <PublicAddress slug={tenant.slug} rootDomain={rootDomain} /> },
+    { term: "Public address", value: <PublicAddress slug={tenantSubdomain} rootDomain={rootDomain} /> },
     { term: "Created", value: utc(tenant.createdAt) },
     { term: "Time zone", value: restaurant?.timezone ?? "—" },
     { term: "Currency", value: restaurant?.currencyCode ?? "—" },

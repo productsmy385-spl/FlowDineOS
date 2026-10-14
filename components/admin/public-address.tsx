@@ -8,13 +8,15 @@ import { publicSiteUrl } from "@/lib/tenancy/hostnames";
  * which is public: it exposes nothing the console is not already showing.
  */
 export function PublicAddress({ slug, rootDomain, className }: { slug: string; rootDomain: string | null; className?: string }) {
-  const url = publicSiteUrl(slug, rootDomain);
-  const label = url ? `${slug}.${rootDomain}` : `/r/${slug}`;
+  const effectiveRoot = rootDomain || "flowdine.in";
+  const url = publicSiteUrl(slug, effectiveRoot) ?? `https://${slug}.${effectiveRoot}/`;
+  const label = `${slug}.${effectiveRoot}`;
   return (
     <a
-      href={url ?? `/r/${slug}`}
+      href={url}
       className={className ?? "font-mono text-body text-fg-accent hover:underline"}
-      {...(url ? { target: "_blank", rel: "noreferrer noopener" } : {})}
+      target="_blank"
+      rel="noreferrer noopener"
     >
       {label}
     </a>

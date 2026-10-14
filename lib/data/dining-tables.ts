@@ -38,16 +38,16 @@ export async function updateTable(tx: Tx, ctx: TenantContext, id: string, data: 
 export async function findPublicTable(slug: string, code: string): Promise<{ label: string } | null> {
   if (!SLUG_PATTERN.test(slug) || !/^[a-z0-9]{8,16}$/.test(code)) return null;
   // The table menu needs the Table QR feature on; it no longer needs a published website (owner request 2026-10-07).
-  const tenant = await db.tenant.findFirst({ where: { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } }, select: { id: true } });
+  const tenant = await db.tenant.findFirst({ where: { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } }, select: { id: true } });
   if (!tenant) return null;
   return db.diningTable.findFirst({ where: { tenantId: tenant.id, publicCode: code, isActive: true, archivedAt: null }, select: { label: true } });
 }
 
 /** The restaurant's public slug and whether its website — where every table QR leads — is published. */
 export async function publicState(tx: Tx, ctx: TenantContext): Promise<{ slug: string; name: string; websitePublished: boolean }> {
-  const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: ctx.tenantId }, select: { slug: true } });
+  const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: ctx.tenantId }, select: { slug: true, subdomain: true } });
   const restaurant = await tx.restaurant.findUniqueOrThrow({ where: tenantKey(ctx, ctx.restaurant.id), select: { name: true, websitePublished: true } });
-  return { slug: tenant.slug, ...restaurant };
+  return { slug: tenant.subdomain || tenant.slug, ...restaurant };
 }
 
 /** Case-insensitive: is this label already used by another live table here? */

@@ -41,6 +41,7 @@ export default clerkMiddleware(async (auth, req) => {
   const withCsp = (headers: Headers) => {
     headers.set("x-nonce", nonce);
     headers.set("content-security-policy", csp);
+    headers.set("x-pathname", `${pathname}${search}`);
     return headers;
   };
 
@@ -124,26 +125,25 @@ export default clerkMiddleware(async (auth, req) => {
       }
     }
 
-    // 5. Cross-tenant path (/r/...) on tenant host
+    // 5. Legacy /r/... path on tenant host -> 308 redirect to clean subdomain path
     if (pathname.startsWith("/r/")) {
-      const isThisTenant = pathname === `/r/${host.slug}` || pathname.startsWith(`/r/${host.slug}/`);
-      if (!isThisTenant) {
-        const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
-        if (authority !== null) {
-          const target = new URL(`${pathname}${search}`, req.url);
-          target.host = authority;
-          const response = NextResponse.redirect(target, 308);
-          response.headers.set("x-request-id", requestId);
-          return response;
-        }
+      const isLegacyDbSlug = host.slug === "akshayapatra" && (pathname === "/r/akshayapatra-devarapalli" || pathname.startsWith("/r/akshayapatra-devarapalli/"));
+      const isThisTenant = pathname === `/r/${host.slug}` || pathname.startsWith(`/r/${host.slug}/`) || isLegacyDbSlug;
+      if (isThisTenant) {
+        const prefix = isLegacyDbSlug ? "/r/akshayapatra-devarapalli" : `/r/${host.slug}`;
+        const subPath = pathname.slice(prefix.length) || "/";
+        const response = NextResponse.redirect(new URL(`${subPath}${search}`, req.url), 308);
+        response.headers.set("x-request-id", requestId);
+        return response;
       }
-      const headers = new Headers(req.headers);
-      headers.set("x-request-id", requestId);
-      headers.set(TENANT_SLUG_HEADER, host.slug);
-      const response = NextResponse.rewrite(new URL(`${pathname}${search}`, req.url), { request: { headers: withCsp(headers) } });
-      response.headers.set("x-request-id", requestId);
-      response.headers.set("content-security-policy", csp);
-      return response;
+      const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
+      if (authority !== null) {
+        const target = new URL(`${pathname}${search}`, req.url);
+        target.host = authority;
+        const response = NextResponse.redirect(target, 308);
+        response.headers.set("x-request-id", requestId);
+        return response;
+      }
     }
 
     // 6. Public menu and daily aliases
@@ -189,6 +189,24 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   // Apex host or host-neutral paths
+  if (pathname.startsWith("/r/")) {
+    const effectiveRoot = rootDomain ?? (req.headers.get("host")?.includes("flowdine.in") ? "flowdine.in" : null);
+    if (effectiveRoot && process.env.NODE_ENV !== "test") {
+      const remainder = pathname.slice(3); // after /r/
+      const slashIndex = remainder.indexOf("/");
+      const slug = slashIndex === -1 ? remainder : remainder.slice(0, slashIndex);
+      const subPath = slashIndex === -1 ? "/" : remainder.slice(slashIndex);
+      const targetSub = slug === "akshayapatra-devarapalli" ? "akshayapatra" : slug;
+      if (targetSub && targetSub !== "_") {
+        const proto = req.headers.get("x-forwarded-proto") || "https";
+        const redirectUrl = new URL(`${proto}://${targetSub}.${effectiveRoot}${subPath}${search}`);
+        const response = NextResponse.redirect(redirectUrl, 308);
+        response.headers.set("x-request-id", requestId);
+        return response;
+      }
+    }
+  }
+
   const decision = gate(pathname, search, signedIn || staffSession, requestId);
   if (decision.action === "redirect") {
     const response = NextResponse.redirect(new URL(decision.location, req.url));

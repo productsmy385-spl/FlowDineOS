@@ -134,6 +134,7 @@ export type RestaurantSettingsSnapshot = {
   restaurant: RestaurantSettingsDto;
   hours: OpeningDayDto[];
   slug: string;
+  subdomain?: string | null;
   currencyLocked: boolean;
   websiteReadiness: WebsiteReadinessItem[];
 };
@@ -144,11 +145,12 @@ export async function getRestaurantSettingsSnapshot(ctx: TenantContext): Promise
     const row = await loadSettingsRow(db, ctx);
     const [hours, tenant, currencyLocked, readiness] = await Promise.all([
       loadWeek(db, ctx, row.id),
-      db.tenant.findUnique({ where: { id: ctx.tenantId }, select: { slug: true } }),
+      db.tenant.findUnique({ where: { id: ctx.tenantId }, select: { slug: true, subdomain: true } }),
       hasOrders(db, ctx),
       websiteReadiness(db, ctx, row),
     ]);
-    return { restaurant: toSettingsDto(row), hours, slug: required(tenant, "Restaurant").slug, currencyLocked, websiteReadiness: readiness };
+    const t = required(tenant, "Restaurant");
+    return { restaurant: toSettingsDto(row), hours, slug: t.slug, subdomain: t.subdomain, currencyLocked, websiteReadiness: readiness };
   });
 }
 

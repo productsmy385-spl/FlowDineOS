@@ -57,12 +57,34 @@ async function operationalIndicators(ctx: Awaited<ReturnType<typeof requireTenan
   return indicators;
 }
 
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { hostPort, resolveHost } from "@/lib/tenancy/hostnames";
+import { configuredRootDomain } from "@/lib/tenancy/request";
+
 // Tenant console (S1-P04-T004, S1-P05-T006, ADR-013 §3). Resolves the tenant context once: signed-out, uninvited,
 // suspended and multi-restaurant users are redirected before any tenant data renders. Pages still guard themselves.
 // ConsoleFrame renders the header-navigation shell, or the focus shell for the kitchen board (frontend.md §2).
 export default async function RestaurantLayout({ children }: { children: React.ReactNode }) {
   const ctx = await requireTenantPage("restaurant:read");
   const [session, indicators] = await Promise.all([getConsoleSession(ctx), operationalIndicators(ctx)]);
+
+  const hostHeader = (await headers()).get("host");
+  const rootDomain = configuredRootDomain();
+  const host = resolveHost(hostHeader, rootDomain);
+
+  if (host.kind === "apex" && rootDomain && process.env.NODE_ENV !== "test") {
+    const sub = session.activeTenant.subdomain || session.activeTenant.slug;
+    if (sub) {
+      const port = hostPort(hostHeader);
+      const portSuffix = port ? `:${port}` : "";
+      const isLocal = hostHeader?.includes("localhost") || hostHeader?.includes("127.0.0.1");
+      const targetHost = isLocal ? `${sub}.localhost${portSuffix}` : `${sub}.${rootDomain}${portSuffix}`;
+      const proto = isLocal ? "http" : "https";
+      const pathname = (await headers()).get("x-pathname") || "/restaurant/dashboard";
+      redirect(`${proto}://${targetHost}${pathname}`);
+    }
+  }
 
   return (
     <SessionProvider value={session}>

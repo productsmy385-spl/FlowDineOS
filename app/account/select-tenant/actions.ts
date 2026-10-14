@@ -10,6 +10,8 @@ import { NotFoundError } from "@/lib/errors";
 import { action } from "@/lib/http/action";
 import { parseInput, strictObject, uuidParam } from "@/lib/validation/core";
 
+import { configuredRootDomain } from "@/lib/tenancy/request";
+
 const switchSchema = strictObject({ membershipId: uuidParam });
 
 /**
@@ -26,5 +28,10 @@ export const switchActiveTenantAction = action(async (input: { membershipId: str
 
   (await cookies()).set(ACTIVE_MEMBERSHIP_COOKIE, target.membershipId, ACTIVE_MEMBERSHIP_COOKIE_OPTIONS);
   await recordTenantSwitch({ userId: session.userId, tenantId: target.tenantId, membershipId: target.membershipId, role: target.role, requestId: session.requestId });
+  const rootDomain = configuredRootDomain();
+  const sub = target.subdomain || target.tenantSlug;
+  if (sub && rootDomain && process.env.NODE_ENV !== "test") {
+    redirect(`https://${sub}.${rootDomain}/restaurant/dashboard`);
+  }
   redirect("/restaurant/dashboard");
 });
