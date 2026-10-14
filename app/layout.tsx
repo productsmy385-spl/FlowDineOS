@@ -43,6 +43,15 @@ export const metadata: Metadata = {
   title: "FlowDineOS — Restaurant Operations Platform",
   description: "Menu management, counter ordering, kitchen tickets and thermal printing for restaurants.",
   manifest: "/manifest.json",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png", sizes: "64x64" },
+    ],
+    apple: [
+      { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+    ],
+  },
 };
 
 // ClerkProvider always wraps the app (S1-P03-T002). Keys are validated at server start (lib/env.ts), so there is

@@ -8,7 +8,6 @@ import { SiteMenu } from "./site-menu";
 import { SiteSections } from "./sections";
 import { siteThemeStyle, surfaceThemeAttribute } from "./theme";
 import { monogram, primaryNavLinks, siteNavLinks, socialLinks, type SiteView } from "./site-view";
-import { appUrl } from "@/lib/env";
 
 /**
  * The public website shell (S1-P09-T003/T012; ADR-013 §6).
@@ -20,23 +19,14 @@ import { appUrl } from "@/lib/env";
  */
 
 /**
- * Staff sign-in lives on the apex host only (ADR-012 §6). Linking to its absolute URL means a click on a tenant
- * sub-domain goes straight there instead of relying on the middleware redirect — which Next.js turns into a relative
- * (self-looping) `Location` when the apex is the dev server's own `localhost:<port>`.
+ * On tenant subdomains, "Staff login" goes to the tenant's own /staff/login door.
+ * On apex preview/QR routes (/r/[slug]), it links to /staff-login.
  */
-function staffSignInHref(): string {
-  const base = appUrl();
-  if (!base) return "/sign-in";
-  try {
-    const url = new URL("/sign-in", base);
-    // NEXT_PUBLIC_* is baked in at build time. A production build that was given a loopback APP_URL (e.g. a copied
-    // development .env) must never send a visitor to *their own* machine — that is ERR_CONNECTION_REFUSED for everyone.
-    // The same-site path is always reachable; on a tenant sub-domain the middleware forwards it to the apex host.
-    if (process.env.NODE_ENV === "production" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return "/sign-in";
-    return url.toString();
-  } catch {
-    return "/sign-in";
+function staffSignInHref(view?: SiteView): string {
+  if (view && view.homeHref === "/") {
+    return "/staff/login";
   }
+  return "/staff-login";
 }
 
 /**
@@ -70,7 +60,7 @@ function SiteHeader({ view }: { view: SiteView }) {
   const { site } = view;
   const links = siteNavLinks(site.sections);
   const inline = primaryNavLinks(links);
-  const signIn = staffSignInHref();
+  const signIn = staffSignInHref(view);
   const share = {
     title: site.restaurant.name,
     text: site.identity.tagline ? `${site.restaurant.name} - ${site.identity.tagline}` : site.restaurant.name,

@@ -235,6 +235,7 @@ export type TenantInspection = {
     id: string;
     name: string;
     slug: string;
+    subdomain?: string | null;
     status: TenantStatus;
     suspendedAt: string | null;
     suspensionReason: string | null;
@@ -272,6 +273,7 @@ export async function inspectPlatformTenant(ctx: PlatformContext, tenantId: stri
         id: true,
         name: true,
         slug: true,
+        subdomain: true,
         status: true,
         suspendedAt: true,
         suspensionReason: true,
@@ -316,6 +318,7 @@ export async function inspectPlatformTenant(ctx: PlatformContext, tenantId: stri
       id: tenant.id,
       name: tenant.name,
       slug: tenant.slug,
+      subdomain: tenant.subdomain,
       status: tenant.status,
       suspendedAt: nullableInstantDto(tenant.suspendedAt),
       suspensionReason: tenant.suspensionReason,
@@ -348,7 +351,7 @@ export async function inspectPlatformTenant(ctx: PlatformContext, tenantId: stri
   };
 }
 
-// ─── Slugs ───
+// ─── Slugs & Subdomains ───
 
 /** True when another tenant (not `exceptTenantId`) already has this slug. */
 export async function isSlugTaken(ctx: PlatformContext, slug: string, exceptTenantId?: string, client: Tx = db): Promise<boolean> {
@@ -357,11 +360,19 @@ export async function isSlugTaken(ctx: PlatformContext, slug: string, exceptTena
   return row !== null && row.id !== exceptTenantId;
 }
 
+/** True when another tenant (not `exceptTenantId`) already has this subdomain. */
+export async function isSubdomainTaken(ctx: PlatformContext, subdomain: string, exceptTenantId?: string, client: Tx = db): Promise<boolean> {
+  assertPlatformTenantRead(ctx);
+  const row = await mapErrors("Tenant", () => client.tenant.findUnique({ where: { subdomain }, select: { id: true } }));
+  return row !== null && row.id !== exceptTenantId;
+}
+
 // ─── SA-ADM-01 create tenant (inside the caller's transaction) ───
 
 export type NewTenantRows = {
   tenantName: string;
   slug: string;
+  subdomain?: string | null;
   restaurantName: string;
   timezone: string;
   currencyCode: string;
@@ -380,7 +391,7 @@ export async function insertTenantWithRestaurant(ctx: PlatformContext, tx: Tx, r
   let tenantId: string;
   try {
     ({ id: tenantId } = await tx.tenant.create({
-      data: { name: rows.tenantName, slug: rows.slug, status: "ACTIVE", createdByUserId: ctx.userId },
+      data: { name: rows.tenantName, slug: rows.slug, subdomain: rows.subdomain ?? null, status: "ACTIVE", createdByUserId: ctx.userId },
       select: { id: true },
     }));
   } catch (error) {

@@ -193,6 +193,7 @@ export async function getWebsiteConfig(ctx: TenantContext): Promise<WebsiteConfi
 
 export type PublicWebsiteData = {
   slug: string;
+  subdomain?: string | null;
   theme: WebsiteThemeRow;
   identity: WebsiteIdentityRow;
   sections: WebsiteSectionRow[];
@@ -213,9 +214,13 @@ export async function getPublicWebsite(slug: string, audience: "website" | "tabl
     db.tenant.findFirst({
       // A table's QR menu (audience "table") is for guests already seated in the restaurant: it needs the Table QR
       // feature, not a published website (owner request 2026-10-07). The website itself still needs both.
-      where: audience === "table" ? { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } } : { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
+      where:
+        audience === "table"
+          ? { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } }
+          : { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         slug: true,
+        subdomain: true,
         restaurant: {
           select: {
             ...THEME_SELECT,
@@ -235,6 +240,7 @@ export async function getPublicWebsite(slug: string, audience: "website" | "tabl
 
   return {
     slug: tenant.slug,
+    subdomain: tenant.subdomain,
     theme: toTheme(restaurant),
     identity: toIdentity(restaurant),
     sections: restaurant.sections,

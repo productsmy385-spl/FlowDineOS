@@ -22,7 +22,7 @@ export async function resolvedTenantSlug(): Promise<string | null> {
 
 /** `PUBLIC_ROOT_DOMAIN`, normalised; `null` when unset or unusable (the app then runs on paths and `*.localhost`). */
 export function configuredRootDomain(): string | null {
-  return normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN);
+  return normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN) ?? (process.env.NODE_ENV !== "test" ? "flowdine.in" : null);
 }
 
 /**

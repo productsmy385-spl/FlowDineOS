@@ -129,7 +129,7 @@ describe("TC-AGENT-009 pair → assign → print → PRINTED", () => {
     ).order;
     dataOf(await invokeAction(updateOrderStatusAction, { orderId: order.id, status: "ACCEPTED" }));
     await asSeedUser("A", "MANAGER");
-    const receipt = dataOf(await invokeAction(printReceiptAction, { orderId: order.id }));
+    const receipt = dataOf(await invokeAction(printReceiptAction, { orderId: order.id, copies: 1 }));
     await asSeedUser("A", "TENANT_ADMIN");
     const testPage = dataOf(await invokeAction(createTestPrintJobAction, { printerId: KITCHEN_PRINTER }));
 

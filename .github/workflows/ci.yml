@@ -49,6 +49,7 @@ jobs:
         with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
       - run: npm ci
       - run: npx prisma generate
+      - run: npm run agent:build
       - run: npm run test:unit
 
   static:
@@ -169,6 +170,7 @@ jobs:
   # the service is registered with the Service Control Manager and its state is read back.
   print-agent-windows:
     runs-on: windows-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

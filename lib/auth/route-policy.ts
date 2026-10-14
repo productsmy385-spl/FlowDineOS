@@ -17,7 +17,7 @@ export type RouteKind =
 const PUBLIC_EXACT = new Set(["/", "/book-demo", "/privacy", "/terms", "/offline", "/api/health", "/api/ready", "/manifest.json", "/sw.js", "/favicon.ico", "/robots.txt", "/sitemap.xml"]);
 // `/staff-login` is public in the same sense as `/sign-in`: it is the door, not what is behind it. The daily
 // password is checked server-side and rate limited there (RASOIOS-ADR-019 §5).
-const PUBLIC_PREFIXES = ["/r/", "/sign-in", "/sign-up", "/staff-login", "/icons/"];
+const PUBLIC_PREFIXES = ["/r/", "/sign-in", "/sign-up", "/staff-login", "/staff/login", "/icons/"];
 
 /**
  * Paths that sit under a public prefix but are not public. `/sign-in/landing` reads the caller's platform role and

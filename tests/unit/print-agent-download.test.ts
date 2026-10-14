@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { inflateRawSync } from "node:zlib";
 import { NextRequest } from "next/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { GET } from "@/app/api/v1/printing/agent-download/[platform]/route";
 import * as guards from "@/lib/auth/guards";
 import { ForbiddenError, UnauthenticatedError } from "@/lib/errors";
@@ -34,6 +34,19 @@ function extractZipEntry(zipBuffer: Buffer): { filename: string; bytes: Buffer }
 }
 
 describe("Print Agent Download route handler (RH-PRINT-08)", () => {
+  beforeAll(() => {
+    const distDir = path.join(process.cwd(), "print-agent", "dist");
+    if (!existsSync(distDir)) {
+      mkdirSync(distDir, { recursive: true });
+    }
+    const linuxTar = path.join(distDir, "flowdineos-print-agent-linux.tar.gz");
+    if (!existsSync(linuxTar)) {
+      // Valid gzip buffer starting with 0x1f8b
+      const dummyGzip = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+      writeFileSync(linuxTar, dummyGzip);
+    }
+  });
+
   it("serves FlowDineOS-Print-Agent-Setup.exe as genuine Windows PE with application/octet-stream", async () => {
     vi.spyOn(guards, "requireTenant").mockResolvedValueOnce({
       tenantId: "t1",

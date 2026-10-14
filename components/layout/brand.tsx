@@ -1,17 +1,24 @@
 import Link from "next/link";
-import { UtensilsCrossed } from "lucide-react";
-import { Icon } from "@/components/ui/icon";
+import Image from "next/image";
 import { cn } from "@/lib/ui/cn";
 
 /**
- * FlowDineOS wordmark (frontend.md §3.1 "Brand"). The mark is the only element that carries the brand gradient at full
- * strength (design.md §2.4); the glyph sits on it in the checked on-primary colour, never as coloured text.
+ * FlowDineOS wordmark (frontend.md §3.1 "Brand"). The mark carries the brand gradient frame and the official FlowDineOS logo badge.
  */
 export function BrandMark({ href, context, className }: { href: string; /** e.g. "Platform" in the admin console */ context?: string; className?: string }) {
   return (
     <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3 rounded-xl", className)}>
-      <span className="brand-gradient inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-action-primary-fg">
-        <Icon icon={UtensilsCrossed} size={20} />
+      <span className="brand-gradient inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl p-0.5 shadow-e1">
+        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-white">
+          <Image
+            src="/logo.png"
+            alt="FlowDineOS logo"
+            width={36}
+            height={36}
+            priority
+            className="h-full w-full object-contain"
+          />
+        </span>
       </span>
       <span className="font-display text-heading text-fg-primary">
         FlowDine<span className="text-fg-accent">OS</span>

@@ -31,7 +31,7 @@ async function freshFailedJob(tenant: TenantKey) {
       printerId: seeded(tenant, "printer:counter"),
       jobType: "TEST",
       dedupeKey: `TEST:it-${randomUUID()}`,
-      payload: { version: 1, kind: "TEST" },
+      payload: { version: 1, widthMm: 80, blocks: [{ type: "cut" }] },
       status: "FAILED",
       attemptCount: 3,
       failedAt: new Date(),

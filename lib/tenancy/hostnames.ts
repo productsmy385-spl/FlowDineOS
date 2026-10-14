@@ -212,9 +212,11 @@ export function resolveHost(hostHeader: string | null | undefined, rootDomain: s
 
   if (host.endsWith(LOCAL_SUFFIX)) return classifyLabel(host.slice(0, -LOCAL_SUFFIX.length));
 
-  if (rootDomain !== null) {
-    if (host === rootDomain) return { kind: "apex" };
-    if (host.endsWith(`.${rootDomain}`)) return classifyLabel(host.slice(0, -(rootDomain.length + 1)));
+  const effectiveRoot = rootDomain ?? (host === "flowdine.in" || host.endsWith(".flowdine.in") ? "flowdine.in" : null);
+
+  if (effectiveRoot !== null) {
+    if (host === effectiveRoot) return { kind: "apex" };
+    if (host.endsWith(`.${effectiveRoot}`)) return classifyLabel(host.slice(0, -(effectiveRoot.length + 1)));
   }
   // Railway's generated host, a preview host or a custom console domain: the apex host.
   return { kind: "apex" };
@@ -232,7 +234,8 @@ export function apexAuthorityFor(hostHeader: string | null | undefined, rootDoma
   const suffix = port === null ? "" : `:${port}`;
 
   if (host.endsWith(LOCAL_SUFFIX) && host !== LOCAL_SUFFIX.slice(1)) return `localhost${suffix}`;
-  if (rootDomain !== null && host !== rootDomain && host.endsWith(`.${rootDomain}`)) return `${rootDomain}${suffix}`;
+  const effectiveRoot = rootDomain ?? (host === "flowdine.in" || host.endsWith(".flowdine.in") ? "flowdine.in" : null);
+  if (effectiveRoot !== null && host !== effectiveRoot && host.endsWith(`.${effectiveRoot}`)) return `${effectiveRoot}${suffix}`;
   return null;
 }
 

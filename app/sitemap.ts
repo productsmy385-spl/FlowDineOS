@@ -26,11 +26,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const sites = await listPublicSiteSlugs();
 
   return sites.flatMap((site) => {
-    const home = canonicalPublicUrl(site.slug) ?? (base === "" ? null : `${base}/r/${site.slug}`);
+    const effectiveSlug = site.subdomain ?? site.slug;
+    const home = canonicalPublicUrl(effectiveSlug) ?? (base === "" ? null : `${base}/r/${site.slug}`);
     if (home === null) return [];
     const root = home.replace(/\/$/, "");
     return [
       { url: root, lastModified: site.updatedAt, changeFrequency: "weekly" as const, priority: 1 },
+      { url: `${root}/menu`, lastModified: site.updatedAt, changeFrequency: "weekly" as const, priority: 0.9 },
       { url: `${root}/daily`, lastModified: site.updatedAt, changeFrequency: "daily" as const, priority: 0.8 },
     ];
   });

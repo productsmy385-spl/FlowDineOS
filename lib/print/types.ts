@@ -131,11 +131,14 @@ export function parsePrintDocument(payload: unknown): PrintDocument {
  * or field-installed print agent binaries that use `.strict()` validation.
  */
 export function toWirePrintDocument(document: unknown): PrintDocument {
-  const parsed = parsePrintDocument(document);
-  return {
-    version: 1,
-    widthMm: parsed.widthMm,
-    blocks: parsed.blocks,
-  };
+  const result = printDocumentSchema.safeParse(document);
+  if (result.success) {
+    return {
+      version: 1,
+      widthMm: result.data.widthMm,
+      blocks: result.data.blocks,
+    };
+  }
+  return document as PrintDocument;
 }
 

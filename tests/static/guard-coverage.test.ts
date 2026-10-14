@@ -16,6 +16,7 @@ const ALLOW_LIST: Record<string, string> = {
     "Print-agent pairing (RH-AGT-01, ADR-007 §1): the single-use pairing code IS the credential — there is no token yet — so the handler starts with the fail-closed `agent.pair` rate limit and the tenant comes from the PRINT_AGENT row the code hash resolves to",
   "app/r/[slug]/page.tsx#default": "Public website: published data only, selected by slug (SC-PUB-01)",
   "app/r/[slug]/daily/page.tsx#default": "Public website: today's published daily menu only, selected by slug (SC-PUB-01, LD-PUB-02)",
+  "app/r/[slug]/menu/page.tsx#default": "Public website: published menu only, selected by slug (SC-PUB-01)",
   "app/page.tsx#default": "Public landing page (no data)",
   "app/privacy/page.tsx#default": "Public Privacy Policy (static text, no data)",
   "app/terms/page.tsx#default": "Public Terms (static text, no data)",

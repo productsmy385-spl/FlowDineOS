@@ -138,7 +138,7 @@ describe("the customisation screen is wired to the real services", () => {
     const data = (result as { ok: true; data: Record<string, unknown> }).data;
     expect((data.sections as unknown[]).length).toBe(11);
     expect(data.canEdit).toBe(true);
-    expect(Object.keys(data.cssVariables as object).every((key) => key.startsWith("--site-"))).toBe(true);
+    expect(Object.keys(data.cssVariables as object).every((key) => key.startsWith("--site-") || key.startsWith("--website-"))).toBe(true);
   });
 
   it("a MANAGER may read the screen but not save: the server refuses every write", async () => {

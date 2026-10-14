@@ -67,6 +67,7 @@ export interface PublicDailyMenuData {
 
 export interface PublicRestaurantData {
   slug: string;
+  subdomain?: string | null;
   timezone: string;
   currencyCode: string;
   countryCode: string;
@@ -176,10 +177,14 @@ export async function getPublicRestaurant(slug: string, now: Date = new Date(), 
     db.tenant.findFirst({
       // A table's QR menu (audience "table") is for guests already seated in the restaurant: it needs the Table QR
       // feature, not a published website (owner request 2026-10-07). The website itself still needs both.
-      where: audience === "table" ? { slug, status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } } : { slug, status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
+      where:
+        audience === "table"
+          ? { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE", features: { none: { featureKey: "QR_MENU", enabled: false } } }
+          : { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       select: {
         id: true,
         slug: true,
+        subdomain: true,
         restaurant: {
           select: {
             name: true,
@@ -253,6 +258,7 @@ export async function getPublicRestaurant(slug: string, now: Date = new Date(), 
 
   return {
     slug: tenant.slug,
+    subdomain: tenant.subdomain,
     timezone: restaurant.timezone,
     currencyCode: restaurant.currencyCode,
     countryCode: restaurant.countryCode,
@@ -344,13 +350,13 @@ export function publicBusinessDate(timezone: string, now: Date = new Date()): st
  * LD-PUB-03 — every slug whose public website is visible right now (ACTIVE tenant, published website), for the
  * sitemap. Slugs only: the sitemap is a list of addresses, not a projection of restaurant data.
  */
-export async function listPublicSiteSlugs(): Promise<Array<{ slug: string; updatedAt: Date }>> {
+export async function listPublicSiteSlugs(): Promise<Array<{ slug: string; subdomain: string | null; updatedAt: Date }>> {
   const tenants = await mapErrors("Restaurant", () =>
     db.tenant.findMany({
       where: { status: "ACTIVE", restaurant: { is: { websitePublished: true } }, features: { none: { featureKey: "WEBSITE", enabled: false } } },
       orderBy: { slug: "asc" },
-      select: { slug: true, restaurant: { select: { updatedAt: true } } },
+      select: { slug: true, subdomain: true, restaurant: { select: { updatedAt: true } } },
     }),
   );
-  return tenants.map((tenant) => ({ slug: tenant.slug, updatedAt: tenant.restaurant?.updatedAt ?? new Date(0) }));
+  return tenants.map((tenant) => ({ slug: tenant.slug, subdomain: tenant.subdomain, updatedAt: tenant.restaurant?.updatedAt ?? new Date(0) }));
 }

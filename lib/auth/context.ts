@@ -112,8 +112,17 @@ async function preferredMembershipFromCookie(): Promise<string | null> {
 export const getTenantResolution = cache(async (): Promise<TenantResolution> => {
   const session = await getSessionUser();
   const requestId = await currentRequestId();
+  const hostSlug = (await headers()).get("x-rasoi-tenant-slug");
   const all = session.state === "ACTIVE" ? await activeMembershipsOfUser(session.user.id) : [];
-  return resolveTenant(session, session.state === "ACTIVE" ? reachableBy(session, all) : all, await preferredMembershipFromCookie(), requestId);
+  let available = session.state === "ACTIVE" ? reachableBy(session, all) : all;
+  if (hostSlug) {
+    const forHost = available.filter((m) => m.tenantSlug === hostSlug || m.subdomain === hostSlug);
+    if (forHost.length === 0 && session.state === "ACTIVE") {
+      return { outcome: "NO_MEMBERSHIP" };
+    }
+    available = forHost;
+  }
+  return resolveTenant(session, available, await preferredMembershipFromCookie(), requestId);
 });
 
 /**
