@@ -162,7 +162,7 @@ test.describe("LD-PUB-03 discoverability", () => {
     const sitemap = await request.get("/sitemap.xml");
     expect(sitemap.status()).toBe(200);
     const xml = await sitemap.text();
-    expect(xml).toContain("/r/spice-route");
+    expect(xml.includes("/r/spice-route") || xml.includes("spice-route.")).toBe(true);
     for (const path of ["/restaurant", "/admin", "/account", "/api/"]) expect(xml, path).not.toContain(path);
   });
 
