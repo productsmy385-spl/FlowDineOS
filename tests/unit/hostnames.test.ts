@@ -133,6 +133,8 @@ describe("redirect and rewrite targets", () => {
     expect(apexAuthorityFor("spice-route.localhost", null)).toBe("localhost");
     expect(apexAuthorityFor("spice-route.rasoios.com", ROOT)).toBe("rasoios.com");
     expect(apexAuthorityFor("spice-route.rasoios.com:8443", ROOT)).toBe("rasoios.com:8443");
+    expect(apexAuthorityFor("spice-route.rasoios.com:8080", ROOT)).toBe("rasoios.com");
+    expect(apexAuthorityFor("akshayapatra.flowdine.in:8080", "flowdine.in")).toBe("flowdine.in");
     expect(apexAuthorityFor("rasoios.com", ROOT)).toBeNull();
     expect(apexAuthorityFor("localhost:3000", null)).toBeNull();
   });

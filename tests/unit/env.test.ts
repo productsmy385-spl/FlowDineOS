@@ -121,6 +121,10 @@ describe("TC-FOUND-003 environment validation", () => {
     const custom: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: "https://app.flowdineos.com", RAILWAY_PUBLIC_DOMAIN: "flowdineos-production.up.railway.app" };
     applyPlatformDefaults(custom);
     expect(custom.NEXT_PUBLIC_APP_URL).toBe("https://app.flowdineos.com");
+
+    const withPort: Record<string, string | undefined> = { ...valid, NEXT_PUBLIC_APP_URL: "https://flowdine.in:8080", RAILWAY_PUBLIC_DOMAIN: "flowdineos-production.up.railway.app" };
+    applyPlatformDefaults(withPort);
+    expect(withPort.NEXT_PUBLIC_APP_URL).toBe("https://flowdine.in");
   });
 
   it("on Railway, derives NEXT_PUBLIC_APP_URL from RAILWAY_PUBLIC_DOMAIN unless it is set explicitly", () => {

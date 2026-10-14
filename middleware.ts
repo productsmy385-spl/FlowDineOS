@@ -1,16 +1,30 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { clerkFrontendApiFromKey, contentSecurityPolicy, newNonce } from "@/lib/http/content-security-policy";
 import { STAFF_SESSION_COOKIE_NAME, ensureRequestId, gate, mustNotBeStored, presentsStaffSession } from "@/lib/auth/route-policy";
 import {
   TENANT_SLUG_HEADER,
   UNRESOLVABLE_PUBLIC_PATH,
   apexAuthorityFor,
+  hostPort,
   isHostNeutralPath,
+  normalizeHost,
   normalizeRootDomain,
   publicRewritePath,
   resolveHost,
 } from "@/lib/tenancy/hostnames";
+
+/** Safe public redirect URL that never leaks internal ports (e.g. 8080) on public domains */
+function publicRedirectUrl(location: string, req: NextRequest): URL {
+  const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
+  const rawHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host || "flowdine.in";
+  const host = normalizeHost(rawHost) || "flowdine.in";
+  const isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
+  const port = hostPort(rawHost);
+  const portSuffix = isLocal && port ? `:${port}` : "";
+  const base = `${proto}://${host}${portSuffix}`;
+  return new URL(location, base);
+}
 
 /**
  * Host resolution (S1-P09-T011, RASOIOS-ADR-012) and the fail-closed authentication gate (S1-P03-T002, SC-AUTH-02/03).
@@ -60,8 +74,13 @@ export default clerkMiddleware(async (auth, req) => {
 
   // Tenant subdomains (e.g. akshayapatra.flowdine.in or akshayapatra.localhost)
   if (host.kind === "tenant" && !isHostNeutralPath(pathname)) {
-    // 1. Staff login aliases
-    if (pathname === "/staff/login" || pathname === "/staff/login/" || pathname === "/staff-login" || pathname === "/staff-login/") {
+    // 1. Staff login: /staff-login is canonical; /staff/login redirects 308 to /staff-login
+    if (pathname === "/staff/login" || pathname === "/staff/login/") {
+      const response = NextResponse.redirect(publicRedirectUrl(`/staff-login${search}`, req), 308);
+      response.headers.set("x-request-id", requestId);
+      return response;
+    }
+    if (pathname === "/staff-login" || pathname === "/staff-login/") {
       const headers = new Headers(req.headers);
       headers.set("x-request-id", requestId);
       headers.set(TENANT_SLUG_HEADER, host.slug);
@@ -74,7 +93,7 @@ export default clerkMiddleware(async (auth, req) => {
     // 2. Tenant dashboard alias (/dashboard -> /restaurant/dashboard)
     if (pathname === "/dashboard" || pathname.startsWith("/dashboard/")) {
       if (!signedIn && !staffSession) {
-        const response = NextResponse.redirect(new URL(`/staff/login`, req.url));
+        const response = NextResponse.redirect(publicRedirectUrl(`/staff-login`, req));
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -92,7 +111,7 @@ export default clerkMiddleware(async (auth, req) => {
     // 3. Tenant console (/restaurant/...) on tenant host
     if (pathname === "/restaurant" || pathname.startsWith("/restaurant/")) {
       if (!signedIn && !staffSession) {
-        const response = NextResponse.redirect(new URL(`/staff/login`, req.url));
+        const response = NextResponse.redirect(publicRedirectUrl(`/staff-login`, req));
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -117,8 +136,9 @@ export default clerkMiddleware(async (auth, req) => {
     ) {
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
-        const target = new URL(`${pathname}${search}`, req.url);
-        target.host = authority;
+        const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
+        const cleanAuthority = authority.replace(/:8080$/, "");
+        const target = new URL(`${pathname}${search}`, `${proto}://${cleanAuthority}`);
         const response = NextResponse.redirect(target, 308);
         response.headers.set("x-request-id", requestId);
         return response;
@@ -132,14 +152,15 @@ export default clerkMiddleware(async (auth, req) => {
       if (isThisTenant) {
         const prefix = isLegacyDbSlug ? "/r/akshayapatra-devarapalli" : `/r/${host.slug}`;
         const subPath = pathname.slice(prefix.length) || "/";
-        const response = NextResponse.redirect(new URL(`${subPath}${search}`, req.url), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req), 308);
         response.headers.set("x-request-id", requestId);
         return response;
       }
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
-        const target = new URL(`${pathname}${search}`, req.url);
-        target.host = authority;
+        const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
+        const cleanAuthority = authority.replace(/:8080$/, "");
+        const target = new URL(`${pathname}${search}`, `${proto}://${cleanAuthority}`);
         const response = NextResponse.redirect(target, 308);
         response.headers.set("x-request-id", requestId);
         return response;
@@ -199,7 +220,8 @@ export default clerkMiddleware(async (auth, req) => {
       const targetSub = slug === "akshayapatra-devarapalli" ? "akshayapatra" : slug;
       if (targetSub && targetSub !== "_") {
         const proto = req.headers.get("x-forwarded-proto") || "https";
-        const redirectUrl = new URL(`${proto}://${targetSub}.${effectiveRoot}${subPath}${search}`);
+        const cleanRoot = effectiveRoot.replace(/:8080$/, "");
+        const redirectUrl = new URL(`${proto}://${targetSub}.${cleanRoot}${subPath}${search}`);
         const response = NextResponse.redirect(redirectUrl, 308);
         response.headers.set("x-request-id", requestId);
         return response;
@@ -209,7 +231,7 @@ export default clerkMiddleware(async (auth, req) => {
 
   const decision = gate(pathname, search, signedIn || staffSession, requestId);
   if (decision.action === "redirect") {
-    const response = NextResponse.redirect(new URL(decision.location, req.url));
+    const response = NextResponse.redirect(publicRedirectUrl(decision.location, req));
     response.headers.set("x-request-id", requestId);
     return response;
   }

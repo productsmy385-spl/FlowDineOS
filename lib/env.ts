@@ -192,6 +192,18 @@ export function applyPlatformDefaults(env: Record<string, string | undefined>): 
   }
   if (!current || loopback || staleRailwayDomain) env.NEXT_PUBLIC_APP_URL = `https://${railwayDomain}`;
 
+  if (env.NEXT_PUBLIC_APP_URL) {
+    try {
+      const parsed = new URL(env.NEXT_PUBLIC_APP_URL);
+      if (parsed.port === "8080" || ((parsed.hostname === "flowdine.in" || parsed.hostname.endsWith(".flowdine.in")) && (parsed.port === "80" || parsed.port === "443" || parsed.port === "8080"))) {
+        parsed.port = "";
+        env.NEXT_PUBLIC_APP_URL = parsed.origin;
+      }
+    } catch {
+      // An unparsable value is reported by validation.
+    }
+  }
+
   // Railway's public Postgres proxy (*.proxy.rlwy.net) speaks TLS: require it instead of refusing to boot (SC-DB-01).
   // This only ever makes the connection stricter.
   const db = env.DATABASE_URL?.trim();

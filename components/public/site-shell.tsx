@@ -19,13 +19,9 @@ import { monogram, primaryNavLinks, siteNavLinks, socialLinks, type SiteView } f
  */
 
 /**
- * On tenant subdomains, "Staff login" goes to the tenant's own /staff/login door.
- * On apex preview/QR routes (/r/[slug]), it links to /staff-login.
+ * Canonical Staff login URL is /staff-login on both tenant subdomains and preview routes.
  */
-function staffSignInHref(view?: SiteView): string {
-  if (view && view.homeHref === "/") {
-    return "/staff/login";
-  }
+function staffSignInHref(): string {
   return "/staff-login";
 }
 
@@ -60,7 +56,7 @@ function SiteHeader({ view }: { view: SiteView }) {
   const { site } = view;
   const links = siteNavLinks(site.sections);
   const inline = primaryNavLinks(links);
-  const signIn = staffSignInHref(view);
+  const signIn = staffSignInHref();
   const share = {
     title: site.restaurant.name,
     text: site.identity.tagline ? `${site.restaurant.name} - ${site.identity.tagline}` : site.restaurant.name,

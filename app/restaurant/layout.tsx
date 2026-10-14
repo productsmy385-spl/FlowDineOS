@@ -77,9 +77,9 @@ export default async function RestaurantLayout({ children }: { children: React.R
     const sub = session.activeTenant.subdomain || session.activeTenant.slug;
     if (sub) {
       const port = hostPort(hostHeader);
-      const portSuffix = port ? `:${port}` : "";
+      const portSuffix = port && port !== "8080" && port !== "80" && port !== "443" ? `:${port}` : "";
       const isLocal = hostHeader?.includes("localhost") || hostHeader?.includes("127.0.0.1");
-      const targetHost = isLocal ? `${sub}.localhost${portSuffix}` : `${sub}.${rootDomain}${portSuffix}`;
+      const targetHost = isLocal ? `${sub}.localhost${portSuffix}` : `${sub}.${rootDomain}`;
       const proto = isLocal ? "http" : "https";
       const pathname = (await headers()).get("x-pathname") || "/restaurant/dashboard";
       redirect(`${proto}://${targetHost}${pathname}`);

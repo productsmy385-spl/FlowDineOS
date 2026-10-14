@@ -235,7 +235,12 @@ export function apexAuthorityFor(hostHeader: string | null | undefined, rootDoma
 
   if (host.endsWith(LOCAL_SUFFIX) && host !== LOCAL_SUFFIX.slice(1)) return `localhost${suffix}`;
   const effectiveRoot = rootDomain ?? (host === "flowdine.in" || host.endsWith(".flowdine.in") ? "flowdine.in" : null);
-  if (effectiveRoot !== null && host !== effectiveRoot && host.endsWith(`.${effectiveRoot}`)) return `${effectiveRoot}${suffix}`;
+  if (effectiveRoot !== null && host !== effectiveRoot && host.endsWith(`.${effectiveRoot}`)) {
+    if (effectiveRoot === "flowdine.in" || port === "8080" || port === "80" || port === "443") {
+      return effectiveRoot;
+    }
+    return `${effectiveRoot}${suffix}`;
+  }
   return null;
 }
 
