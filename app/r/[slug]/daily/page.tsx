@@ -28,7 +28,7 @@ export async function generateMetadata({ params }: DailyMenuPageProps): Promise<
 
   const title = `${site.dailyMenu?.title ?? "Today's menu"} · ${site.restaurant.name}`;
   const description = site.dailyMenu?.note ?? site.dailyMenu?.title ?? undefined;
-  const canonical = canonicalPublicUrl(site.subdomain ?? site.slug);
+  const canonical = canonicalPublicUrl(site.slug);
   const image = site.identity.heroImageUrl ?? site.restaurant.coverImageUrl;
   return {
     title,
@@ -48,7 +48,7 @@ export default async function DailyMenuPage({ params }: DailyMenuPageProps) {
   const site = await loadPublicSite((await params).slug);
   const onTenantHost = (await resolvedTenantSlug()) !== null;
   const homeHref = siteHomeHref(site.slug, onTenantHost);
-  const view = siteView(site, { canonicalUrl: canonicalPublicUrl(site.subdomain ?? site.slug), homeHref });
+  const view = siteView(site, { canonicalUrl: canonicalPublicUrl(site.slug), homeHref });
   const daily = site.dailyMenu;
   const businessDate = daily?.businessDate ?? publicBusinessDate(site.timezone);
   const fullMenu = menuAnchor(site.sections);

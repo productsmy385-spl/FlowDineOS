@@ -204,11 +204,11 @@ describe("TC-PRINT-014 receipt jobs (SA-PRN-06)", () => {
     dataOf(await accept(orderId));
 
     await asSeedUser("A", "MANAGER");
-    const job = dataOf(await invokeAction(printReceiptAction, { orderId }));
+    const job = dataOf(await invokeAction(printReceiptAction, { orderId, copies: 1 }));
     expect(job).toMatchObject({ jobType: "RECEIPT", status: "PENDING", printer: { id: COUNTER_PRINTER } });
 
     const row = await db.printJob.findUniqueOrThrow({ where: { id: job.id } });
-    expect(row.dedupeKey).toMatch(new RegExp(`^RECEIPT:${orderId}:v1`));
+    expect(row.dedupeKey).toBe(`RECEIPT:${orderId}:v1`);
     const document = parsePrintDocument(row.payload);
     const serialised = JSON.stringify(document);
     const order = await db.order.findUniqueOrThrow({ where: { id: orderId } });
@@ -216,8 +216,8 @@ describe("TC-PRINT-014 receipt jobs (SA-PRN-06)", () => {
     expect(serialised).toContain("INR");
     expect(serialised).toContain("TOTAL");
 
-    const again = dataOf(await invokeAction(printReceiptAction, { orderId }));
-    expect((await db.printJob.findUniqueOrThrow({ where: { id: again.id } })).dedupeKey).toMatch(new RegExp(`^RECEIPT:${orderId}:v2`));
+    const again = dataOf(await invokeAction(printReceiptAction, { orderId, copies: 1 }));
+    expect((await db.printJob.findUniqueOrThrow({ where: { id: again.id } })).dedupeKey).toBe(`RECEIPT:${orderId}:v2`);
     expect(await db.auditLog.count({ where: { action: "print_job.created", resourceId: job.id } })).toBe(1);
   });
 

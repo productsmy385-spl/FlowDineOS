@@ -67,7 +67,6 @@ export interface PublicDailyMenuData {
 
 export interface PublicRestaurantData {
   slug: string;
-  subdomain?: string | null;
   timezone: string;
   currencyCode: string;
   countryCode: string;
@@ -258,7 +257,6 @@ export async function getPublicRestaurant(slug: string, now: Date = new Date(), 
 
   return {
     slug: tenant.slug,
-    subdomain: tenant.subdomain,
     timezone: restaurant.timezone,
     currencyCode: restaurant.currencyCode,
     countryCode: restaurant.countryCode,

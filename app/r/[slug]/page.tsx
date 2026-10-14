@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: PublicRestaurantPageProps): P
   const site = await loadPublicSiteForMetadata((await params).slug);
   if (site === null) return { title: "Restaurant not found" };
 
-  const canonical = canonicalPublicUrl(site.subdomain ?? site.slug);
+  const canonical = canonicalPublicUrl(site.slug);
   const title = site.seoTitle ?? site.restaurant.name;
   const description = site.seoDescription ?? site.identity.tagline ?? site.restaurant.description ?? undefined;
   const image = site.identity.heroImageUrl ?? site.restaurant.coverImageUrl;
@@ -54,5 +54,5 @@ export async function generateMetadata({ params }: PublicRestaurantPageProps): P
 export default async function PublicRestaurantPage({ params }: PublicRestaurantPageProps) {
   const site = await loadPublicSite((await params).slug);
   const onTenantHost = (await resolvedTenantSlug()) !== null;
-  return <PublicSitePage view={siteView(site, { canonicalUrl: canonicalPublicUrl(site.subdomain ?? site.slug), homeHref: siteHomeHref(site.slug, onTenantHost) })} />;
+  return <PublicSitePage view={siteView(site, { canonicalUrl: canonicalPublicUrl(site.slug), homeHref: siteHomeHref(site.slug, onTenantHost) })} />;
 }

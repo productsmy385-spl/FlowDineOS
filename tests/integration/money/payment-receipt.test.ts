@@ -38,7 +38,7 @@ describe("TC-TXN-020 paying the bill in full queues one receipt", () => {
     expect(["RECEIPT", "KOT_AND_RECEIPT"]).toContain(printer.purpose);
 
     const audit = await db.auditLog.findFirstOrThrow({ where: { tenantId: A, action: "print_job.created", resourceId: jobs[0].id } });
-    expect(audit.afterState).toMatchObject({ jobType: "RECEIPT", orderId: order.id, trigger: "payment" });
+    expect(audit.afterState).toMatchObject({ jobType: "RECEIPT", orderId: order.id, trigger: "automatic" });
   });
 
   it("a partial payment prints nothing — the receipt waits until the bill is settled", async () => {

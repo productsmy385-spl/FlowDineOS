@@ -235,7 +235,6 @@ export type TenantInspection = {
     id: string;
     name: string;
     slug: string;
-    subdomain?: string | null;
     status: TenantStatus;
     suspendedAt: string | null;
     suspensionReason: string | null;
@@ -318,7 +317,6 @@ export async function inspectPlatformTenant(ctx: PlatformContext, tenantId: stri
       id: tenant.id,
       name: tenant.name,
       slug: tenant.slug,
-      subdomain: tenant.subdomain,
       status: tenant.status,
       suspendedAt: nullableInstantDto(tenant.suspendedAt),
       suspensionReason: tenant.suspensionReason,

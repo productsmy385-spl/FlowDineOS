@@ -92,9 +92,8 @@ async function openSeededStaffSession(input: { tenantId: string; membershipId: s
     where: { tenantId: input.tenantId, membershipId: input.membershipId, status: "ACTIVE" },
     data: { status: "ENDED", endReason: "SIGNED_OUT", endedAt: new Date() },
   });
-  await db.staffCredential.updateMany({
-    where: { tenantId: input.tenantId, membershipId: input.membershipId, status: "ACTIVE" },
-    data: { status: "REVOKED", revokedAt: new Date() },
+  await db.staffCredential.deleteMany({
+    where: { tenantId: input.tenantId, membershipId: input.membershipId },
   });
   const credential = await db.staffCredential.create({
     data: {

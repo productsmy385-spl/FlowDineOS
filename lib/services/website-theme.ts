@@ -15,7 +15,7 @@ import {
   type WebsiteSectionRow,
   type WebsiteThemeRow,
 } from "@/lib/data/website";
-import { ConflictError } from "@/lib/errors";
+import { ConflictError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { assertOwnedImageUrls, imageUrlsBeforeSave, releaseUnusedImages } from "@/lib/services/media";
 import { getPublicRestaurantBySlug, type PublicRestaurantData } from "@/lib/services/public-restaurant";
@@ -442,6 +442,9 @@ export async function updateTheme(ctx: TenantContext, input: UpdateWebsiteThemeD
         gradientTo: input.gradientToHex ?? input.secondaryHex!,
       }
     : { ...base!, gradientFrom: input.gradientFromHex ?? base!.gradientFrom, gradientTo: input.gradientToHex ?? base!.gradientTo };
+
+  const issues = themeContrastIssues(palette, input.surfaceMode);
+  if (Object.keys(issues).length > 0) throw new ValidationError("Choose colours that stay readable on the website background.", issues);
 
   // A preset owns its colours: the custom columns are cleared so the stored row can never disagree with the preset
   // (and the database CHECK that binds CUSTOM to its three colours keeps holding).
