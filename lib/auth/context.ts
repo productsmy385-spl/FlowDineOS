@@ -116,7 +116,9 @@ export const getTenantResolution = cache(async (): Promise<TenantResolution> => 
   const all = session.state === "ACTIVE" ? await activeMembershipsOfUser(session.user.id) : [];
   let available = session.state === "ACTIVE" ? reachableBy(session, all) : all;
   if (hostSlug) {
-    const forHost = available.filter((m) => m.tenantSlug === hostSlug || m.subdomain === hostSlug);
+    const forHost = available.filter(
+      (m) => m.tenantSlug === hostSlug || m.subdomain === hostSlug || (hostSlug === "akshayapatra" && m.tenantSlug === "akshayapatra-devarapalli"),
+    );
     if (forHost.length === 0 && session.state === "ACTIVE") {
       return { outcome: "NO_MEMBERSHIP" };
     }

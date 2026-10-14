@@ -15,15 +15,30 @@ import {
 } from "@/lib/tenancy/hostnames";
 
 /** Safe public redirect URL that never leaks internal ports (e.g. 8080) on public domains */
-function publicRedirectUrl(location: string, req: NextRequest): URL {
-  const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
-  const rawHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host || "flowdine.in";
+function publicRedirectUrl(location: string, req: NextRequest, targetHost?: string): URL {
+  const rawHost = targetHost || req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host || "flowdine.in";
   const host = normalizeHost(rawHost) || "flowdine.in";
   const isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
+  const proto = isLocal ? (req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http")) : "https";
   const port = hostPort(rawHost);
   const portSuffix = isLocal && port ? `:${port}` : "";
   const base = `${proto}://${host}${portSuffix}`;
   return new URL(location, base);
+}
+
+/** Sanitize request headers forwarded downstream to Next.js Server Components so redirect() never sees internal ports */
+function sanitizeForwardedHeaders(headers: Headers, req: NextRequest): Headers {
+  const rawHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || "flowdine.in";
+  const host = normalizeHost(rawHost) || "flowdine.in";
+  const isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
+
+  if (!isLocal) {
+    headers.set("host", host);
+    headers.set("x-forwarded-host", host);
+    headers.set("x-forwarded-proto", "https");
+    headers.set("x-forwarded-port", "443");
+  }
+  return headers;
 }
 
 /**
@@ -56,7 +71,7 @@ export default clerkMiddleware(async (auth, req) => {
     headers.set("x-nonce", nonce);
     headers.set("content-security-policy", csp);
     headers.set("x-pathname", `${pathname}${search}`);
-    return headers;
+    return sanitizeForwardedHeaders(headers, req);
   };
 
   const rootDomain = normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN);
@@ -136,10 +151,8 @@ export default clerkMiddleware(async (auth, req) => {
     ) {
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
-        const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
-        const cleanAuthority = authority.replace(/:8080$/, "");
-        const target = new URL(`${pathname}${search}`, `${proto}://${cleanAuthority}`);
-        const response = NextResponse.redirect(target, 308);
+        const cleanAuthority = normalizeHost(authority) || "flowdine.in";
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 308);
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -158,10 +171,8 @@ export default clerkMiddleware(async (auth, req) => {
       }
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
-        const proto = req.headers.get("x-forwarded-proto") || (req.url.startsWith("https") ? "https" : "http");
-        const cleanAuthority = authority.replace(/:8080$/, "");
-        const target = new URL(`${pathname}${search}`, `${proto}://${cleanAuthority}`);
-        const response = NextResponse.redirect(target, 308);
+        const cleanAuthority = normalizeHost(authority) || "flowdine.in";
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 308);
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -219,10 +230,8 @@ export default clerkMiddleware(async (auth, req) => {
       const subPath = slashIndex === -1 ? "/" : remainder.slice(slashIndex);
       const targetSub = slug === "akshayapatra-devarapalli" ? "akshayapatra" : slug;
       if (targetSub && targetSub !== "_") {
-        const proto = req.headers.get("x-forwarded-proto") || "https";
-        const cleanRoot = effectiveRoot.replace(/:8080$/, "");
-        const redirectUrl = new URL(`${proto}://${targetSub}.${cleanRoot}${subPath}${search}`);
-        const response = NextResponse.redirect(redirectUrl, 308);
+        const cleanRoot = normalizeHost(effectiveRoot) || "flowdine.in";
+        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req, `${targetSub}.${cleanRoot}`), 308);
         response.headers.set("x-request-id", requestId);
         return response;
       }
