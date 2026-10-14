@@ -88,9 +88,8 @@ async function openSeededStaffSession(input: { tenantId: string; membershipId: s
   const expiresAt = new Date("2099-12-31T00:00:00.000Z");
   const businessDate = new Date("2026-09-15T00:00:00.000Z");
 
-  await db.staffSession.updateMany({
-    where: { tenantId: input.tenantId, membershipId: input.membershipId, status: "ACTIVE" },
-    data: { status: "ENDED", endReason: "SIGNED_OUT", endedAt: new Date() },
+  await db.staffSession.deleteMany({
+    where: { tenantId: input.tenantId, membershipId: input.membershipId },
   });
   await db.staffCredential.deleteMany({
     where: { tenantId: input.tenantId, membershipId: input.membershipId },
