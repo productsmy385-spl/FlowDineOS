@@ -89,9 +89,9 @@ export default clerkMiddleware(async (auth, req) => {
 
   // Tenant subdomains (e.g. akshayapatra.flowdine.in or akshayapatra.localhost)
   if (host.kind === "tenant" && !isHostNeutralPath(pathname)) {
-    // 1. Staff login: /staff-login is canonical; /staff/login redirects 308 to /staff-login
+    // 1. Staff login: /staff-login is canonical; /staff/login redirects temporarily to /staff-login (307; avoid caching a stale host/port)
     if (pathname === "/staff/login" || pathname === "/staff/login/") {
-      const response = NextResponse.redirect(publicRedirectUrl(`/staff-login${search}`, req), 308);
+      const response = NextResponse.redirect(publicRedirectUrl(`/staff-login${search}`, req), 307);
       response.headers.set("x-request-id", requestId);
       return response;
     }
@@ -152,27 +152,27 @@ export default clerkMiddleware(async (auth, req) => {
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
         const cleanAuthority = normalizeHost(authority) || "flowdine.in";
-        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 307);
         response.headers.set("x-request-id", requestId);
         return response;
       }
     }
 
-    // 5. Legacy /r/... path on tenant host -> 308 redirect to clean subdomain path
+    // 5. Legacy /r/... path on tenant host -> temporary redirect to clean subdomain path (avoid caching stale host/port)
     if (pathname.startsWith("/r/")) {
       const isLegacyDbSlug = host.slug === "akshayapatra" && (pathname === "/r/akshayapatra-devarapalli" || pathname.startsWith("/r/akshayapatra-devarapalli/"));
       const isThisTenant = pathname === `/r/${host.slug}` || pathname.startsWith(`/r/${host.slug}/`) || isLegacyDbSlug;
       if (isThisTenant) {
         const prefix = isLegacyDbSlug ? "/r/akshayapatra-devarapalli" : `/r/${host.slug}`;
         const subPath = pathname.slice(prefix.length) || "/";
-        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req), 307);
         response.headers.set("x-request-id", requestId);
         return response;
       }
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
         const cleanAuthority = normalizeHost(authority) || "flowdine.in";
-        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 307);
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -231,7 +231,7 @@ export default clerkMiddleware(async (auth, req) => {
       const targetSub = slug === "akshayapatra-devarapalli" ? "akshayapatra" : slug;
       if (targetSub && targetSub !== "_") {
         const cleanRoot = normalizeHost(effectiveRoot) || "flowdine.in";
-        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req, `${targetSub}.${cleanRoot}`), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${subPath}${search}`, req, `${targetSub}.${cleanRoot}`), 307);
         response.headers.set("x-request-id", requestId);
         return response;
       }
