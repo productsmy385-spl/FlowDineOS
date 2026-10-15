@@ -82,42 +82,31 @@ export const THEME_PRESETS: Readonly<Record<Exclude<WebsiteThemePresetName, "CUS
   },
 };
 
-const HEX = /^#[0-9A-Fa-f]{6}$/;
+export {
+  relativeLuminance,
+  contrastRatio,
+  onColourFor,
+  sampleGradientHex,
+  suggestedAccessibleColour,
+} from "@/lib/ui/contrast";
 
-function channel(value: number): number {
-  const c = value / 255;
-  return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-}
+import {
+  contrastRatio,
+  onColourFor,
+  sampleGradientHex,
+} from "@/lib/ui/contrast";
 
-/** WCAG 2.x relative luminance of `#RRGGBB`. */
-export function relativeLuminance(hex: string): number {
-  if (!HEX.test(hex)) throw new RangeError("Invalid colour");
-  const [r, g, b] = [1, 3, 5].map((i) => channel(parseInt(hex.slice(i, i + 2), 16)));
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-/** WCAG 2.x contrast ratio between two `#RRGGBB` colours (1–21). */
-export function contrastRatio(a: string, b: string): number {
-  const [light, dark] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
-  return (light + 0.05) / (dark + 0.05);
-}
+const round2 = (value: number) => Math.round(value * 100) / 100;
 
 const BLACK = "#0B0B0F";
 const WHITE = "#FFFFFF";
 
-/** Black or white — whichever is more readable on `hex`. */
-export function onColourFor(hex: string): string {
-  return contrastRatio(hex, WHITE) >= contrastRatio(hex, BLACK) ? WHITE : BLACK;
-}
-
-const round2 = (value: number) => Math.round(value * 100) / 100;
-
 // ─── Contrast enforcement ───
 
 const COLOUR_FIELDS = [
-  { field: "primaryHex", key: "primary", label: "primary colour" },
-  { field: "secondaryHex", key: "secondary", label: "secondary colour" },
-  { field: "accentHex", key: "accent", label: "accent colour" },
+  { field: "primaryHex", key: "primary", label: "primary colour", minContrast: MIN_THEME_CONTRAST },
+  { field: "secondaryHex", key: "secondary", label: "secondary colour", minContrast: 3.0 },
+  { field: "accentHex", key: "accent", label: "accent colour", minContrast: 3.0 },
 ] as const;
 
 /**
@@ -129,26 +118,32 @@ export function themeContrastIssues(palette: Palette, surfaceMode: WebsiteSurfac
   const issues: Record<string, string[]> = {};
   const add = (field: string, message: string) => (issues[field] ??= []).push(message);
 
-  for (const { field, key, label } of COLOUR_FIELDS) {
+  for (const { field, key, label, minContrast } of COLOUR_FIELDS) {
     const colour = palette[key];
     const onSurface = contrastRatio(colour, surface);
-    if (onSurface < MIN_THEME_CONTRAST) {
-      add(field, `This ${label} reaches only ${round2(onSurface)}:1 on the ${surfaceMode.toLowerCase()} website background; it needs at least ${MIN_THEME_CONTRAST}:1.`);
+    if (onSurface < minContrast) {
+      add(
+        field,
+        `This ${label} (${colour}) reaches only ${round2(onSurface)}:1 on the ${surfaceMode.toLowerCase()} website background (${surface}); it needs at least ${minContrast}:1. Field to adjust: ${label}.`,
+      );
       continue;
     }
     const onColour = contrastRatio(colour, onColourFor(colour));
-    if (onColour < MIN_THEME_CONTRAST) {
-      add(field, `No readable text colour fits on this ${label} (best is ${round2(onColour)}:1, needs ${MIN_THEME_CONTRAST}:1).`);
+    if (onColour < minContrast) {
+      add(field, `No readable text colour fits on this ${label} (best is ${round2(onColour)}:1, needs ${minContrast}:1). Field to adjust: ${label}.`);
     }
   }
 
-  // A gradient is a background: text sits on both ends, so one on-colour has to work for both.
-  const best = Math.max(
-    Math.min(contrastRatio(palette.gradientFrom, WHITE), contrastRatio(palette.gradientTo, WHITE)),
-    Math.min(contrastRatio(palette.gradientFrom, BLACK), contrastRatio(palette.gradientTo, BLACK)),
-  );
-  if (best < MIN_THEME_CONTRAST) {
-    const message = `No readable text colour fits across this gradient (best is ${round2(best)}:1, needs ${MIN_THEME_CONTRAST}:1).`;
+  // Validate readable text across the rendered gradient's text region (0% to 60% of the linear gradient).
+  // Hero headings are WCAG Large Text (32–40px bold) needing >= 3.0:1 contrast.
+  const samplePoints = [0, 0.25, 0.5];
+  const samples = samplePoints.map((t) => sampleGradientHex(palette.gradientFrom, palette.gradientTo, t));
+  const whiteContrast = Math.min(...samples.map((s) => contrastRatio(s, WHITE)));
+  const blackContrast = Math.min(...samples.map((s) => contrastRatio(s, BLACK)));
+  const bestGradientContrast = Math.max(whiteContrast, blackContrast);
+
+  if (bestGradientContrast < 3.0) {
+    const message = `No readable text colour fits across this gradient (best is ${round2(bestGradientContrast)}:1 across the text range, needs at least 3.0:1 for headings). Field to adjust: Gradient start or end colour.`;
     add("gradientFromHex", message);
     add("gradientToHex", message);
   }
@@ -201,18 +196,37 @@ export function defaultTextColors(
   surfaceMode: WebsiteSurfaceModeName,
   palette: Palette,
   onGradient: string,
+  preset?: WebsiteThemePresetName,
 ): ResolvedTextColors {
   const isDark = surfaceMode === "DARK";
+  // Preserve PLATFORM Signature botanical branding defaults
+  if (preset === "PLATFORM" || (!preset && palette.primary === THEME_PRESETS.PLATFORM[surfaceMode].primary)) {
+    return {
+      headingColor: isDark ? "#F5F5F7" : "#17211B",
+      sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
+      bodyTextColor: isDark ? "#DEE8E3" : "#405044",
+      mutedTextColor: isDark ? "#93A69D" : "#667366",
+      navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+      linkColor: palette.primary,
+      buttonTextColor: onColourFor(palette.primary),
+      priceColor: palette.primary,
+      footerTextColor: isDark ? "#93A69D" : "#405044",
+      heroHeadingColor: onGradient,
+      heroDescriptionColor: onGradient,
+    };
+  }
+
+  // Modern, high-contrast, neutral accessible tones for CITRUS, OCEAN, BERRY, and CUSTOM palettes
   return {
-    headingColor: isDark ? "#F5F5F7" : "#17211B",
-    sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
-    bodyTextColor: isDark ? "#DEE8E3" : "#405044",
-    mutedTextColor: isDark ? "#93A69D" : "#667366",
-    navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+    headingColor: isDark ? "#F9FAFB" : "#111827",
+    sectionHeadingColor: isDark ? "#F3F4F6" : "#1F2937",
+    bodyTextColor: isDark ? "#E5E7EB" : "#374151",
+    mutedTextColor: isDark ? "#9CA3AF" : "#6B7280",
+    navigationTextColor: isDark ? "#F3F4F6" : "#1F2937",
     linkColor: palette.primary,
     buttonTextColor: onColourFor(palette.primary),
     priceColor: palette.primary,
-    footerTextColor: isDark ? "#93A69D" : "#405044",
+    footerTextColor: isDark ? "#9CA3AF" : "#4B5563",
     heroHeadingColor: onGradient,
     heroDescriptionColor: onGradient,
   };
@@ -239,13 +253,15 @@ export function resolveTheme(theme: ThemePaletteRow): ResolvedTheme {
         }
       : { ...base, gradientFrom: theme.gradientFromHex ?? base.gradientFrom, gradientTo: theme.gradientToHex ?? base.gradientTo };
 
+  // Calculate best onGradient across the text region of the gradient
+  const midPoint = sampleGradientHex(palette.gradientFrom, palette.gradientTo, 0.3);
   const onGradient =
-    Math.min(contrastRatio(palette.gradientFrom, WHITE), contrastRatio(palette.gradientTo, WHITE)) >=
-    Math.min(contrastRatio(palette.gradientFrom, BLACK), contrastRatio(palette.gradientTo, BLACK))
+    Math.min(contrastRatio(palette.gradientFrom, WHITE), contrastRatio(midPoint, WHITE)) >=
+    Math.min(contrastRatio(palette.gradientFrom, BLACK), contrastRatio(midPoint, BLACK))
       ? WHITE
       : BLACK;
 
-  const defaultTexts = defaultTextColors(surfaceMode, palette, onGradient);
+  const defaultTexts = defaultTextColors(surfaceMode, palette, onGradient, preset);
   const textColors: ResolvedTextColors = {
     headingColor: theme.textColors?.headingColor ?? defaultTexts.headingColor,
     sectionHeadingColor: theme.textColors?.sectionHeadingColor ?? defaultTexts.sectionHeadingColor,

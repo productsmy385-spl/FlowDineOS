@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { channels } from "@/components/public/theme";
-import { contrastRatio } from "@/lib/ui/contrast";
+import { contrastRatio, sampleGradientHex, suggestedAccessibleColour } from "@/lib/ui/contrast";
 import { MIN_THEME_CONTRAST, type WebsiteSurfaceModeName, type WebsiteThemePresetName } from "@/lib/validation/website";
 import type { ResolvedTextColors } from "@/lib/services/website-theme";
 
@@ -83,113 +83,116 @@ export function evaluateThemeContrast(
   surfaceHex: string,
   textColors: ResolvedTextColors,
 ): { checks: ContrastCheck[]; failing: ContrastCheck[] } {
-  const gradientEffective = (fg: string) =>
-    round2(Math.min(contrastRatio(fg, palette.gradientFrom), contrastRatio(fg, palette.gradientTo)));
+  const samplePoints = [0, 0.25, 0.5];
+  const gradientEffective = (fg: string) => {
+    const samples = samplePoints.map((t) => sampleGradientHex(palette.gradientFrom, palette.gradientTo, t));
+    return round2(Math.min(...samples.map((s) => contrastRatio(fg, s))));
+  };
 
   const checks: ContrastCheck[] = [
     {
       id: "secondary",
       label: "Secondary colour",
-      pair: "Secondary colour on website background",
+      pair: `Secondary colour on website background (${palette.secondary} on ${surfaceHex})`,
       foreground: palette.secondary,
       background: surfaceHex,
       ratio: round2(contrastRatio(palette.secondary, surfaceHex)),
-      required: MIN_THEME_CONTRAST,
-      ok: contrastRatio(palette.secondary, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      required: 3.0,
+      ok: contrastRatio(palette.secondary, surfaceHex) >= 3.0,
+      suggestion: suggestedAccessibleColour(palette.secondary, surfaceHex, 3.0),
     },
     {
       id: "primary",
       label: "Primary colour",
-      pair: "Primary colour on website background",
+      pair: `Primary colour on website background (${palette.primary} on ${surfaceHex})`,
       foreground: palette.primary,
       background: surfaceHex,
       ratio: round2(contrastRatio(palette.primary, surfaceHex)),
       required: 3.0,
       ok: contrastRatio(palette.primary, surfaceHex) >= 3.0,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(palette.primary, surfaceHex, 3.0),
     },
     {
       id: "accent",
       label: "Accent colour",
-      pair: "Accent colour on website background",
+      pair: `Accent colour on website background (${palette.accent} on ${surfaceHex})`,
       foreground: palette.accent,
       background: surfaceHex,
       ratio: round2(contrastRatio(palette.accent, surfaceHex)),
       required: 3.0,
       ok: contrastRatio(palette.accent, surfaceHex) >= 3.0,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(palette.accent, surfaceHex, 3.0),
     },
     {
       id: "heading",
       label: "Main heading",
-      pair: "Main heading on website background",
+      pair: `Main heading on website background (${textColors.headingColor} on ${surfaceHex})`,
       foreground: textColors.headingColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.headingColor, surfaceHex)),
       required: 3.0,
       ok: contrastRatio(textColors.headingColor, surfaceHex) >= 3.0,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.headingColor, surfaceHex, 3.0),
     },
     {
       id: "sectionHeading",
       label: "Section headings",
-      pair: "Section headings on website background",
+      pair: `Section headings on website background (${textColors.sectionHeadingColor} on ${surfaceHex})`,
       foreground: textColors.sectionHeadingColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.sectionHeadingColor, surfaceHex)),
       required: 3.0,
       ok: contrastRatio(textColors.sectionHeadingColor, surfaceHex) >= 3.0,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.sectionHeadingColor, surfaceHex, 3.0),
     },
     {
       id: "bodyText",
       label: "Body text",
-      pair: "Body text on website background",
+      pair: `Body text on website background (${textColors.bodyTextColor} on ${surfaceHex})`,
       foreground: textColors.bodyTextColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.bodyTextColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.bodyTextColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.bodyTextColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "mutedText",
       label: "Secondary/muted text",
-      pair: "Secondary/muted text on website background",
+      pair: `Secondary/muted text on website background (${textColors.mutedTextColor} on ${surfaceHex})`,
       foreground: textColors.mutedTextColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.mutedTextColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.mutedTextColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.mutedTextColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "navigationText",
       label: "Navigation text",
-      pair: "Navigation text on header background",
+      pair: `Navigation text on header background (${textColors.navigationTextColor} on ${surfaceHex})`,
       foreground: textColors.navigationTextColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.navigationTextColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.navigationTextColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.navigationTextColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "link",
       label: "Link text",
-      pair: "Link text on website background",
+      pair: `Link text on website background (${textColors.linkColor} on ${surfaceHex})`,
       foreground: textColors.linkColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.linkColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.linkColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.linkColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "buttonText",
       label: "Button text",
-      pair: "Button text on primary button",
+      pair: `Button text on primary button (${textColors.buttonTextColor} on ${palette.primary})`,
       foreground: textColors.buttonTextColor,
       background: palette.primary,
       ratio: round2(contrastRatio(textColors.buttonTextColor, palette.primary)),
@@ -200,29 +203,29 @@ export function evaluateThemeContrast(
     {
       id: "price",
       label: "Price text",
-      pair: "Price text on website background",
+      pair: `Price text on website background (${textColors.priceColor} on ${surfaceHex})`,
       foreground: textColors.priceColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.priceColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.priceColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.priceColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "footerText",
       label: "Footer text",
-      pair: "Footer text on website background",
+      pair: `Footer text on website background (${textColors.footerTextColor} on ${surfaceHex})`,
       foreground: textColors.footerTextColor,
       background: surfaceHex,
       ratio: round2(contrastRatio(textColors.footerTextColor, surfaceHex)),
       required: MIN_THEME_CONTRAST,
       ok: contrastRatio(textColors.footerTextColor, surfaceHex) >= MIN_THEME_CONTRAST,
-      suggestion: onColour(surfaceHex),
+      suggestion: suggestedAccessibleColour(textColors.footerTextColor, surfaceHex, MIN_THEME_CONTRAST),
     },
     {
       id: "heroHeading",
       label: "Hero heading",
-      pair: "Hero heading across hero gradient",
+      pair: `Hero heading across hero gradient (${textColors.heroHeadingColor} on ${palette.gradientFrom} → ${palette.gradientTo})`,
       foreground: textColors.heroHeadingColor,
       background: `${palette.gradientFrom} → ${palette.gradientTo}`,
       ratio: gradientEffective(textColors.heroHeadingColor),
@@ -233,12 +236,12 @@ export function evaluateThemeContrast(
     {
       id: "heroDescription",
       label: "Hero description",
-      pair: "Hero description across hero gradient",
+      pair: `Hero description across hero gradient (${textColors.heroDescriptionColor} on ${palette.gradientFrom} → ${palette.gradientTo})`,
       foreground: textColors.heroDescriptionColor,
       background: `${palette.gradientFrom} → ${palette.gradientTo}`,
       ratio: gradientEffective(textColors.heroDescriptionColor),
-      required: MIN_THEME_CONTRAST,
-      ok: gradientEffective(textColors.heroDescriptionColor) >= MIN_THEME_CONTRAST,
+      required: 3.0,
+      ok: gradientEffective(textColors.heroDescriptionColor) >= 3.0,
       suggestion: onGradient(palette.gradientFrom, palette.gradientTo),
     },
   ];
@@ -255,12 +258,23 @@ export function SitePreview({ input, dirty }: { input: PreviewInput; dirty: bool
     backgroundColor: surfaceHex,
     color: textColors.bodyTextColor,
     "--surface": channels(surfaceHex),
+    "--surface-2": input.surfaceMode === "LIGHT" ? "255 255 255" : "24 24 27",
+    "--surface-3": input.surfaceMode === "LIGHT" ? "243 244 246" : "39 39 42",
+    "--border": input.surfaceMode === "LIGHT" ? "229 231 235" : "39 39 42",
+    "--border-strong": input.surfaceMode === "LIGHT" ? "209 213 219" : "63 63 70",
     "--text": channels(onSurfaceHex),
+    "--text-muted": channels(textColors.mutedTextColor),
     "--text-accent": channels(palette.primary),
     "--primary": channels(palette.primary),
-    "--on-primary": channels(onColour(palette.primary)),
+    "--on-primary": channels(textColors.buttonTextColor),
     "--secondary": channels(palette.secondary),
+    "--on-secondary": channels(onColour(palette.secondary)),
     "--accent": channels(palette.accent),
+    "--on-accent": channels(onColour(palette.accent)),
+    "--action-primary": channels(palette.primary),
+    "--action-primary-fg": channels(textColors.buttonTextColor),
+    "--action-secondary": channels(palette.secondary),
+    "--focus-ring": channels(palette.accent),
     "--website-heading-color": textColors.headingColor,
     "--website-section-heading-color": textColors.sectionHeadingColor,
     "--website-body-text-color": textColors.bodyTextColor,
@@ -442,38 +456,28 @@ export function SitePreview({ input, dirty }: { input: PreviewInput; dirty: bool
           )}
         </div>
 
-        {/* Existing Secondary Colour warning notice if secondary fails */}
-        {failing.some((f) => f.id === "secondary") && (
-          <div className="rounded-lg border border-status-warning/30 bg-status-warning/10 p-3 text-caption text-fg-primary">
-            <p className="font-semibold text-status-warning">Secondary colour contrast warning</p>
+        {/* Failing contrast checks breakdown */}
+        {failing.map((fail) => (
+          <div key={fail.id} className="rounded-lg border border-status-warning/30 bg-status-warning/10 p-3 text-caption text-fg-primary">
+            <p className="font-semibold text-status-warning">{fail.label} contrast warning</p>
             <p className="mt-1 text-fg-secondary">
-              Secondary colour ({palette.secondary}) reaches{" "}
-              {round2(contrastRatio(palette.secondary, surfaceHex))}:1 on the website background (WCAG AA target:{" "}
-              {MIN_THEME_CONTRAST}:1).
+              <strong className="text-fg-primary">Combination:</strong> {fail.pair}
             </p>
             <p className="mt-1 text-fg-secondary">
-              Suggested accessible alternative: <span className="font-mono font-bold text-fg-primary">{onColour(surfaceHex)}</span>
+              <strong className="text-fg-primary">Contrast ratio:</strong> measured ratio is{" "}
+              <span className="font-bold text-status-danger">{fail.ratio}:1</span> (required: at least {fail.required}:1).
             </p>
+            <p className="mt-1 text-fg-secondary">
+              <strong className="text-fg-primary">Field to adjust:</strong> {fail.label}
+            </p>
+            {fail.suggestion ? (
+              <p className="mt-1 text-fg-secondary">
+                <strong className="text-fg-primary">Suggested accessible colour:</strong>{" "}
+                <span className="font-mono font-bold text-fg-primary">{fail.suggestion}</span>
+              </p>
+            ) : null}
           </div>
-        )}
-
-        {/* Other failing checks breakdown */}
-        {failing
-          .filter((f) => f.id !== "secondary")
-          .map((fail) => (
-            <div key={fail.id} className="rounded-lg border border-status-warning/30 bg-status-warning/10 p-3 text-caption text-fg-primary">
-              <p className="font-semibold text-status-warning">
-                {fail.label} contrast warning
-              </p>
-              <p className="mt-1 text-fg-secondary">
-                {fail.pair}: measured ratio is{" "}
-                <span className="font-bold text-status-danger">{fail.ratio}:1</span> (needs at least {fail.required}:1).
-              </p>
-              <p className="mt-1 text-fg-secondary">
-                Suggested accessible colour: <span className="font-mono font-bold text-fg-primary">{fail.suggestion}</span>
-              </p>
-            </div>
-          ))}
+        ))}
 
         {/* Summary Table of all 3 base palette colours (legacy readout) */}
         <dl className="flex flex-col gap-1 border-t border-border-subtle pt-2">

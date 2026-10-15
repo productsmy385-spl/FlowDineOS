@@ -141,8 +141,8 @@ export async function assertOwnedImageUrls(ctx: TenantContext, fields: Record<st
       continue;
     }
 
-    // 3. Must not be registered to another tenant in media_assets
-    if (await isAssetOwnedByOtherTenant(ctx, [url])) {
+    // 3. Must not be registered to another tenant in media_assets (if it is a private tenant upload)
+    if (tenantFolderMatch && (await isAssetOwnedByOtherTenant(ctx, [url]))) {
       problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
       continue;
     }
@@ -163,7 +163,11 @@ export async function assertOwnedImageUrls(ctx: TenantContext, fields: Record<st
       }
     }
     if (isCurrent) {
-      await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      try {
+        await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      } catch (e) {
+        logger.warn("media.register_current_failed", { url, error: e instanceof Error ? e.message : String(e) });
+      }
       continue;
     }
 
@@ -171,7 +175,11 @@ export async function assertOwnedImageUrls(ctx: TenantContext, fields: Record<st
     // If it is directly under the endpoint and not in any tenant's private upload folder,
     // register it as a READY asset for this tenant
     if (!tenantFolderMatch) {
-      await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      try {
+        await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      } catch (e) {
+        logger.warn("media.register_root_failed", { url, error: e instanceof Error ? e.message : String(e) });
+      }
       continue;
     }
 

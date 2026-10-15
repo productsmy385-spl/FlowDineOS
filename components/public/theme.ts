@@ -58,7 +58,12 @@ export function siteThemeStyle(theme: SiteTheme, cssVariables: Readonly<Record<s
   return {
     ...cssVariables,
     "--surface": channels(theme.surface),
+    "--surface-2": theme.surfaceMode === "LIGHT" ? "255 255 255" : "24 24 27",
+    "--surface-3": theme.surfaceMode === "LIGHT" ? "243 244 246" : "39 39 42",
+    "--border": theme.surfaceMode === "LIGHT" ? "229 231 235" : "39 39 42",
+    "--border-strong": theme.surfaceMode === "LIGHT" ? "209 213 219" : "63 63 70",
     "--text": channels(theme.onSurface),
+    "--text-muted": theme.surfaceMode === "LIGHT" ? "107 114 128" : "156 163 175",
     "--text-accent": channels(theme.accent),
     "--primary": channels(theme.primary),
     "--on-primary": channels(theme.onPrimary),

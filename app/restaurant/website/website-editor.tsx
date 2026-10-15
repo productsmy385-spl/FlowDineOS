@@ -22,6 +22,7 @@ import {
   type WebsiteThemePresetName,
 } from "@/lib/validation/website";
 import { SitePreview, type PreviewPalette } from "./site-preview";
+import { sampleGradientHex } from "@/lib/ui/contrast";
 import type { ResolvedTextColors } from "@/lib/services/website-theme";
 import { updateBrandingAction } from "../settings/website-actions";
 import { saveWebsiteSectionsAction, updateWebsiteIdentityAction, updateWebsiteThemeAction } from "./actions";
@@ -125,26 +126,55 @@ type BrandColour = { name: string; hex: string };
 export function computeDefaultTextColors(
   surfaceMode: WebsiteSurfaceModeName,
   palette: PreviewPalette,
+  preset?: WebsiteThemePresetName,
 ): ResolvedTextColors {
   const isDark = surfaceMode === "DARK";
   const onGradient =
-    Math.min(contrastRatio(palette.gradientFrom, "#FFFFFF"), contrastRatio(palette.gradientTo, "#FFFFFF")) >=
-    Math.min(contrastRatio(palette.gradientFrom, "#0B0B0F"), contrastRatio(palette.gradientTo, "#0B0B0F"))
+    Math.min(
+      contrastRatio(palette.gradientFrom, "#FFFFFF"),
+      contrastRatio(palette.gradientTo, "#FFFFFF"),
+      contrastRatio(sampleGradientHex(palette.gradientFrom, palette.gradientTo, 0.25), "#FFFFFF"),
+    ) >=
+    Math.min(
+      contrastRatio(palette.gradientFrom, "#0B0B0F"),
+      contrastRatio(palette.gradientTo, "#0B0B0F"),
+      contrastRatio(sampleGradientHex(palette.gradientFrom, palette.gradientTo, 0.25), "#0B0B0F"),
+    )
       ? "#FFFFFF"
       : "#0B0B0F";
   const onPrimary =
     contrastRatio(palette.primary, "#FFFFFF") >= contrastRatio(palette.primary, "#0B0B0F") ? "#FFFFFF" : "#0B0B0F";
 
+  const isPlatform =
+    preset === "PLATFORM" ||
+    (!preset && (palette.primary === "#2E7D0A" || palette.primary === "#41E012"));
+
+  if (isPlatform) {
+    return {
+      headingColor: isDark ? "#F5F5F7" : "#17211B",
+      sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
+      bodyTextColor: isDark ? "#DEE8E3" : "#405044",
+      mutedTextColor: isDark ? "#93A69D" : "#667366",
+      navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+      linkColor: palette.primary,
+      buttonTextColor: onPrimary,
+      priceColor: palette.primary,
+      footerTextColor: isDark ? "#93A69D" : "#405044",
+      heroHeadingColor: onGradient,
+      heroDescriptionColor: onGradient,
+    };
+  }
+
   return {
-    headingColor: isDark ? "#F5F5F7" : "#17211B",
-    sectionHeadingColor: isDark ? "#DEE8E3" : "#24352B",
-    bodyTextColor: isDark ? "#DEE8E3" : "#405044",
-    mutedTextColor: isDark ? "#93A69D" : "#667366",
-    navigationTextColor: isDark ? "#DEE8E3" : "#24352B",
+    headingColor: isDark ? "#F9FAFB" : "#111827",
+    sectionHeadingColor: isDark ? "#F3F4F6" : "#1F2937",
+    bodyTextColor: isDark ? "#E5E7EB" : "#374151",
+    mutedTextColor: isDark ? "#9CA3AF" : "#6B7280",
+    navigationTextColor: isDark ? "#F3F4F6" : "#1F2937",
     linkColor: palette.primary,
     buttonTextColor: onPrimary,
     priceColor: palette.primary,
-    footerTextColor: isDark ? "#93A69D" : "#405044",
+    footerTextColor: isDark ? "#9CA3AF" : "#4B5563",
     heroHeadingColor: onGradient,
     heroDescriptionColor: onGradient,
   };
@@ -350,6 +380,8 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   const [colours, setColours] = React.useState(() => colourDraft(settings));
   const [identity, setIdentity] = React.useState(() => ({ ...settings.identity }));
   const [sections, setSections] = React.useState<EditorSection[]>(settings.sections);
+  const [themeFormKey, setThemeFormKey] = React.useState(0);
+  const clearThemeErrors = React.useCallback(() => setThemeFormKey((k) => k + 1), []);
 
   // The forms submit what is on screen, not what the browser serialised, because the section order lives in state.
   const latest = React.useRef({ colours, identity, sections, view });
@@ -485,10 +517,11 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     setSections((current) => current.map((section) => (section.key === key ? { ...section, ...patch } : section)));
 
   function updateCustomPalette(patch: Partial<Pick<ColourDraft, "primaryHex" | "secondaryHex" | "accentHex" | "gradientFromHex" | "gradientToHex">>) {
+    clearThemeErrors();
     setColours((current) => {
       const updated = { ...current, ...patch };
       const nextPalette = draftPalette(updated, reference, savedColours);
-      const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
+      const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette, updated.preset);
       const nextTextColors = { ...updated.textColors };
       for (const k of TEXT_COLOR_KEYS) {
         if (!updated.customTextColors[k]) {
@@ -503,6 +536,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   }
 
   function updateTextColor(key: TextColorKey, hex: string) {
+    clearThemeErrors();
     setColours((current) => ({
       ...current,
       customTextColors: {
@@ -517,7 +551,8 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   }
 
   function resetTextColor(key: TextColorKey) {
-    const defaults = computeDefaultTextColors(colours.surfaceMode, palette);
+    clearThemeErrors();
+    const defaults = computeDefaultTextColors(colours.surfaceMode, palette, colours.preset);
     setColours((current) => ({
       ...current,
       customTextColors: {
@@ -552,7 +587,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
       label: "Colours",
       icon: Palette,
       content: (
-        <Form action={themeAction} onSuccess={applySaved}>
+        <Form key={themeFormKey} action={themeAction} onSuccess={applySaved}>
           <Card>
             <CardHeader>
               <CardTitle>Colours</CardTitle>
@@ -565,10 +600,27 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 disabled={disabled}
                 value={colours.preset}
                 onValueChange={(value) => {
+                  clearThemeErrors();
                   const nextPreset = value as WebsiteThemePresetName;
                   setColours((current) => {
-                    const nextPalette = draftPalette({ ...current, preset: nextPreset }, reference, savedColours);
-                    const defaults = computeDefaultTextColors(current.surfaceMode, nextPalette);
+                    const presetColors = nextPreset !== "CUSTOM" ? reference.presetPalettes[nextPreset][current.surfaceMode] : null;
+                    const nextUseGradient = nextPreset === "CUSTOM" ? current.useGradient : false;
+                    const nextColours: ColourDraft = {
+                      ...current,
+                      preset: nextPreset,
+                      useGradient: nextUseGradient,
+                      ...(presetColors
+                        ? {
+                            primaryHex: presetColors.primary,
+                            secondaryHex: presetColors.secondary,
+                            accentHex: presetColors.accent,
+                            gradientFromHex: presetColors.gradientFrom,
+                            gradientToHex: presetColors.gradientTo,
+                          }
+                        : {}),
+                    };
+                    const nextPalette = draftPalette(nextColours, reference, savedColours);
+                    const defaults = computeDefaultTextColors(current.surfaceMode, nextPalette, nextPreset);
                     const nextTextColors = { ...current.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
                       if (!current.customTextColors[k]) {
@@ -576,8 +628,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                       }
                     }
                     return {
-                      ...current,
-                      preset: nextPreset,
+                      ...nextColours,
                       textColors: nextTextColors,
                     };
                   });
@@ -598,10 +649,25 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 disabled={disabled}
                 value={colours.surfaceMode}
                 onValueChange={(value) => {
+                  clearThemeErrors();
                   const nextMode = value as WebsiteSurfaceModeName;
                   setColours((current) => {
-                    const nextPalette = draftPalette({ ...current, surfaceMode: nextMode }, reference, savedColours);
-                    const defaults = computeDefaultTextColors(nextMode, nextPalette);
+                    const presetColors = current.preset !== "CUSTOM" ? reference.presetPalettes[current.preset][nextMode] : null;
+                    const nextColours: ColourDraft = {
+                      ...current,
+                      surfaceMode: nextMode,
+                      ...(presetColors
+                        ? {
+                            primaryHex: presetColors.primary,
+                            secondaryHex: presetColors.secondary,
+                            accentHex: presetColors.accent,
+                            gradientFromHex: presetColors.gradientFrom,
+                            gradientToHex: presetColors.gradientTo,
+                          }
+                        : {}),
+                    };
+                    const nextPalette = draftPalette(nextColours, reference, savedColours);
+                    const defaults = computeDefaultTextColors(nextMode, nextPalette, current.preset);
                     const nextTextColors = { ...current.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
                       if (!current.customTextColors[k]) {
@@ -609,8 +675,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                       }
                     }
                     return {
-                      ...current,
-                      surfaceMode: nextMode,
+                      ...nextColours,
                       textColors: nextTextColors,
                     };
                   });
@@ -652,12 +717,13 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 help="Off keeps the gradient that comes with the palette."
                 checked={colours.useGradient}
                 disabled={disabled}
-                onChange={(event) =>
+                onChange={(event) => {
+                  clearThemeErrors();
                   setColours((current) => {
                     const nextUse = event.target.checked;
                     const updated = { ...current, useGradient: nextUse };
                     const nextPalette = draftPalette(updated, reference, savedColours);
-                    const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette);
+                    const defaults = computeDefaultTextColors(updated.surfaceMode, nextPalette, updated.preset);
                     const nextTextColors = { ...updated.textColors };
                     for (const k of TEXT_COLOR_KEYS) {
                       if (!updated.customTextColors[k]) {
@@ -665,8 +731,8 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                       }
                     }
                     return { ...updated, textColors: nextTextColors };
-                  })
-                }
+                  });
+                }}
               />
               {colours.useGradient && (
                 <div className="grid gap-4 md:grid-cols-2">
@@ -723,7 +789,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {TEXT_COLOUR_FIELDS.map(({ key, label, help }) => {
-                    const defaults = computeDefaultTextColors(colours.surfaceMode, palette);
+                    const defaults = computeDefaultTextColors(colours.surfaceMode, palette, colours.preset);
                     const defaultHex = defaults[key];
                     const isCustom = colours.customTextColors[key];
                     return (
@@ -814,11 +880,11 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
               </CardContent>
             </Card>
           </Form>
-          <Form action={identityAction(["tagline", "heroImageUrl", "faviconUrl"])} onSuccess={applySaved}>
+          <Form action={identityAction(["tagline", "heroImageUrl"])} onSuccess={applySaved}>
             <Card>
               <CardHeader>
-                <CardTitle>Branding</CardTitle>
-                <CardDescription>The line under your name, the photograph at the top of your site and the icon browsers show in the tab.</CardDescription>
+                <CardTitle>Website Identity</CardTitle>
+                <CardDescription>The line under your name and the photograph at the top of your website.</CardDescription>
               </CardHeader>
               <CardContent>
                 <TextField
@@ -838,20 +904,9 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                   value={identity.heroImageUrl ?? ""}
                   onChange={(url) => setIdentity((current) => ({ ...current, heroImageUrl: url }))}
                 />
-                <ImageUploader
-                  name="faviconUrl"
-                  label="Site icon"
-                  purpose="FAVICON"
-                  shape="square"
-                  help="The small icon browsers show in the tab. A square image, at least 64 × 64 pixels."
-                  disabled={disabled}
-                  value={identity.faviconUrl ?? ""}
-                  onChange={(url) => setIdentity((current) => ({ ...current, faviconUrl: url }))}
-                  onCommit={(url) => commitBrandingImage("faviconUrl", url)}
-                />
                 {!disabled && (
                   <div className="flex justify-end">
-                    <SubmitButton>Save branding</SubmitButton>
+                    <SubmitButton>Save website identity</SubmitButton>
                   </div>
                 )}
               </CardContent>

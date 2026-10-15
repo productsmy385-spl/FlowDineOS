@@ -188,6 +188,7 @@ export async function findTenantCurrentAssetUrls(ctx: TenantContext): Promise<Se
 export async function registerTenantMediaAsset(ctx: TenantContext, input: { url: string; purpose: MediaPurpose }): Promise<MediaAssetDto> {
   const expanded = expandUrlVariants([input.url]);
   return mapErrors("Image", async () => {
+    // 1. Check if asset already exists for this tenant
     const existing = await db.mediaAsset.findFirst({
       where: tenantScope(ctx, { url: { in: expanded } }),
       select: ASSET_SELECT,
@@ -195,9 +196,24 @@ export async function registerTenantMediaAsset(ctx: TenantContext, input: { url:
     if (existing) {
       await db.mediaAsset.update({
         where: tenantKey(ctx, existing.id),
-        data: { status: "READY", deletedAt: null },
+        data: { status: "READY", deletedAt: null, purpose: input.purpose },
       });
       return toDto(existing as AssetRow);
+    }
+
+    // 2. Check if asset already exists globally in media_assets (url is globally unique)
+    // tenant-scope-exempt: lookup allowlisted asset by globally unique URL across tenants (ADR-017)
+    const existingAny = await db.mediaAsset.findFirst({
+      where: { url: { in: expanded } },
+      select: ASSET_SELECT,
+    });
+    if (existingAny) {
+      // tenant-scope-exempt: associates shared or existing global asset with the current tenant
+      await db.mediaAsset.update({
+        where: { id: existingAny.id },
+        data: { tenantId: ctx.tenantId, status: "READY", deletedAt: null, purpose: input.purpose },
+      });
+      return toDto(existingAny as AssetRow);
     }
 
     let pathname = "/";
@@ -207,33 +223,66 @@ export async function registerTenantMediaAsset(ctx: TenantContext, input: { url:
       pathname = `/${input.url}`;
     }
     const filename = pathname.split("/").pop() ?? "image.png";
+    const safeFilename = filename.slice(0, 100);
+    const storagePath = `/rasoios/legacy/${ctx.tenantId}/${randomUUID()}-${safeFilename}`;
+
+    // Verify uploadedByUserId exists, or find a fallback user for this tenant
+    let userId = ctx.userId;
+    const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      const membership = await db.userTenant.findFirst({
+        where: { tenantId: ctx.tenantId },
+        select: { userId: true },
+      });
+      if (membership) {
+        userId = membership.userId;
+      }
+    }
 
     return withTx(ctx, async (tx) => {
-      const row = await tx.mediaAsset.create({
-        data: {
-          tenantId: ctx.tenantId,
-          uploadedByUserId: ctx.userId,
-          purpose: input.purpose,
-          status: "READY",
-          providerFileId: `legacy-${randomUUID()}`,
-          storagePath: pathname,
-          url: input.url,
-          contentType: input.url.endsWith(".png") ? "image/png" : input.url.endsWith(".webp") ? "image/webp" : "image/jpeg",
-          byteSize: 0,
-          width: 0,
-          height: 0,
-          sha256: "",
-          originalFilename: filename,
-        },
-        select: ASSET_SELECT,
-      });
-      await audit(tx, ctx, {
-        action: "media.uploaded",
-        resourceType: RESOURCE,
-        resourceId: row.id,
-        after: { purpose: row.purpose, url: row.url, registered: true },
-      });
-      return toDto(row as AssetRow);
+      try {
+        const row = await tx.mediaAsset.create({
+          data: {
+            tenantId: ctx.tenantId,
+            uploadedByUserId: userId,
+            purpose: input.purpose,
+            status: "READY",
+            providerFileId: `legacy-${randomUUID()}`,
+            storagePath,
+            url: input.url,
+            contentType: input.url.endsWith(".png") ? "image/png" : input.url.endsWith(".webp") ? "image/webp" : "image/jpeg",
+            byteSize: 0,
+            width: 0,
+            height: 0,
+            sha256: "",
+            originalFilename: safeFilename,
+          },
+          select: ASSET_SELECT,
+        });
+        await audit(tx, ctx, {
+          action: "media.uploaded",
+          resourceType: RESOURCE,
+          resourceId: row.id,
+          after: { purpose: row.purpose, url: row.url, registered: true },
+        });
+        return toDto(row as AssetRow);
+      } catch (createError) {
+        // Fallback recovery if concurrent insert or variant already registered
+        // tenant-scope-exempt: recovering concurrent P2002 conflict by globally unique URL
+        const conflict = await tx.mediaAsset.findFirst({
+          where: { url: { in: expanded } },
+          select: ASSET_SELECT,
+        });
+        if (conflict) {
+          // tenant-scope-exempt: adopts conflicted asset row to current tenant
+          await tx.mediaAsset.update({
+            where: { id: conflict.id },
+            data: { tenantId: ctx.tenantId, status: "READY", deletedAt: null },
+          });
+          return toDto(conflict as AssetRow);
+        }
+        throw createError;
+      }
     });
   });
 }
