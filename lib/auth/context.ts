@@ -71,6 +71,8 @@ export function resolveTenant(session: SessionState, memberships: MembershipRow[
       userId: session.user.id,
       membershipId: chosen.membershipId,
       tenantId: chosen.tenantId,
+      tenantSlug: chosen.tenantSlug,
+      subdomain: chosen.subdomain,
       role: chosen.role,
       // The role's permissions minus those of any feature switched off for this restaurant (RASOIOS-ADR-023).
       permissions: withoutDisabledFeatures(permissionsForTenantRole(chosen.role), chosen.disabledFeatures ?? []) as ReadonlySet<Permission>,

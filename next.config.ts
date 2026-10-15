@@ -18,6 +18,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   allowedDevOrigins,
+  env: {
+    NEXT_PUBLIC_CLERK_DOMAIN: process.env.NEXT_PUBLIC_CLERK_DOMAIN || process.env.PUBLIC_ROOT_DOMAIN || "flowdine.in",
+  },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders(process.env.NODE_ENV === "production") }];
   },

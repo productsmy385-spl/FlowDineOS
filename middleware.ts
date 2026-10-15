@@ -23,7 +23,12 @@ function publicRedirectUrl(location: string, req: NextRequest, targetHost?: stri
   const port = hostPort(rawHost);
   const portSuffix = isLocal && port ? `:${port}` : "";
   const base = `${proto}://${host}${portSuffix}`;
-  return new URL(location, base);
+  const url = new URL(location, base);
+  if (!isLocal) {
+    url.port = "";
+    url.protocol = "https:";
+  }
+  return url;
 }
 
 /** Sanitize request headers forwarded downstream to Next.js Server Components so redirect() never sees internal ports */

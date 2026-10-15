@@ -17,6 +17,8 @@ export type TenantContext = {
   membershipId: string;
   /** USER_TENANT.tenant_id — read from the database, never from input. */
   tenantId: string;
+  tenantSlug?: string;
+  subdomain?: string | null;
   /** USER_TENANT.role — read from the database. */
   role: TenantRole;
   permissions: ReadonlySet<Permission>;

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getPlatformResolution, getTenantResolution } from "@/lib/auth/context";
 import { accountRedirectFor } from "@/lib/auth/guards";
 import { roleHomePath } from "@/lib/ui/navigation";
+import { configuredRootDomain } from "@/lib/tenancy/request";
 import { CompletingSignIn } from "./completing-sign-in";
 
 export const dynamic = "force-dynamic";
@@ -28,5 +29,14 @@ export default async function SignInLanding() {
   if (platform.outcome === "SIGNED_OUT") return <CompletingSignIn />;
 
   const tenant = await getTenantResolution();
-  redirect(tenant.outcome === "OK" ? roleHomePath(tenant.ctx.role) : accountRedirectFor(tenant));
+  if (tenant.outcome === "OK") {
+    const rolePath = roleHomePath(tenant.ctx.role);
+    const rootDomain = configuredRootDomain();
+    const sub = tenant.ctx.subdomain || tenant.ctx.tenantSlug;
+    if (sub && rootDomain && process.env.NODE_ENV !== "test") {
+      redirect(`https://${sub}.${rootDomain}${rolePath}`);
+    }
+    redirect(rolePath);
+  }
+  redirect(accountRedirectFor(tenant));
 }

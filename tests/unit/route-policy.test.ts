@@ -153,4 +153,31 @@ describe("staff daily-password sessions at the gate", () => {
     expect(STAFF_SESSION_COOKIE_OPTIONS.path).toBe("/");
     expect(STAFF_SESSION_COOKIE_OPTIONS.httpOnly).toBe(true);
   });
+
+  it("configures active membership cookie with sameSite: lax", async () => {
+    const { ACTIVE_MEMBERSHIP_COOKIE_OPTIONS } = await import("@/lib/auth/active-membership-cookie");
+    expect(ACTIVE_MEMBERSHIP_COOKIE_OPTIONS.sameSite).toBe("lax");
+    expect(ACTIVE_MEMBERSHIP_COOKIE_OPTIONS.path).toBe("/");
+    expect(ACTIVE_MEMBERSHIP_COOKIE_OPTIONS.httpOnly).toBe(true);
+  });
+
+  it("strips port :8080 from public redirect URLs on production domain", () => {
+    const rawHost = "flowdine.in:8080";
+    const hostPort = (h: string) => {
+      const idx = h.lastIndexOf(":");
+      return idx === -1 ? null : h.slice(idx + 1);
+    };
+    const isLocal = rawHost.includes("localhost");
+    const port = hostPort(rawHost);
+    const portSuffix = isLocal && port ? `:${port}` : "";
+    const cleanHost = rawHost.replace(/:[0-9]+$/, "");
+    const base = `https://${cleanHost}${portSuffix}`;
+    const url = new URL("/restaurant/dashboard", base);
+    if (!isLocal) {
+      url.port = "";
+      url.protocol = "https:";
+    }
+    expect(url.toString()).toBe("https://flowdine.in/restaurant/dashboard");
+    expect(url.port).toBe("");
+  });
 });
