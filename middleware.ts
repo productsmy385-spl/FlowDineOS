@@ -171,8 +171,9 @@ export default clerkMiddleware(async (auth, req) => {
           sp.set("redirect_url", returnUrl);
           targetSearch = `?${sp.toString()}`;
         }
-        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${targetSearch}`, req, cleanAuthority), 308);
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${targetSearch}`, req, cleanAuthority), 307);
         response.headers.set("x-request-id", requestId);
+        response.headers.set("cache-control", "no-store, no-cache, must-revalidate");
         return response;
       }
     }

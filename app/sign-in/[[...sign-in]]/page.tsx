@@ -70,7 +70,9 @@ export default async function SignInPage() {
           path="/sign-in"
           routing="path"
           forceRedirectUrl={targetUrl}
+          fallbackRedirectUrl={targetUrl}
           signUpForceRedirectUrl={targetUrl}
+          signUpFallbackRedirectUrl={targetUrl}
           appearance={signInAppearance}
         />
       </div>

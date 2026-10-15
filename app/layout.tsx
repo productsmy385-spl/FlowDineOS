@@ -67,8 +67,15 @@ export default async function RootLayout({
   // The per-request script nonce set by the middleware (Content-Security-Policy). `dynamic` makes Clerk read it too;
   // every page is rendered per request so each one carries its own nonce.
   const nonce = (await headers()).get("x-nonce") ?? undefined;
+  const rootDomain = process.env.PUBLIC_ROOT_DOMAIN || "flowdine.in";
+  const allowedRedirectOrigins = [
+    `https://${rootDomain}`,
+    `https://*.${rootDomain}`,
+    "http://localhost:3000",
+    "http://*.localhost:3000",
+  ];
   return (
-    <ClerkProvider afterSignOutUrl="/sign-in" dynamic>
+    <ClerkProvider afterSignOutUrl="/sign-in" allowedRedirectOrigins={allowedRedirectOrigins} dynamic>
       <html lang="en" className={`dark ${display.variable} ${sans.variable}`} data-theme="dark" suppressHydrationWarning>
         <head>
           {/* Browsers hide a script's nonce from the DOM once it has run (nonce=""), so React would report a mismatch. */}
