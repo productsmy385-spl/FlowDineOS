@@ -27,6 +27,11 @@ function publicRedirectUrl(location: string, req: NextRequest, targetHost?: stri
   if (!isLocal) {
     url.port = "";
     url.protocol = "https:";
+    for (const [key, val] of url.searchParams.entries()) {
+      if (val.includes(":8080")) {
+        url.searchParams.set(key, val.replace(/:8080\b/g, ""));
+      }
+    }
   }
   return url;
 }
@@ -157,7 +162,16 @@ export default clerkMiddleware(async (auth, req) => {
       const authority = apexAuthorityFor(req.headers.get("host"), rootDomain);
       if (authority !== null) {
         const cleanAuthority = normalizeHost(authority) || "flowdine.in";
-        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${search}`, req, cleanAuthority), 308);
+        let targetSearch = search;
+        if ((pathname === "/sign-in" || pathname.startsWith("/sign-in/")) && !req.nextUrl.searchParams.has("redirect_url")) {
+          const isLocal = cleanAuthority.includes("localhost") || cleanAuthority.includes("127.0.0.1");
+          const proto = isLocal ? "http" : "https";
+          const returnUrl = `${proto}://${host.slug}.${cleanAuthority}/restaurant/dashboard`;
+          const sp = new URLSearchParams(search);
+          sp.set("redirect_url", returnUrl);
+          targetSearch = `?${sp.toString()}`;
+        }
+        const response = NextResponse.redirect(publicRedirectUrl(`${pathname}${targetSearch}`, req, cleanAuthority), 308);
         response.headers.set("x-request-id", requestId);
         return response;
       }
@@ -265,12 +279,33 @@ export default clerkMiddleware(async (auth, req) => {
   return response;
 }, (req) => {
   const rootDomain = normalizeRootDomain(process.env.PUBLIC_ROOT_DOMAIN);
-  const rawHost = req.headers.get("host") || "";
-  const host = normalizeHost(rawHost) || "";
-  if (rootDomain && (host === rootDomain || host.endsWith(`.${rootDomain}`))) {
-    return { domain: rootDomain };
+  const rawHost = req.headers.get("x-forwarded-host") || req.headers.get("host") || req.nextUrl.host || "flowdine.in";
+  const host = normalizeHost(rawHost) || "flowdine.in";
+  const isLocal = host === "localhost" || host.endsWith(".localhost") || host === "127.0.0.1";
+
+  if (!isLocal) {
+    req.headers.set("host", host);
+    req.headers.set("x-forwarded-host", host);
+    req.headers.set("x-forwarded-proto", "https");
+    req.headers.set("x-forwarded-port", "443");
+    if (req.nextUrl.port === "8080" || req.nextUrl.port === "80" || req.nextUrl.port === "443") {
+      req.nextUrl.port = "";
+    }
+    req.nextUrl.protocol = "https:";
   }
-  return {};
+
+  const proto = isLocal ? "http" : "https";
+  const apex = rootDomain || "flowdine.in";
+
+  const opts: Record<string, string> = {
+    signInUrl: `${proto}://${apex}/sign-in`,
+    signUpUrl: `${proto}://${apex}/sign-up`,
+  };
+
+  if (rootDomain && (host === rootDomain || host.endsWith(`.${rootDomain}`))) {
+    opts.domain = rootDomain;
+  }
+  return opts;
 });
 
 export const config = {

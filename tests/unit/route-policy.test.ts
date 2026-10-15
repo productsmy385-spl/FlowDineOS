@@ -180,4 +180,23 @@ describe("staff daily-password sessions at the gate", () => {
     expect(url.toString()).toBe("https://flowdine.in/restaurant/dashboard");
     expect(url.port).toBe("");
   });
+
+  it("strips port :8080 from query params on public redirects", () => {
+    const rawHost = "flowdine.in:8080";
+    const isLocal = rawHost.includes("localhost");
+    const cleanHost = rawHost.replace(/:[0-9]+$/, "");
+    const base = `https://${cleanHost}`;
+    const url = new URL("/sign-in?redirect_url=https%3A%2F%2Fakshayapatra.flowdine.in%3A8080%2Frestaurant%2Fdashboard", base);
+    if (!isLocal) {
+      url.port = "";
+      url.protocol = "https:";
+      for (const [key, val] of url.searchParams.entries()) {
+        if (val.includes(":8080")) {
+          url.searchParams.set(key, val.replace(/:8080\b/g, ""));
+        }
+      }
+    }
+    expect(url.toString()).toBe("https://flowdine.in/sign-in?redirect_url=https%3A%2F%2Fakshayapatra.flowdine.in%2Frestaurant%2Fdashboard");
+    expect(url.searchParams.get("redirect_url")).toBe("https://akshayapatra.flowdine.in/restaurant/dashboard");
+  });
 });

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { KeyRound } from "lucide-react";
 import { SignIn } from "@clerk/nextjs";
@@ -8,6 +8,8 @@ import { AuthLayout } from "@/components/layout/auth-layout";
 import { SignInAudience, SignInDoor } from "@/components/layout/sign-in-door";
 import { ACTIVE_MEMBERSHIP_COOKIE } from "@/lib/auth/active-membership-cookie";
 import { signInAppearance } from "@/lib/ui/clerk-appearance";
+import { configuredRootDomain } from "@/lib/tenancy/request";
+import { normalizeHost } from "@/lib/tenancy/hostnames";
 import { ClearTenantPreference } from "../clear-tenant-preference";
 
 export const metadata: Metadata = { title: "Sign in — FlowDineOS" };
@@ -15,16 +17,42 @@ export const metadata: Metadata = { title: "Sign in — FlowDineOS" };
 /** Where a signed-in user goes when no (valid) redirect was requested: /admin or /restaurant (see ../landing). */
 const AFTER_SIGN_IN = "/sign-in/landing";
 
-/**
- * /sign-in (S1-P03-T005, frontend.md §5.1): Clerk Email OTP on the Brand v2 dark-glass theme (ADR-013 §1). `redirect_url` is honoured only
- * when it is a same-origin relative path (SC-AUTH-11); anything else falls back to the role landing. Clerk is told
- * to *force* that target so it never falls back to its own reading of the query string.
- * A signed-out browser that still carries the active-restaurant cookie has it cleared here (SC-SESS-03).
- */
+function safeRedirectTarget(target: string | undefined | null, rootDomain: string | null): string | null {
+  if (!target) return null;
+  const raw = target.trim();
+  if (raw.startsWith("/") && !raw.startsWith("//")) return raw;
+  try {
+    const u = new URL(raw);
+    const host = normalizeHost(u.host);
+    const isLocal = host === "localhost" || host?.endsWith(".localhost") || host === "127.0.0.1";
+    if (isLocal) return u.toString();
+    const effectiveRoot = rootDomain || "flowdine.in";
+    if (host === effectiveRoot || host?.endsWith(`.${effectiveRoot}`)) {
+      u.port = "";
+      u.protocol = "https:";
+      return u.toString();
+    }
+  } catch {}
+  return null;
+}
+
 export default async function SignInPage() {
-  const [{ userId }, jar] = await Promise.all([auth(), cookies()]);
+  const [{ userId }, jar, reqHeaders] = await Promise.all([auth(), cookies(), headers()]);
+  const currentPath = reqHeaders.get("x-pathname") || "";
+  let rawRedirect: string | null = null;
+  if (currentPath.includes("?")) {
+    const sp = new URLSearchParams(currentPath.slice(currentPath.indexOf("?")));
+    rawRedirect = sp.get("redirect_url");
+  }
+
+  const rootDomain = configuredRootDomain();
+  const safeTarget = safeRedirectTarget(rawRedirect, rootDomain);
+  const targetUrl = safeTarget
+    ? `/sign-in/landing?redirect_url=${encodeURIComponent(safeTarget)}`
+    : AFTER_SIGN_IN;
+
   // Already signed in: go to landing to resolve role-based home.
-  if (userId) redirect(AFTER_SIGN_IN);
+  if (userId) redirect(targetUrl);
   const clearStalePreference = !userId && jar.has(ACTIVE_MEMBERSHIP_COOKIE);
 
   return (
@@ -38,7 +66,13 @@ export default async function SignInPage() {
           comes first and says so; counter and kitchen staff, who have no emailed code here, get a full card to theirs. */}
       <SignInAudience>Owner, administrator or manager</SignInAudience>
       <div className="flex justify-center">
-        <SignIn path="/sign-in" routing="path" forceRedirectUrl={AFTER_SIGN_IN} signUpForceRedirectUrl={AFTER_SIGN_IN} appearance={signInAppearance} />
+        <SignIn
+          path="/sign-in"
+          routing="path"
+          forceRedirectUrl={targetUrl}
+          signUpForceRedirectUrl={targetUrl}
+          appearance={signInAppearance}
+        />
       </div>
       <SignInDoor
         href="/staff-login"

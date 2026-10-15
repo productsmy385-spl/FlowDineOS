@@ -17,6 +17,6 @@ export const ACTIVE_MEMBERSHIP_COOKIE_OPTIONS = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/",
-  domain: process.env.NODE_ENV === "production" ? "flowdine.in" : undefined,
+  domain: process.env.NODE_ENV === "production" ? (process.env.PUBLIC_ROOT_DOMAIN || "flowdine.in") : undefined,
   maxAge: 60 * 60 * 24 * 30, // 30 days
 };
