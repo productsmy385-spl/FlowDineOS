@@ -38,7 +38,13 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
     db.$transaction(async (tx) => {
       const candidate = await tx.user.findUnique({
         where: { email },
-        select: { ...identitySelect, memberships: { where: { status: "INVITED" as MembershipStatus }, select: { id: true, tenantId: true, role: true } } },
+        select: {
+          ...identitySelect,
+          memberships: {
+            where: { status: { in: ["INVITED" as MembershipStatus, "ACTIVE" as MembershipStatus] } },
+            select: { id: true, tenantId: true, role: true, status: true },
+          },
+        },
       });
       if (!candidate) return { outcome: "NOT_INVITED" } as const;
       // Already linked to a different Clerk account: never re-point an identity automatically (account takeover risk).
@@ -52,11 +58,15 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
       });
       if (linked.count === 0) return { outcome: "CONFLICT" } as const;
 
-      // tenant-scope-exempt: activates the signed-in user's own invitations, which may span tenants (ADR-006 §2)
-      await tx.userTenant.updateMany({
-        where: { userId: candidate.id, status: "INVITED" },
-        data: { status: "ACTIVE", acceptedAt: now },
-      });
+      const invitedMemberships = candidate.memberships.filter((m) => m.status === "INVITED");
+
+      if (invitedMemberships.length > 0) {
+        // tenant-scope-exempt: activates the signed-in user's own invitations, which may span tenants (ADR-006 §2)
+        await tx.userTenant.updateMany({
+          where: { userId: candidate.id, status: "INVITED" },
+          data: { status: "ACTIVE", acceptedAt: now },
+        });
+      }
 
       await tx.auditLog.createMany({
         data: [
@@ -70,7 +80,7 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
             afterState: { clerkLinked: true },
             requestId,
           },
-          ...candidate.memberships.map((m) => ({
+          ...invitedMemberships.map((m) => ({
             tenantId: m.tenantId,
             actorType: "USER" as const,
             actorUserId: candidate.id,
@@ -86,7 +96,8 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
       });
 
       const { memberships, ...user } = candidate;
-      return { outcome: "LINKED", user: { ...user, clerkUserId }, activatedMemberships: memberships } as const;
+      const activated = invitedMemberships.map((m) => ({ id: m.id, tenantId: m.tenantId, role: m.role }));
+      return { outcome: "LINKED", user: { ...user, clerkUserId }, activatedMemberships: activated } as const;
     }),
   );
 }
