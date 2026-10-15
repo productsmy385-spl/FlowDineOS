@@ -13,6 +13,8 @@ import {
   createPrinter,
   createTestPrintJob,
   deactivatePrinter,
+  deletePrinter,
+  deletePrintAgent,
   getPrinterDiscovery,
   getPrintingConsole,
   listActivePrinters,
@@ -125,6 +127,13 @@ export const deactivatePrinterAction = action(async (input: PrinterIdInput) => {
   return deactivatePrinter(ctx, printerId);
 });
 
+/** Delete a printer completely — `printer:manage`. */
+export const deletePrinterAction = action(async (input: PrinterIdInput) => {
+  const ctx = await requireTenant("printer:manage");
+  const { printerId } = parseInput(printerIdSchema, input);
+  return deletePrinter(ctx, printerId);
+});
+
 /** SA-PRN-04 test print to one of the tenant's printers — `printer:manage`. */
 export const createTestPrintJobAction = action(async (input: TestPrintInput) => {
   const ctx = await requireTenant("printer:manage");
@@ -176,6 +185,13 @@ export const revokePrintAgentAction = action(async (input: PrintAgentIdInput) =>
   const ctx = await requireTenant("print_agent:manage");
   const { agentId } = parseInput(printAgentIdSchema, input);
   return revokePrintAgent(ctx, agentId);
+});
+
+/** Delete an agent completely — `print_agent:manage`. */
+export const deletePrintAgentAction = action(async (input: PrintAgentIdInput) => {
+  const ctx = await requireTenant("print_agent:manage");
+  const { agentId } = parseInput(printAgentIdSchema, input);
+  return deletePrintAgent(ctx, agentId);
 });
 
 // ─── LAN printer discovery (RASOIOS-ADR-015) ───

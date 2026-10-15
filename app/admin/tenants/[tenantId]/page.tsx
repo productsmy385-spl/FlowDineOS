@@ -114,6 +114,7 @@ export default async function TenantDetailPage({ params, searchParams }: { param
         <TenantLifecycle
           tenantId={tenant.id}
           name={tenant.name}
+          slug={tenant.slug}
           status={tenant.status}
           provisioningState={tenant.provisioningState}
           handoverReady={members.some((member) => member.role === "TENANT_ADMIN" && member.status === "ACTIVE")}

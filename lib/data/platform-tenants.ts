@@ -458,8 +458,7 @@ export async function findTenantStatus(ctx: PlatformContext, tenantId: string): 
   return mapErrors("Tenant", () => db.tenant.findUnique({ where: { id: tenantId }, select: { id: true, status: true } }));
 }
 
-/** SA-ADM-02: new name and/or slug. A slug collision is a 422 SLUG_TAKEN. */
-export async function updateTenantIdentity(ctx: PlatformContext, tx: Tx, tenantId: string, data: { name?: string; slug?: string }): Promise<void> {
+export async function updateTenantIdentity(ctx: PlatformContext, tx: Tx, tenantId: string, data: { name?: string; slug?: string; subdomain?: string }): Promise<void> {
   assertPlatform(ctx, "platform:tenant:update");
   if (data.slug !== undefined && (await isSlugTaken(ctx, data.slug, tenantId, tx))) throw new SlugTakenError();
   try {

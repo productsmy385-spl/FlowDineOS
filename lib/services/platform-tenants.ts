@@ -312,25 +312,34 @@ async function sendInvitationAfterCommit(ctx: PlatformContext, tenantId: string,
 
 export type UpdateTenantResult = { tenantId: string; name: string; slug: string; changed: boolean };
 
-/** New display name only. Sending the current slug is a no-op; a different one is refused (ADR-012 §4). */
+/** Update display name and/or slug. */
 export async function updateTenant(ctx: PlatformContext, data: UpdateTenantData): Promise<UpdateTenantResult> {
   assertPlatform(ctx, "platform:tenant:update");
   return withTx(ctx, async (tx) => {
     const tenant = await lockTenant(ctx, tx, data.targetTenantId);
     if (!tenant) throw tenantNotFound();
 
-    const changes: { name?: string } = {};
-    const before: { name?: string } = {};
+    const changes: { name?: string; slug?: string; subdomain?: string } = {};
+    const before: { name?: string; slug?: string } = {};
     if (data.name !== undefined && data.name !== tenant.name) {
       changes.name = data.name;
       before.name = tenant.name;
     }
-    if (data.slug !== undefined && data.slug !== tenant.slug) throw new SlugImmutableError();
+    if (data.slug !== undefined && data.slug !== tenant.slug) {
+      const slug = data.slug.trim().toLowerCase();
+      const availability = await checkSlugAvailability(ctx, { slug }, tenant.id);
+      if (!availability.available) {
+        throw new ConflictError(availability.message ?? "This slug is not available", "SLUG_UNAVAILABLE");
+      }
+      changes.slug = slug;
+      changes.subdomain = slug;
+      before.slug = tenant.slug;
+    }
     if (Object.keys(changes).length === 0) return { tenantId: tenant.id, name: tenant.name, slug: tenant.slug, changed: false };
 
     await updateTenantIdentity(ctx, tx, tenant.id, changes);
     await audit(tx, ctx, { action: "tenant.updated", resourceType: "tenant", resourceId: tenant.id, tenantId: tenant.id, before, after: changes });
-    return { tenantId: tenant.id, name: changes.name ?? tenant.name, slug: tenant.slug, changed: true };
+    return { tenantId: tenant.id, name: changes.name ?? tenant.name, slug: changes.slug ?? tenant.slug, changed: true };
   });
 }
 

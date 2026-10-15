@@ -30,6 +30,8 @@ import {
   closeStalePairingsAction,
   createTestPrintJobAction,
   deactivatePrinterAction,
+  deletePrinterAction,
+  deletePrintAgentAction,
   restorePrinterAction,
   getPrintingConsoleAction,
   retryPrintJobAction,
@@ -141,6 +143,8 @@ export function PrintingConsoleView({
   const [pairing, setPairing] = React.useState(false);
   const [deactivating, setDeactivating] = React.useState<PrinterDto | null>(null);
   const [revoking, setRevoking] = React.useState<PrintingConsoleAgent | null>(null);
+  const [deletingPrinter, setDeletingPrinter] = React.useState<PrinterDto | null>(null);
+  const [deletingAgent, setDeletingAgent] = React.useState<PrintingConsoleAgent | null>(null);
   // Print history clean-up (RASOIOS-ADR-022): only finished jobs can be selected or cleared.
   const [selected, setSelected] = React.useState<Set<string>>(() => new Set());
   const [archiving, setArchiving] = React.useState<{ jobIds: string[] } | { olderThanDays: number } | null>(null);
@@ -305,6 +309,30 @@ export function PrintingConsoleView({
     }
     setRevoking(null);
     toast.success(`${agent.name} revoked. Its token no longer works.`);
+    await reloadConsole();
+    router.refresh();
+  }
+
+  async function removePrinter(printer: PrinterDto) {
+    const result = await deletePrinterAction({ printerId: printer.id });
+    setDeletingPrinter(null);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success(`${printer.name} deleted.`);
+    await reloadConsole();
+    router.refresh();
+  }
+
+  async function removeAgent(agent: PrintingConsoleAgent) {
+    const result = await deletePrintAgentAction({ agentId: agent.id });
+    setDeletingAgent(null);
+    if (!result.ok) {
+      toast.error(result.error.message);
+      return;
+    }
+    toast.success(`${agent.name} deleted.`);
     await reloadConsole();
     router.refresh();
   }
@@ -640,6 +668,10 @@ export function PrintingConsoleView({
                           Archive
                         </Button>
                       )}
+                      <Button size="sm" variant="ghost" className="text-status-danger hover:bg-status-danger/10" onClick={() => setDeletingPrinter(printer)}>
+                        <Icon icon={Trash2} size={16} />
+                        Delete
+                      </Button>
                     </div>
                   )}
                   {can.managePrinters && printer.isActive && (
@@ -653,6 +685,10 @@ export function PrintingConsoleView({
                       </Button>
                       <Button size="sm" variant="ghost" onClick={() => setDeactivating(printer)}>
                         Deactivate
+                      </Button>
+                      <Button size="sm" variant="ghost" className="text-status-danger hover:bg-status-danger/10" onClick={() => setDeletingPrinter(printer)}>
+                        <Icon icon={Trash2} size={16} />
+                        Delete
                       </Button>
                     </div>
                   )}
@@ -817,6 +853,12 @@ export function PrintingConsoleView({
                         Revoke
                       </Button>
                     )}
+                    {can.manageAgents && (
+                      <Button size="sm" variant="ghost" className="text-status-danger hover:bg-status-danger/10" onClick={() => setDeletingAgent(agent)}>
+                        <Icon icon={Trash2} size={16} />
+                        Delete
+                      </Button>
+                    )}
                   </div>
                 </Card>
               </li>
@@ -915,6 +957,26 @@ export function PrintingConsoleView({
         confirmLabel="Revoke"
         tone="destructive"
         onConfirm={() => (revoking ? revoke(revoking) : undefined)}
+      />
+
+      <ConfirmDialog
+        open={deletingPrinter !== null}
+        onClose={() => setDeletingPrinter(null)}
+        title={deletingPrinter ? `Delete ${deletingPrinter.name}?` : "Delete printer?"}
+        description="This permanently deletes the printer configuration and removes it from all kitchen and billing routing. This cannot be undone."
+        confirmLabel="Delete printer"
+        tone="destructive"
+        onConfirm={() => (deletingPrinter ? void removePrinter(deletingPrinter) : undefined)}
+      />
+
+      <ConfirmDialog
+        open={deletingAgent !== null}
+        onClose={() => setDeletingAgent(null)}
+        title={deletingAgent ? `Delete ${deletingAgent.name}?` : "Delete print agent?"}
+        description="This permanently deletes this print agent. Any printers currently linked to it will be unassigned."
+        confirmLabel="Delete agent"
+        tone="destructive"
+        onConfirm={() => (deletingAgent ? void removeAgent(deletingAgent) : undefined)}
       />
       <ConfirmDialog
         open={cancelling !== null}

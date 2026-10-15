@@ -16,6 +16,8 @@ import {
   countReceiptJobs,
   createPrintJob,
   deactivatePrinterRow,
+  deletePrinterRow,
+  deletePrintAgentRow,
   failPendingJobsForPrinter,
   findAgentByPairingCodeHash,
   findPrintAgentRow,
@@ -890,6 +892,26 @@ export async function deactivatePrinter(ctx: TenantContext, printerId: string): 
   return result;
 }
 
+/** Delete a printer completely, along with its checks and jobs — `printer:manage`. */
+export async function deletePrinter(ctx: TenantContext, printerId: string): Promise<{ success: boolean }> {
+  const result = await withTx(ctx, async (tx) => {
+    const existing = await findPrinterRow(tx, ctx, printerId);
+    if (!existing) throw new NotFoundError("Printer not found");
+
+    await deletePrinterRow(tx, ctx, printerId);
+    await audit(tx, ctx, {
+      action: "printer.deleted",
+      resourceType: "printer",
+      resourceId: printerId,
+      before: { name: existing.name, connectionAddress: existing.connectionAddress },
+    });
+    return { success: true };
+  });
+
+  logger.info("printer.deleted", { requestId: ctx.requestId, tenantId: ctx.tenantId, printerId });
+  return result;
+}
+
 // ─── Agents (SA-AGT-01, SA-AGT-02) ───
 
 /** 8 characters of CSPRNG output over a 32-symbol alphabet — 40 bits, and single-use for 10 minutes (SC-PRINT-02). */
@@ -954,6 +976,26 @@ export async function revokePrintAgent(ctx: TenantContext, agentId: string): Pro
 
   logger.info("print_agent.revoked", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: agentId });
   return agent;
+}
+
+/** Delete an agent completely, unassigning its printers and clearing its checks — `print_agent:manage`. */
+export async function deletePrintAgent(ctx: TenantContext, agentId: string): Promise<{ success: boolean }> {
+  const result = await withTx(ctx, async (tx) => {
+    const existing = await findPrintAgentRow(tx, ctx, agentId);
+    if (!existing) throw new NotFoundError("Print agent not found");
+
+    await deletePrintAgentRow(tx, ctx, agentId);
+    await audit(tx, ctx, {
+      action: "print_agent.deleted",
+      resourceType: "print_agent",
+      resourceId: agentId,
+      before: { name: existing.name, status: existing.status },
+    });
+    return { success: true };
+  });
+
+  logger.info("print_agent.deleted", { requestId: ctx.requestId, tenantId: ctx.tenantId, printAgentId: agentId });
+  return result;
 }
 
 // ─── Agent API (RH-AGT-01…05) ───

@@ -871,6 +871,13 @@ export async function deactivatePrinterRow(client: Tx, ctx: TenantContext, print
   return required(await findPrinterRow(client, ctx, printerId), "Printer");
 }
 
+export async function deletePrinterRow(client: Tx, ctx: TenantContext, printerId: string): Promise<boolean> {
+  await client.printerCheck.deleteMany({ where: tenantScope(ctx, { printerId }) });
+  await client.printJob.deleteMany({ where: tenantScope(ctx, { printerId }) });
+  const { count } = await client.printer.deleteMany({ where: tenantScope(ctx, { id: printerId }) });
+  return count > 0;
+}
+
 // ─── Agents (SA-AGT-01/02, RH-AGT-01/02/05) ───
 
 export type NewPrintAgentPairing = { name: string; pairingCodeHash: string; pairingExpiresAt: Date; createdByUserId: string };
@@ -986,6 +993,15 @@ export async function revokeAgentRow(client: Tx, ctx: TenantContext, agentId: st
     data: { status: PrintAgentStatus.REVOKED, revokedAt: at, revokedByUserId, tokenHash: null, pairingCodeHash: null, pairingExpiresAt: null },
   });
   return count;
+}
+
+export async function deletePrintAgentRow(client: Tx, ctx: TenantContext, agentId: string): Promise<boolean> {
+  await client.printer.updateMany({ where: tenantScope(ctx, { printAgentId: agentId }), data: { printAgentId: null } });
+  await client.printerDiscovery.deleteMany({ where: tenantScope(ctx, { printAgentId: agentId }) });
+  await client.printerCheck.deleteMany({ where: tenantScope(ctx, { printAgentId: agentId }) });
+  await client.printJob.updateMany({ where: tenantScope(ctx, { printAgentId: agentId }), data: { printAgentId: null } });
+  const { count } = await client.printAgent.deleteMany({ where: tenantScope(ctx, { id: agentId }) });
+  return count > 0;
 }
 
 /** The printer ids assigned to one agent — the only jobs it may ever claim (ADR-007 §2). */

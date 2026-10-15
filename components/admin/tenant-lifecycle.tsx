@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Ban, CircleCheck, Handshake, Pencil, Settings } from "lucide-react";
+import { Ban, CircleCheck, Globe, Handshake, Pencil, Settings } from "lucide-react";
 import { handOverTenantAction, reactivateTenantAction, suspendTenantAction, updateTenantAction } from "@/app/admin/actions";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,18 +14,10 @@ import { Menu } from "@/components/ui/menu";
 import { useToast } from "@/components/ui/toast";
 import type { ActionResult } from "@/lib/http/action";
 
-/**
- * Tenant lifecycle actions (S1-P06-T006; api.md SA-ADM-02, SA-ADM-03, SA-ADM-04, SA-ADM-07).
- *
- * Only the actions the signed-in administrator holds the permission for are rendered, and the server re-checks each
- * one (SC-RBAC-08) — hiding a button is a convenience, never the authorization. Every action is a form inside a
- * dialog rather than a bare confirm, so a refused reason or a stale state lands on the field that caused it.
- *
- * The slug is not editable: it is the restaurant's public address and is fixed at provisioning (ADR-012 §4).
- */
 export type TenantLifecycleProps = {
   tenantId: string;
   name: string;
+  slug?: string;
   status: "ACTIVE" | "SUSPENDED";
   provisioningState: "PROVISIONING" | "HANDED_OVER";
   /** True when an administrator has accepted their invitation — the precondition for handover (ADR-013 §7). */
@@ -33,9 +25,9 @@ export type TenantLifecycleProps = {
   can: { update: boolean; suspend: boolean; reactivate: boolean };
 };
 
-type OpenDialog = "rename" | "suspend" | "reactivate" | "handover" | null;
+type OpenDialog = "rename" | "edit-slug" | "suspend" | "reactivate" | "handover" | null;
 
-export function TenantLifecycle({ tenantId, name, status, provisioningState, handoverReady, can }: TenantLifecycleProps) {
+export function TenantLifecycle({ tenantId, name, slug, status, provisioningState, handoverReady, can }: TenantLifecycleProps) {
   const router = useRouter();
   const toast = useToast();
   const [open, setOpen] = React.useState<OpenDialog>(null);
@@ -50,7 +42,12 @@ export function TenantLifecycle({ tenantId, name, status, provisioningState, han
   );
 
   const menuItems = [
-    ...(can.update ? [{ label: "Rename restaurant", icon: Pencil, onSelect: () => setOpen("rename") }] : []),
+    ...(can.update
+      ? [
+          { label: "Rename restaurant", icon: Pencil, onSelect: () => setOpen("rename") },
+          { label: "Edit slug / address", icon: Globe, onSelect: () => setOpen("edit-slug") },
+        ]
+      : []),
     ...(can.suspend && status === "ACTIVE" ? [{ label: "Suspend restaurant", icon: Ban, tone: "danger" as const, onSelect: () => setOpen("suspend") }] : []),
     ...(can.reactivate && status === "SUSPENDED" ? [{ label: "Reactivate restaurant", icon: CircleCheck, onSelect: () => setOpen("reactivate") }] : []),
     ...(can.update && provisioningState === "HANDED_OVER" ? [{ label: "Record another handover note", icon: Handshake, onSelect: () => setOpen("handover") }] : []),
@@ -89,6 +86,36 @@ export function TenantLifecycle({ tenantId, name, status, provisioningState, han
               Cancel
             </Button>
             <SubmitButton>Save name</SubmitButton>
+          </div>
+        </Form>
+      </Dialog>
+
+      <Dialog
+        open={open === "edit-slug"}
+        onClose={() => setOpen(null)}
+        title={`Edit address & slug for ${name}`}
+        description="Changing the slug updates the public subdomain and web address for this restaurant (e.g. <slug>.flowdine.in)."
+      >
+        <Form
+          action={(formData: FormData): Promise<ActionResult<unknown>> => {
+            const newSlug = String(formData.get("slug") ?? "").trim().toLowerCase();
+            return updateTenantAction({ targetTenantId: tenantId, slug: newSlug });
+          }}
+          onSuccess={() => done("Restaurant slug updated.")}
+        >
+          <TextField
+            name="slug"
+            label="Subdomain / Slug"
+            required
+            defaultValue={slug}
+            autoComplete="off"
+            help="Lowercase letters, numbers, and hyphens (e.g. akshayapatra)."
+          />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setOpen(null)}>
+              Cancel
+            </Button>
+            <SubmitButton>Save slug</SubmitButton>
           </div>
         </Form>
       </Dialog>
