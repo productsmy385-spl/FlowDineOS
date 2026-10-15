@@ -17,7 +17,7 @@ export type MembershipRow = {
   tenantStatus: TenantStatus;
   /** Features the platform owner has switched off for this restaurant (RASOIOS-ADR-023). */
   disabledFeatures: string[];
-  restaurant: { id: string; name: string; timezone: string; currencyCode: string; countryCode: string; logoUrl: string | null } | null;
+  restaurant: { id: string; name: string; timezone: string; currencyCode: string; countryCode: string; logoUrl: string | null; faviconUrl: string | null } | null;
 };
 
 export async function activeMembershipsOfUser(userId: string): Promise<MembershipRow[]> {
@@ -37,8 +37,8 @@ export async function activeMembershipsOfUser(userId: string): Promise<Membershi
             subdomain: true,
             status: true,
             features: { where: { enabled: false }, select: { featureKey: true } },
-            // `logoUrl` so the console can wear the restaurant's own brand rather than the platform's (ADR-013 §1).
-            restaurant: { select: { id: true, name: true, timezone: true, currencyCode: true, countryCode: true, logoUrl: true } },
+            // `logoUrl` & `faviconUrl` so the console can wear the restaurant's own brand rather than the platform's (ADR-013 §1).
+            restaurant: { select: { id: true, name: true, timezone: true, currencyCode: true, countryCode: true, logoUrl: true, faviconUrl: true } },
           },
         },
       },

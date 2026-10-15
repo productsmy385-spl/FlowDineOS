@@ -97,6 +97,14 @@ export default clerkMiddleware(async (auth, req) => {
 
   const staffSession = presentsStaffSession(req.cookies.get(STAFF_SESSION_COOKIE_NAME)?.value);
 
+  // Intercept favicon on tenant subdomains to serve tenant-specific favicon
+  if (host.kind === "tenant" && (pathname === "/favicon.ico" || pathname === "/icon.png")) {
+    const headers = new Headers(req.headers);
+    headers.set("x-request-id", requestId);
+    headers.set(TENANT_SLUG_HEADER, host.slug);
+    return NextResponse.rewrite(new URL(`/api/tenant-favicon`, req.url), { request: { headers: withCsp(headers) } });
+  }
+
   // Tenant subdomains (e.g. akshayapatra.flowdine.in or akshayapatra.localhost)
   if (host.kind === "tenant" && !isHostNeutralPath(pathname)) {
     // 1. Staff login: /staff-login is canonical; /staff/login redirects 308 to /staff-login

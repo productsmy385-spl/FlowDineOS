@@ -30,7 +30,7 @@ function staffSignInHref(): string {
  * platform's mark (ADR-013 §6: the public site is the restaurant's).
  */
 function BrandMark({ name, logoUrl }: { name: string; logoUrl: string | null }) {
-  if (logoUrl) return <SiteImage src={logoUrl} alt="" displayWidth={40} className="h-10 w-10 shrink-0 rounded-xl" />;
+  if (logoUrl) return <SiteImage src={logoUrl} alt="" displayWidth={40} className="h-10 w-10 shrink-0 object-contain" />;
   return (
     <span aria-hidden="true" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-action-primary font-display text-subheading text-action-primary-fg">
       {monogram(name)}

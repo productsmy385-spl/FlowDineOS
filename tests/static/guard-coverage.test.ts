@@ -25,6 +25,8 @@ const ALLOW_LIST: Record<string, string> = {
     "Book a demo (RASOIOS-ADR-024): a visitor has no account; the action can only create a request — never read one — and the service checks a spam trap and fail-closed per-email/per-address rate limits before writing",
   "app/api/health/route.ts#GET": "Liveness probe for Railway/uptime monitors: static body, no data (RH-OPS-01)",
   "app/api/ready/route.ts#GET": "Readiness probe: SELECT 1 only, returns ready/unavailable without detail (RH-OPS-02)",
+  "app/api/tenant-favicon/route.ts#GET":
+    "Public tenant favicon redirect: resolves public favicon or logo by host slug and redirects without exposing internal tenant data",
   "app/account/no-access/page.tsx#default": "Account state page: renders no tenant data",
   "app/account/forbidden/page.tsx#default": "Account state page: renders no tenant data",
   "app/account/suspended/page.tsx#default": "Account state page: resolves its own session state, renders no tenant data",

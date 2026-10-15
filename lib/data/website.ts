@@ -370,3 +370,22 @@ export function defaultSectionRows(tenantId: string, restaurantId: string): Pris
     sortOrder: WEBSITE_SECTION_DEFAULTS[key].sortOrder,
   }));
 }
+
+/** Lightweight read of a tenant's favicon and logo by slug or subdomain for dynamic favicon resolution. */
+export async function getTenantFaviconAndLogoBySlug(slug: string): Promise<{ faviconUrl: string | null; logoUrl: string | null } | null> {
+  if (typeof slug !== "string" || !SLUG_PATTERN.test(slug)) return null;
+  return mapErrors("Restaurant", async () => {
+    const tenant = await db.tenant.findFirst({
+      where: { OR: [{ subdomain: slug }, { slug }], status: "ACTIVE" },
+      select: {
+        restaurant: {
+          select: {
+            faviconUrl: true,
+            logoUrl: true,
+          },
+        },
+      },
+    });
+    return tenant?.restaurant ?? null;
+  });
+}

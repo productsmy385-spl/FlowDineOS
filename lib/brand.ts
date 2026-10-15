@@ -9,7 +9,8 @@
 export const PLATFORM_NAME = "FlowDineOS";
 export const PLATFORM_TAGLINE = "Restaurant operations, connected.";
 export const PLATFORM_DOMAIN = "flowdine.in";
-export const COMPANY_NAME = "KJS TECH INNOVATIONS";
+export const COMPANY_NAME = "KRANAS TECH & SOLUTIONS PVT LTD";
+export const COMPANY_LOGO = "/kranas-logo.png";
 export const COMPANY_ADDRESS = ["4-177/1, Duddukuru", "Devarapalli Mandal", "East Godavari District", "Andhra Pradesh 534313", "India"] as const;
 export const COMPANY_EMAILS = ["gopalakrishnaeerothu@gmail.com", "jayendrasimhadri@gmail.com", "productsmy385@gmail.com"] as const;
 /** Shown as written; dialled in international form. */

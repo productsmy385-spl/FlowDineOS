@@ -186,9 +186,20 @@ export function ImageUploader({ label, purpose, value, onChange, onCommit, name,
       />
 
       {value && !busy ? (
-        <div className="overflow-hidden rounded-2xl border border-border-subtle bg-raised">
+        <div className={cn("overflow-hidden rounded-2xl border border-border-subtle", purpose === "LOGO" || purpose === "FAVICON" ? "bg-canvas" : "bg-raised")}>
           {/* eslint-disable-next-line @next/next/no-img-element -- ImageKit resizes; next/image would re-process it. */}
-          <img src={previewSrc ?? undefined} alt={`${label} preview`} className={cn("w-full object-cover", shape === "wide" ? "aspect-[16/9]" : "mx-auto aspect-square max-w-60")} />
+          <img
+            src={previewSrc ?? undefined}
+            alt={`${label} preview`}
+            className={cn(
+              "w-full",
+              purpose === "LOGO" || purpose === "FAVICON"
+                ? "mx-auto aspect-square max-w-60 object-contain p-4"
+                : shape === "wide"
+                  ? "aspect-[16/9] object-cover"
+                  : "mx-auto aspect-square max-w-60 object-cover",
+            )}
+          />
           <div className="flex flex-wrap items-center justify-between gap-2 p-3">
             <span className="flex items-center gap-1.5 text-caption text-status-success">
               <Icon icon={CircleCheck} size={16} />

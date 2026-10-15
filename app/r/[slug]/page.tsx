@@ -39,7 +39,7 @@ export async function generateMetadata({ params }: PublicRestaurantPageProps): P
   return {
     title,
     description,
-    ...(site.identity.faviconUrl ? { icons: { icon: imageKitSized(site.identity.faviconUrl, 64) } } : {}),
+    ...(site.identity.faviconUrl || site.identity.logoUrl ? { icons: { icon: imageKitSized(site.identity.faviconUrl || site.identity.logoUrl!, 64) } } : {}),
     ...(canonical === null ? {} : { alternates: { canonical } }),
     openGraph: {
       title,

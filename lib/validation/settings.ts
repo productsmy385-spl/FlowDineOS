@@ -88,8 +88,9 @@ export const updateBrandingSchema = strictObject({
   logoUrl: clearable(imageUrl("Logo")),
   coverImageUrl: clearable(imageUrl("Cover image")),
   brandAccentHex: clearable(brandAccentField),
+  faviconUrl: clearable(imageUrl("Favicon / site icon")),
 });
-export type UpdateBrandingInput = { logoUrl?: string | null; coverImageUrl?: string | null; brandAccentHex?: string | null };
+export type UpdateBrandingInput = { logoUrl?: string | null; coverImageUrl?: string | null; brandAccentHex?: string | null; faviconUrl?: string | null };
 export type UpdateBrandingData = z.output<typeof updateBrandingSchema>;
 
 // ─── SA-RST-03 opening hours (restaurant:update) ───

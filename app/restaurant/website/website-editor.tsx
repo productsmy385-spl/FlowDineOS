@@ -412,15 +412,26 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     return saved(updateWebsiteIdentityAction(Object.fromEntries(fields.map((field) => [field, draft[field] ?? ""]))));
   };
 
-  // Logo and cover belong to the restaurant's branding (SA-RST-02), saved by their own action; the result is merged
+  // Logo, favicon and cover belong to the restaurant's branding (SA-RST-02), saved by their own action; the result is merged
   // into the editor's saved state so the preview and the dirty check see what was stored.
   const brandingAction = async (): Promise<ActionResult<EditorSettings>> => {
     const draft = latest.current.identity;
-    const result = await updateBrandingAction({ logoUrl: draft.logoUrl ?? "", coverImageUrl: draft.coverImageUrl ?? "" });
+    const result = await updateBrandingAction({ logoUrl: draft.logoUrl ?? "", coverImageUrl: draft.coverImageUrl ?? "", faviconUrl: draft.faviconUrl ?? "" });
     if (!result.ok) return result;
-    const stored = result.data as { logoUrl: string | null; coverImageUrl: string | null };
+    const stored = result.data as { logoUrl: string | null; coverImageUrl: string | null; faviconUrl?: string | null };
     const base = latest.current.view;
-    return { ok: true, data: { ...base, identity: { ...base.identity, logoUrl: stored.logoUrl, coverImageUrl: stored.coverImageUrl } } };
+    return {
+      ok: true,
+      data: {
+        ...base,
+        identity: {
+          ...base.identity,
+          logoUrl: stored.logoUrl,
+          coverImageUrl: stored.coverImageUrl,
+          faviconUrl: stored.faviconUrl !== undefined ? stored.faviconUrl : base.identity.faviconUrl,
+        },
+      },
+    };
   };
 
   // Owner report 2026-10-07: uploading, replacing or removing the logo seemed to do nothing, because the change waited
@@ -428,20 +439,29 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
   // at once. Only the field that changed is sent with the other field's SAVED value, so nothing half-typed elsewhere is
   // saved with it; the server still checks the image is this restaurant's own (SC-FILE-02) and refreshes the console
   // layout, so the header shows the new logo.
-  async function commitBrandingImage(field: "logoUrl" | "coverImageUrl", url: string) {
+  async function commitBrandingImage(field: "logoUrl" | "coverImageUrl" | "faviconUrl", url: string) {
     const saved = latest.current.view.identity;
-    const label = field === "logoUrl" ? "Logo" : "Cover photo";
+    const label = field === "logoUrl" ? "Logo" : field === "faviconUrl" ? "Favicon / site icon" : "Cover photo";
     const result = await updateBrandingAction({
       logoUrl: field === "logoUrl" ? url : (saved.logoUrl ?? ""),
       coverImageUrl: field === "coverImageUrl" ? url : (saved.coverImageUrl ?? ""),
+      faviconUrl: field === "faviconUrl" ? url : (saved.faviconUrl ?? ""),
     });
     if (!result.ok) {
       setBrandingNote({ ok: false, text: `${label} not saved. ${result.error.fieldErrors?.[field]?.[0] ?? result.error.message}` });
       return;
     }
-    const stored = result.data as { logoUrl: string | null; coverImageUrl: string | null };
-    setView((current) => ({ ...current, identity: { ...current.identity, logoUrl: stored.logoUrl, coverImageUrl: stored.coverImageUrl } }));
-    setIdentity((current) => ({ ...current, [field]: stored[field] }));
+    const stored = result.data as { logoUrl: string | null; coverImageUrl: string | null; faviconUrl?: string | null };
+    setView((current) => ({
+      ...current,
+      identity: {
+        ...current.identity,
+        logoUrl: stored.logoUrl,
+        coverImageUrl: stored.coverImageUrl,
+        faviconUrl: stored.faviconUrl !== undefined ? stored.faviconUrl : current.identity.faviconUrl,
+      },
+    }));
+    setIdentity((current) => ({ ...current, [field]: stored[field] ?? url }));
     setBrandingNote({ ok: true, text: url ? `${label} saved.` : `${label} removed.` });
   }
 
@@ -523,6 +543,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
     ctaLabel: sections.find((section) => section.key === "HERO")?.ctaLabel ?? null,
     sectionLabels: sections.filter((section) => section.enabled || section.alwaysEnabled).map((section) => section.headline || section.defaultHeadline),
     textColors: previewTextColors(colours.textColors, savedColours.textColors),
+    logoUrl: identity.logoUrl,
   };
 
   const tabs = [
@@ -742,21 +763,34 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
           <Form action={brandingAction} onSuccess={applySaved}>
             <Card>
               <CardHeader>
-                <CardTitle>Logo and cover</CardTitle>
-                <CardDescription>Your logo appears in the website header and the console; the cover photo is used when no hero image is set. Uploading or removing an image saves it straight away.</CardDescription>
+                <CardTitle>Brand Assets & Logo</CardTitle>
+                <CardDescription>
+                  Your logo appears in the website header and the console; the custom favicon appears in browser tabs (your logo is used automatically if empty); the cover photo is used when no hero image is set. Uploading or removing an image saves it straight away.
+                </CardDescription>
               </CardHeader>
               <CardContent>
-                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+                <div className="grid gap-4 md:grid-cols-3">
                   <ImageUploader
                     name="logoUrl"
-                    label="Logo"
+                    label="Restaurant Logo"
                     purpose="LOGO"
                     shape="square"
                     disabled={disabled}
                     value={identity.logoUrl ?? ""}
                     onChange={(url) => setIdentity((current) => ({ ...current, logoUrl: url }))}
                     onCommit={(url) => commitBrandingImage("logoUrl", url)}
-                    help="A square image works best, at least 256 × 256 pixels."
+                    help="Square image, transparent PNG works best, at least 256 × 256 pixels."
+                  />
+                  <ImageUploader
+                    name="faviconUrl"
+                    label="Custom Favicon"
+                    purpose="FAVICON"
+                    shape="square"
+                    disabled={disabled}
+                    value={identity.faviconUrl ?? ""}
+                    onChange={(url) => setIdentity((current) => ({ ...current, faviconUrl: url }))}
+                    onCommit={(url) => commitBrandingImage("faviconUrl", url)}
+                    help="Small icon for browser tabs. If empty, your logo is used automatically."
                   />
                   <ImageUploader
                     name="coverImageUrl"
@@ -774,7 +808,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                 </p>
                 {!disabled && (
                   <div className="flex justify-end">
-                    <SubmitButton>Save image links</SubmitButton>
+                    <SubmitButton>Save brand assets</SubmitButton>
                   </div>
                 )}
               </CardContent>

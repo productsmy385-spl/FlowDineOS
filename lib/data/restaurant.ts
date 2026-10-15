@@ -33,6 +33,7 @@ const SETTINGS_SELECT = {
   name: true,
   description: true,
   logoUrl: true,
+  faviconUrl: true,
   coverImageUrl: true,
   brandAccentHex: true,
   phoneE164: true,

@@ -7,18 +7,16 @@ import { cn } from "@/lib/ui/cn";
  */
 export function BrandMark({ href, context, className }: { href: string; /** e.g. "Platform" in the admin console */ context?: string; className?: string }) {
   return (
-    <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3 rounded-xl", className)}>
-      <span className="brand-gradient inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl p-0.5 shadow-e1">
-        <span className="relative flex h-full w-full items-center justify-center overflow-hidden rounded-lg bg-transparent">
-          <Image
-            src="/logo.png"
-            alt="FlowDineOS logo"
-            width={36}
-            height={36}
-            priority
-            className="h-full w-full object-contain"
-          />
-        </span>
+    <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3", className)}>
+      <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
+        <Image
+          src="/logo.png"
+          alt="FlowDineOS logo"
+          width={40}
+          height={40}
+          priority
+          className="h-full w-full object-contain"
+        />
       </span>
       <span className="font-display text-heading text-fg-primary">
         FlowDine<span className="text-fg-accent">OS</span>

@@ -1,12 +1,47 @@
+import type { Metadata } from "next";
 import type { OperationalIndicator } from "@/components/layout/notifications";
 import { ConsoleFrame } from "@/components/layout/console-frame";
 import { getConsoleSession } from "@/lib/auth/context";
 import { requireTenantPage } from "@/lib/auth/guards";
 import { hasPermission } from "@/lib/auth/permissions";
 import { listActivePrinters, listAgents, listPrintJobs } from "@/lib/services/printing";
+import { imageKitSized } from "@/lib/media/purposes";
 import { SessionProvider } from "@/lib/ui/session-context";
 
 export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  try {
+    const ctx = await requireTenantPage("restaurant:read");
+    const session = await getConsoleSession(ctx);
+    const name = session.activeTenant.name;
+    const favicon = session.activeTenant.faviconUrl || session.activeTenant.logoUrl;
+
+    return {
+      title: {
+        template: `%s | ${name}`,
+        default: `${name} Console`,
+      },
+      ...(favicon
+        ? {
+            icons: {
+              icon: [
+                { url: imageKitSized(favicon, 64), sizes: "64x64", type: "image/png" },
+                { url: imageKitSized(favicon, 32), sizes: "32x32", type: "image/png" },
+              ],
+              apple: [
+                { url: imageKitSized(favicon, 180), sizes: "180x180", type: "image/png" },
+              ],
+            },
+          }
+        : {}),
+    };
+  } catch {
+    return {
+      title: "Restaurant Console",
+    };
+  }
+}
 
 /** How many failed jobs the header counts before it says "20+" rather than guessing a total. */
 const FAILED_JOB_SAMPLE = 20;

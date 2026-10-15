@@ -47,6 +47,7 @@ export type PreviewInput = {
   ctaLabel: string | null;
   sectionLabels: string[];
   textColors: ResolvedTextColors;
+  logoUrl?: string | null;
 };
 
 /** Per-colour contrast against the chosen website background — preserved for backward compatibility and tests. */
@@ -292,12 +293,17 @@ export function SitePreview({ input, dirty }: { input: PreviewInput; dirty: bool
           style={{ backgroundColor: surfaceHex }}
         >
           <div className="flex items-center gap-2">
-            <span
-              className="flex h-7 w-7 items-center justify-center rounded-lg font-display text-caption font-bold"
-              style={{ backgroundColor: palette.primary, color: textColors.buttonTextColor }}
-            >
-              {input.restaurantName.charAt(0) || "R"}
-            </span>
+            {input.logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={input.logoUrl} alt="" className="h-7 w-7 object-contain" />
+            ) : (
+              <span
+                className="flex h-7 w-7 items-center justify-center rounded-lg font-display text-caption font-bold"
+                style={{ backgroundColor: palette.primary, color: textColors.buttonTextColor }}
+              >
+                {input.restaurantName.charAt(0) || "R"}
+              </span>
+            )}
             <span className="font-display text-subheading font-semibold" style={{ color: textColors.headingColor }}>
               {input.restaurantName}
             </span>

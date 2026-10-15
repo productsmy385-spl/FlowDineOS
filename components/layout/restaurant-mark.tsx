@@ -19,10 +19,10 @@ import { cn } from "@/lib/ui/cn";
  */
 export function RestaurantMark({ href, name, logoUrl, className }: { href: string; name: string; logoUrl: string | null; className?: string }) {
   return (
-    <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3 rounded-xl", className)}>
-      <span className="brand-gradient inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-action-primary-fg">
-        {logoUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- remote hosts are tenant-configured, not build-time known.
+    <Link href={href} className={cn("inline-flex min-w-0 items-center gap-3", className)}>
+      {logoUrl ? (
+        <span className="relative flex h-10 w-10 shrink-0 items-center justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element -- remote hosts are tenant-configured, not build-time known. */}
           <img
             src={imageKitSized(logoUrl, 40)}
             srcSet={imageKitSrcSet(logoUrl, 40) ?? undefined}
@@ -30,12 +30,14 @@ export function RestaurantMark({ href, name, logoUrl, className }: { href: strin
             width={40}
             height={40}
             decoding="async"
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
           />
-        ) : (
+        </span>
+      ) : (
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-action-primary text-action-primary-fg">
           <Monogram name={name} />
-        )}
-      </span>
+        </span>
+      )}
       <span className="min-w-0 truncate font-display text-heading text-fg-primary">{name}</span>
     </Link>
   );

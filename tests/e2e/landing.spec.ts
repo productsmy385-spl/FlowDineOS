@@ -84,7 +84,7 @@ test.describe("landing page", () => {
     await page.goto("/");
     expect(await page.locator("#contact").count()).toBe(1);
     const contact = page.locator("footer #contact");
-    await expect(contact).toContainText("KJS TECH INNOVATIONS");
+    await expect(contact).toContainText("KRANAS TECH & SOLUTIONS PVT LTD");
     await expect(contact).toContainText("4-177/1, Duddukuru");
     await expect(contact).toContainText("534313");
     const phone = page.getByTestId("footer-phone");

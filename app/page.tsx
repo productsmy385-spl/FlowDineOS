@@ -30,7 +30,7 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 import { HeroBackdrop, Metrics, Showcase } from "@/components/landing/landing-interactive";
 import { IconTile } from "@/components/ui/icon-tile";
 import { FEATURE_KEYS } from "@/lib/auth/features";
-import { COMPANY_ADDRESS, COMPANY_EMAILS, COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_TEL, COPYRIGHT, PLATFORM_DOMAIN, PLATFORM_NAME, PLATFORM_TAGLINE } from "@/lib/brand";
+import { COMPANY_ADDRESS, COMPANY_EMAILS, COMPANY_LOGO, COMPANY_NAME, COMPANY_PHONE, COMPANY_PHONE_TEL, COPYRIGHT, PLATFORM_DOMAIN, PLATFORM_NAME, PLATFORM_TAGLINE } from "@/lib/brand";
 import type { DomainHue } from "@/lib/ui/icons";
 
 const DESCRIPTION =
@@ -303,7 +303,11 @@ export default function Home() {
           {/* The one place the company's contact details appear (owner brief 2026-10-07 §29–32). */}
           <address id="contact" className="flex min-w-0 scroll-mt-24 flex-col gap-2 text-body not-italic">
             <p className="text-label text-fg-primary">Contact</p>
-            <p className="text-fg-primary">{COMPANY_NAME}</p>
+            <div className="flex items-center gap-3 py-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={COMPANY_LOGO} alt={COMPANY_NAME} className="h-10 w-auto object-contain" />
+            </div>
+            <p className="font-semibold text-fg-primary">{COMPANY_NAME}</p>
             <p className="text-fg-secondary">
               {COMPANY_ADDRESS.map((line) => (
                 <span key={line} className="block">
