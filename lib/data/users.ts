@@ -95,9 +95,16 @@ export async function linkInvitedUser(email: string, clerkUserId: string, now: D
         ],
       });
 
-      const { memberships, ...user } = candidate;
+      const user: IdentityUser = {
+        id: candidate.id,
+        email: candidate.email,
+        fullName: candidate.fullName,
+        platformRole: candidate.platformRole,
+        status: candidate.status,
+        clerkUserId,
+      };
       const activated = invitedMemberships.map((m) => ({ id: m.id, tenantId: m.tenantId, role: m.role }));
-      return { outcome: "LINKED", user: { ...user, clerkUserId }, activatedMemberships: activated } as const;
+      return { outcome: "LINKED", user, activatedMemberships: activated } as const;
     }),
   );
 }

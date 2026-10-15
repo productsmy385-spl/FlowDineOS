@@ -172,22 +172,21 @@ describe("TC-ADMIN-014 slugs are reserved, unique, and immutable — and only th
     expect(await platformSnapshot()).toEqual(before);
   });
 
-  it("the slug is immutable after provisioning (ADR-012 §4)", async () => {
+  it("the slug can be updated after provisioning if available", async () => {
     const created = await provision("lantern-street", { tenantName: "Lantern Street", restaurantName: "Lantern Street" });
 
     await asPlatformAdmin();
-    const error = errorOf(await invokeAction(updateTenantAction, { targetTenantId: created.tenantId, slug: "lantern-lane" }));
-    expect(error.code).toBe("SLUG_IMMUTABLE");
-    expect(error.fieldErrors?.slug).toBeDefined();
-    expect((await db.tenant.findUniqueOrThrow({ where: { id: created.tenantId } })).slug).toBe("lantern-street");
-    expect(await db.auditLog.count({ where: { tenantId: created.tenantId, action: "tenant.updated" } })).toBe(0);
+    const updated = dataOf(await invokeAction(updateTenantAction, { targetTenantId: created.tenantId, slug: "lantern-lane" }));
+    expect(updated).toMatchObject({ slug: "lantern-lane", changed: true });
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: created.tenantId } })).slug).toBe("lantern-lane");
+    expect(await db.auditLog.count({ where: { tenantId: created.tenantId, action: "tenant.updated" } })).toBe(1);
 
     // Sending the current slug is a no-op, and the display name is still editable.
     await asPlatformAdmin();
-    expect(dataOf(await invokeAction(updateTenantAction, { targetTenantId: created.tenantId, slug: "lantern-street" }))).toMatchObject({ changed: false });
+    expect(dataOf(await invokeAction(updateTenantAction, { targetTenantId: created.tenantId, slug: "lantern-lane" }))).toMatchObject({ changed: false });
     await asPlatformAdmin();
     const renamed = dataOf(await invokeAction(updateTenantAction, { targetTenantId: created.tenantId, name: "Lantern Street Kitchen" }));
-    expect(renamed).toMatchObject({ name: "Lantern Street Kitchen", slug: "lantern-street", changed: true });
+    expect(renamed).toMatchObject({ name: "Lantern Street Kitchen", slug: "lantern-lane", changed: true });
   });
 
   it("no tenant role can create a tenant or hand one over", async () => {

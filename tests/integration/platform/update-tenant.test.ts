@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { updateTenantAction } from "@/app/admin/actions";
-import { getPublicRestaurant } from "@/lib/data/public-restaurant";
 import { createTenant } from "../../factories";
 import { testDb } from "../setup/db";
 import { asPlatformAdmin, invokeAction, seedOnce, tenantIdOf } from "../helpers/actors";
@@ -43,28 +42,27 @@ describe("TC-ADMIN-004 update tenant name and slug", () => {
     expect(await xminOf("audit_logs", audit.id)).toBe(await xminOf("tenants", tenant.id));
   });
 
-  it("refuses any slug change with SLUG_IMMUTABLE, leaving the public address exactly where it was", async () => {
+  it("allows updating slug when available and records audit log", async () => {
     await asPlatformAdmin();
     const tenant = await freshTenant("hilltop-cafe");
-    const error = errorOf(await invokeAction(updateTenantAction, { targetTenantId: tenant.id, slug: "hilltop-kitchen" }));
-    expect(error).toMatchObject({ code: "SLUG_IMMUTABLE", fieldErrors: { slug: [expect.any(String)] } });
-    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).slug).toBe("hilltop-cafe");
-    expect(await db.auditLog.count({ where: { tenantId: tenant.id } })).toBe(0);
-
-    // Tenant A's site keeps answering on its original address; nothing moved (ADR-012 §4).
-    await asPlatformAdmin();
-    const tenantA = tenantIdOf("A");
-    expect(errorOf(await invokeAction(updateTenantAction, { targetTenantId: tenantA, slug: "spice-route-blr" })).code).toBe("SLUG_IMMUTABLE");
-    expect((await getPublicRestaurant("spice-route")).slug).toBe("spice-route");
-    await expect(getPublicRestaurant("spice-route-blr")).rejects.toMatchObject({ code: "NOT_FOUND" });
-    expect(await db.auditLog.count({ where: { tenantId: tenantA, action: "tenant.updated" } })).toBe(0);
+    const data = dataOf(await invokeAction(updateTenantAction, { targetTenantId: tenant.id, slug: "hilltop-kitchen" }));
+    expect(data).toMatchObject({ slug: "hilltop-kitchen", changed: true });
+    expect((await db.tenant.findUniqueOrThrow({ where: { id: tenant.id } })).slug).toBe("hilltop-kitchen");
+    const audit = await db.auditLog.findFirstOrThrow({ where: { tenantId: tenant.id, action: "tenant.updated" } });
+    expect(audit).toMatchObject({
+      actorRole: "SUPER_ADMIN",
+      resourceType: "tenant",
+      resourceId: tenant.id,
+      beforeState: { slug: "hilltop-cafe" },
+      afterState: { slug: "hilltop-kitchen", subdomain: "hilltop-kitchen" },
+    });
   });
 
-  it("refuses a taken, reserved or malformed slug before it even reaches immutability", async () => {
+  it("refuses a taken, reserved or malformed slug", async () => {
     await asPlatformAdmin();
     const tenant = await freshTenant("lakeview-tiffins");
-    // A slug that is already another tenant's is still a change, so it is refused the same way.
-    expect(errorOf(await invokeAction(updateTenantAction, { targetTenantId: tenant.id, slug: "harbour-grill" })).code).toBe("SLUG_IMMUTABLE");
+    // A slug that is already another tenant's is refused with SLUG_UNAVAILABLE.
+    expect(errorOf(await invokeAction(updateTenantAction, { targetTenantId: tenant.id, slug: "harbour-grill" })).code).toBe("SLUG_UNAVAILABLE");
 
     for (const slug of ["admin", "sign-up", "account", "api", "www"]) {
       const error = errorOf(await invokeAction(updateTenantAction, { targetTenantId: tenant.id, slug }));

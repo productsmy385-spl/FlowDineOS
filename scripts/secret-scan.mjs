@@ -16,6 +16,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 
 const RULES = [
   { category: "Private key block", severity: "HIGH", re: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/ },
@@ -93,11 +94,14 @@ function scanTree() {
   }
 }
 
-function scanHistory() {
-  const log = readFileSync(0, "utf8");
+async function scanHistory() {
+  const rl = createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
   let commit = "?";
   let file = "?";
-  for (const line of log.split("\n")) {
+  for await (const line of rl) {
     if (line.startsWith("@@commit ")) commit = line.slice(9);
     else if (line.startsWith("+++ b/")) file = line.slice(6);
     else if (line.startsWith("+") && !line.startsWith("+++") && !SKIP.some((re) => re.test(file))) {
@@ -136,7 +140,7 @@ function scanBundle() {
 
 const mode = process.argv[2] ?? "tree";
 if (mode === "tree") scanTree();
-else if (mode === "history") scanHistory();
+else if (mode === "history") await scanHistory();
 else if (mode === "bundle") scanBundle();
 else {
   console.error("Usage: node scripts/secret-scan.mjs tree|history|bundle");
