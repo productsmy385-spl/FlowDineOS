@@ -1,4 +1,5 @@
 import "server-only";
+import { randomUUID } from "node:crypto";
 import type { MediaPurpose } from "@prisma/client";
 import type { TenantContext } from "@/lib/auth/context-types";
 import { audit } from "@/lib/audit/write";
@@ -72,6 +73,22 @@ export type NewMediaAsset = {
   originalFilename: string | null;
 };
 
+/** Helper to expand URLs to test both encoded and decoded variants (e.g. KRANAS%20LOGO.png vs KRANAS LOGO.png). */
+export function expandUrlVariants(urls: readonly string[]): string[] {
+  const result = new Set<string>();
+  for (const u of urls) {
+    if (!u) continue;
+    result.add(u);
+    try {
+      result.add(decodeURI(u));
+      result.add(encodeURI(decodeURI(u)));
+    } catch {
+      // ignore malformed URI
+    }
+  }
+  return [...result];
+}
+
 /** `media.uploaded` — the uploader is always the signed-in user, never an input field. */
 export async function insertMediaAsset(ctx: TenantContext, input: NewMediaAsset): Promise<MediaAssetDto> {
   return withTx(ctx, async (tx) => {
@@ -89,12 +106,136 @@ export async function insertMediaAsset(ctx: TenantContext, input: NewMediaAsset)
   });
 }
 
-/** READY assets of this tenant whose untransformed URL is one of `urls`. */
+/** READY assets of this tenant whose untransformed URL is one of `urls`. Also reactivates DELETED assets if re-selected. */
 export async function findReadyAssetsByUrl(ctx: TenantContext, urls: readonly string[]): Promise<Array<{ id: string; url: string; purpose: MediaPurpose }>> {
   if (urls.length === 0) return [];
-  return mapErrors("Image", () =>
-    db.mediaAsset.findMany({ where: tenantScope(ctx, { url: { in: [...new Set(urls)] }, status: "READY" as const }), select: { id: true, url: true, purpose: true } }),
-  );
+  const expanded = expandUrlVariants(urls);
+  return mapErrors("Image", async () => {
+    // 1. Check for ready assets
+    const ready = await db.mediaAsset.findMany({
+      where: tenantScope(ctx, { url: { in: expanded }, status: "READY" as const }),
+      select: { id: true, url: true, purpose: true },
+    });
+    if (ready.length > 0) return ready;
+
+    // 2. If this tenant previously had this asset marked DELETED, reactivate it to READY
+    const deleted = await db.mediaAsset.findMany({
+      where: tenantScope(ctx, { url: { in: expanded }, status: "DELETED" as const }),
+      select: { id: true, url: true, purpose: true },
+    });
+    if (deleted.length > 0) {
+      await db.mediaAsset.updateMany({
+        where: tenantScope(ctx, { id: { in: deleted.map((d) => d.id) } }),
+        data: { status: "READY", deletedAt: null },
+      });
+      return deleted;
+    }
+    return [];
+  });
+}
+
+/** Check if any of these URLs are registered in media_assets as owned by ANOTHER tenant. */
+export async function isAssetOwnedByOtherTenant(ctx: TenantContext, urls: readonly string[]): Promise<boolean> {
+  if (urls.length === 0) return false;
+  const expanded = expandUrlVariants(urls);
+  return mapErrors("Image", async () => {
+    const count = await db.mediaAsset.count({
+      where: {
+        url: { in: expanded },
+        tenantId: { not: ctx.tenantId },
+      },
+    });
+    return count > 0;
+  });
+}
+
+/** All image URLs currently assigned to this tenant across restaurant, website sections, and menu items. */
+export async function findTenantCurrentAssetUrls(ctx: TenantContext): Promise<Set<string>> {
+  return mapErrors("Image", async () => {
+    const [restaurant, sections, items] = await Promise.all([
+      db.restaurant.findUnique({
+        where: { tenantId: ctx.tenantId },
+        select: { logoUrl: true, coverImageUrl: true, heroImageUrl: true, faviconUrl: true },
+      }),
+      db.websiteSection.findMany({
+        where: tenantScope(ctx, { imageUrl: { not: null } }),
+        select: { imageUrl: true },
+      }),
+      db.menuItem.findMany({
+        where: tenantScope(ctx, { imageUrl: { not: null } }),
+        select: { imageUrl: true },
+      }),
+    ]);
+
+    const rawUrls: string[] = [];
+    if (restaurant) {
+      if (restaurant.logoUrl) rawUrls.push(restaurant.logoUrl);
+      if (restaurant.coverImageUrl) rawUrls.push(restaurant.coverImageUrl);
+      if (restaurant.heroImageUrl) rawUrls.push(restaurant.heroImageUrl);
+      if (restaurant.faviconUrl) rawUrls.push(restaurant.faviconUrl);
+    }
+    for (const s of sections) {
+      if (s.imageUrl) rawUrls.push(s.imageUrl);
+    }
+    for (const i of items) {
+      if (i.imageUrl) rawUrls.push(i.imageUrl);
+    }
+    return new Set(expandUrlVariants(rawUrls));
+  });
+}
+
+/** Registers a verified ImageKit URL as a READY media asset for this tenant. */
+export async function registerTenantMediaAsset(ctx: TenantContext, input: { url: string; purpose: MediaPurpose }): Promise<MediaAssetDto> {
+  const expanded = expandUrlVariants([input.url]);
+  return mapErrors("Image", async () => {
+    const existing = await db.mediaAsset.findFirst({
+      where: tenantScope(ctx, { url: { in: expanded } }),
+      select: ASSET_SELECT,
+    });
+    if (existing) {
+      await db.mediaAsset.update({
+        where: tenantKey(ctx, existing.id),
+        data: { status: "READY", deletedAt: null },
+      });
+      return toDto(existing as AssetRow);
+    }
+
+    let pathname = "/";
+    try {
+      pathname = new URL(input.url).pathname;
+    } catch {
+      pathname = `/${input.url}`;
+    }
+    const filename = pathname.split("/").pop() ?? "image.png";
+
+    return withTx(ctx, async (tx) => {
+      const row = await tx.mediaAsset.create({
+        data: {
+          tenantId: ctx.tenantId,
+          uploadedByUserId: ctx.userId,
+          purpose: input.purpose,
+          status: "READY",
+          providerFileId: `legacy-${randomUUID()}`,
+          storagePath: pathname,
+          url: input.url,
+          contentType: input.url.endsWith(".png") ? "image/png" : input.url.endsWith(".webp") ? "image/webp" : "image/jpeg",
+          byteSize: 0,
+          width: 0,
+          height: 0,
+          sha256: "",
+          originalFilename: filename,
+        },
+        select: ASSET_SELECT,
+      });
+      await audit(tx, ctx, {
+        action: "media.uploaded",
+        resourceType: RESOURCE,
+        resourceId: row.id,
+        after: { purpose: row.purpose, url: row.url, registered: true },
+      });
+      return toDto(row as AssetRow);
+    });
+  });
 }
 
 /** READY assets of this tenant with one of these ids (anything else — unknown or another tenant's — is simply absent). */

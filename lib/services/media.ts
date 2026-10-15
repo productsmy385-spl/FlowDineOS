@@ -1,7 +1,19 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
 import type { TenantContext } from "@/lib/auth/context-types";
-import { currentImageUrls, findReadyAssetsById, findReadyAssetsByUrl, insertMediaAsset, markAssetDeleted, unreferencedAssetsCreatedBefore, type ImageOwner, type MediaAssetDto } from "@/lib/data/media";
+import {
+  currentImageUrls,
+  findReadyAssetsById,
+  findReadyAssetsByUrl,
+  findTenantCurrentAssetUrls,
+  insertMediaAsset,
+  isAssetOwnedByOtherTenant,
+  markAssetDeleted,
+  registerTenantMediaAsset,
+  unreferencedAssetsCreatedBefore,
+  type ImageOwner,
+  type MediaAssetDto,
+} from "@/lib/data/media";
 import { hasPermission } from "@/lib/auth/permissions";
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -79,23 +91,97 @@ export async function discardImage(ctx: TenantContext, assetId: string): Promise
   return { id: assetId, deleted: true };
 }
 
+/** Determines MediaPurpose from the field name being validated. */
+function purposeForField(field: string): MediaPurpose {
+  if (field === "logoUrl") return "LOGO";
+  if (field === "faviconUrl") return "FAVICON";
+  if (field === "coverImageUrl") return "COVER";
+  if (field === "heroImageUrl") return "HERO";
+  if (field.includes("section")) return "WEBSITE_SECTION";
+  if (field.includes("item") || field.includes("menu")) return "MENU_ITEM";
+  return "LOGO";
+}
+
 /**
- * SC-FILE-02 — every ImageKit URL a save is about to store must be a READY asset of the caller's tenant. The ImageKit
- * host is shared by all ImageKit accounts, so any URL on that host outside our endpoint is refused as well. Pasted URLs
- * on other allow-listed hosts are unaffected.
+ * SC-FILE-02 — every ImageKit URL a save is about to store must belong to the caller's tenant.
+ * - The ImageKit host is shared by all ImageKit accounts; URLs outside our endpoint are refused.
+ * - URLs inside another tenant's folder (/rasoios/restaurants/{otherTenantId}/) are refused.
+ * - URLs registered to another tenant in media_assets are refused.
+ * - Legitimate existing tenant assets (already saved in restaurant/sections/items, or previously uploaded
+ *   and reactivated from DELETED, or valid unowned ImageKit library assets) are verified and registered.
  */
 export async function assertOwnedImageUrls(ctx: TenantContext, fields: Record<string, string | null | undefined>): Promise<void> {
   const endpoint = imageKitUrlEndpoint();
   const host = imageKitHost(endpoint) ?? "ik.imagekit.io";
-  const candidates = Object.entries(fields).filter((entry): entry is [string, string] => typeof entry[1] === "string" && hostOf(entry[1]) === host);
+  const candidates = Object.entries(fields).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "" && hostOf(entry[1]) === host);
   if (candidates.length === 0) return;
 
-  const owned = new Set((await findReadyAssetsByUrl(ctx, candidates.map(([, url]) => url))).map((asset) => asset.url));
   const problems: Record<string, string[]> = {};
-  for (const [field, url] of candidates) {
-    if (!endpoint || !url.startsWith(`${endpoint}/`) || !owned.has(url)) problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
+  const currentAssignedUrls = await findTenantCurrentAssetUrls(ctx);
+
+  for (const [field, rawUrl] of candidates) {
+    const url = rawUrl.trim();
+
+    // 1. Must start with the application's configured ImageKit endpoint
+    if (!endpoint || !url.startsWith(`${endpoint}/`)) {
+      problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
+      continue;
+    }
+
+    // 2. Must not belong to another tenant's folder (/rasoios/restaurants/{otherTenantId}/)
+    let urlPath = "";
+    try {
+      urlPath = new URL(url).pathname;
+    } catch {
+      urlPath = url;
+    }
+    const tenantFolderMatch = urlPath.match(/\/rasoios\/restaurants\/([^/]+)/);
+    if (tenantFolderMatch && tenantFolderMatch[1] !== ctx.tenantId) {
+      problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
+      continue;
+    }
+
+    // 3. Must not be registered to another tenant in media_assets
+    if (await isAssetOwnedByOtherTenant(ctx, [url])) {
+      problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
+      continue;
+    }
+
+    // 4. Check if already a ready asset (or reactivated from DELETED)
+    const ready = await findReadyAssetsByUrl(ctx, [url]);
+    if (ready.length > 0) {
+      continue;
+    }
+
+    // 5. Check if currently assigned to this tenant's restaurant or website
+    let isCurrent = currentAssignedUrls.has(url);
+    if (!isCurrent) {
+      try {
+        isCurrent = currentAssignedUrls.has(decodeURI(url)) || currentAssignedUrls.has(encodeURI(decodeURI(url)));
+      } catch {
+        // ignore malformed URI
+      }
+    }
+    if (isCurrent) {
+      await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      continue;
+    }
+
+    // 6. Root or shared library asset outside /rasoios/restaurants/ (e.g. KRANAS%20LOGO.png)
+    // If it is directly under the endpoint and not in any tenant's private upload folder,
+    // register it as a READY asset for this tenant
+    if (!tenantFolderMatch) {
+      await registerTenantMediaAsset(ctx, { url, purpose: purposeForField(field) });
+      continue;
+    }
+
+    // 7. If it is under /rasoios/restaurants/ but was never uploaded or registered, reject
+    problems[field] = ["This image isn't one of your restaurant's uploads. Upload it again."];
   }
-  if (Object.keys(problems).length > 0) throw new ValidationError("Upload the image again — this link can't be used.", problems, "IMAGE_NOT_OWNED");
+
+  if (Object.keys(problems).length > 0) {
+    throw new ValidationError("Upload the image again — this link can't be used.", problems, "IMAGE_NOT_OWNED");
+  }
 }
 
 /** Read before a save: the ImageKit URLs it may replace (ADR-017 §5). */
@@ -134,6 +220,7 @@ async function sweepAbandoned(ctx: TenantContext): Promise<void> {
 }
 
 async function removeQuietly(ctx: TenantContext, fileId: string): Promise<void> {
+  if (fileId.startsWith("legacy-")) return;
   try {
     await imageKit().remove(fileId);
   } catch {

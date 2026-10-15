@@ -18,6 +18,17 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   allowedDevOrigins,
+  experimental: {
+    serverActions: {
+      allowedOrigins: [
+        "flowdine.in",
+        "*.flowdine.in",
+        "localhost:3000",
+        "*.localhost:3000",
+        ...(publicRootDomain ? [publicRootDomain, `*.${publicRootDomain}`] : []),
+      ],
+    },
+  },
   env: {
     NEXT_PUBLIC_CLERK_DOMAIN: process.env.NEXT_PUBLIC_CLERK_DOMAIN || process.env.PUBLIC_ROOT_DOMAIN || "flowdine.in",
   },

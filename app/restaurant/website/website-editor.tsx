@@ -847,6 +847,7 @@ export function WebsiteEditor({ settings, reference, site }: { settings: EditorS
                   disabled={disabled}
                   value={identity.faviconUrl ?? ""}
                   onChange={(url) => setIdentity((current) => ({ ...current, faviconUrl: url }))}
+                  onCommit={(url) => commitBrandingImage("faviconUrl", url)}
                 />
                 {!disabled && (
                   <div className="flex justify-end">
